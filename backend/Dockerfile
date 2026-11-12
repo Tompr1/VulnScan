@@ -1,4 +1,10 @@
 FROM python:3.11-slim
+# Utiliser des miroirs Debian accessibles
+RUN sed -i \
+    -e 's|https\?://deb.debian.org/debian$|http://debian.mirrors.ovh.net/debian|' \
+    -e 's|https\?://deb.debian.org/debian-security$|http://cloudfront.debian.net/debian-security|' \
+    -e 's|https\?://security.debian.org/debian-security$|http://cloudfront.debian.net/debian-security|' \
+    /etc/apt/sources.list.d/debian.sources
 
 # Install system dependencies including curl for health checks,
 # nmap for port scanning, git for testssl.sh, and Perl for nikto/testssl
@@ -24,49 +30,52 @@ RUN ARCH=$(dpkg --print-architecture) && \
     nuclei -update-templates -silent || true
 
 # testssl.sh — comprehensive TLS/SSL testing
-RUN git clone --depth 1 https://github.com/drwetter/testssl.sh.git /opt/testssl.sh && \
-    ln -s /opt/testssl.sh/testssl.sh /usr/local/bin/testssl.sh && \
-    chmod +x /opt/testssl.sh/testssl.sh
+
+# testssl.sh — installation depuis les fichiers locaux
+COPY vendor/testssl.sh/ /opt/testssl.sh/
+
+RUN chmod +x /opt/testssl.sh/testssl.sh && \
+    ln -s /opt/testssl.sh/testssl.sh /usr/local/bin/testssl.sh
 
 # ffuf — fast web fuzzer (directory/vhost/parameter discovery)
-ARG FFUF_VERSION=2.1.0
-RUN ARCH=$(dpkg --print-architecture) && \
-    curl -fsSL "https://github.com/ffuf/ffuf/releases/download/v${FFUF_VERSION}/ffuf_${FFUF_VERSION}_linux_${ARCH}.tar.gz" \
-      -o /tmp/ffuf.tar.gz && \
-    tar xzf /tmp/ffuf.tar.gz -C /usr/local/bin/ ffuf && \
-    chmod +x /usr/local/bin/ffuf && \
-    rm /tmp/ffuf.tar.gz
+
+# ffuf 2.1.0 — installation depuis Debian Trixie
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffuf && \
+    rm -rf /var/lib/apt/lists/*
 
 # subfinder (ProjectDiscovery) — passive subdomain enumeration
-ARG SUBFINDER_VERSION=2.6.7
-RUN ARCH=$(dpkg --print-architecture) && \
-    curl -fsSL "https://github.com/projectdiscovery/subfinder/releases/download/v${SUBFINDER_VERSION}/subfinder_${SUBFINDER_VERSION}_linux_${ARCH}.zip" \
-      -o /tmp/subfinder.zip && \
-    unzip -o /tmp/subfinder.zip -d /usr/local/bin/ && \
-    chmod +x /usr/local/bin/subfinder && \
-    rm /tmp/subfinder.zip
+
+# subfinder 2.6.7 — copie depuis l'image Docker officielle
+COPY --from=projectdiscovery/subfinder:v2.6.7 \
+    /usr/local/bin/subfinder /usr/local/bin/subfinder
 
 # httpx (ProjectDiscovery) — HTTP probing + tech detection.
 # Installed as `httpx-pd`: the Python httpx package from requirements.txt
 # installs its own /usr/local/bin/httpx script and would overwrite it.
-ARG HTTPX_VERSION=1.6.9
-RUN ARCH=$(dpkg --print-architecture) && \
-    curl -fsSL "https://github.com/projectdiscovery/httpx/releases/download/v${HTTPX_VERSION}/httpx_${HTTPX_VERSION}_linux_${ARCH}.zip" \
-      -o /tmp/httpx.zip && \
-    unzip -o /tmp/httpx.zip httpx -d /tmp/httpx && \
-    install -m 0755 /tmp/httpx/httpx /usr/local/bin/httpx-pd && \
-    rm -rf /tmp/httpx.zip /tmp/httpx
+
+# httpx ProjectDiscovery 1.6.9
+# Installer sous httpx-pd pour éviter le conflit avec Python httpx
+COPY --from=projectdiscovery/httpx:v1.6.9 \
+    /usr/local/bin/httpx /usr/local/bin/httpx-pd
 
 # sqlmap — advanced SQL injection testing
 RUN git clone --depth 1 https://github.com/sqlmapproject/sqlmap.git /opt/sqlmap && \
     ln -s /opt/sqlmap/sqlmap.py /usr/local/bin/sqlmap
 
 # Bundled wordlist for ffuf (common directories/files)
-RUN mkdir -p /opt/wordlists && \
-    curl -fsSL "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt" \
-      -o /opt/wordlists/common.txt && \
-    curl -fsSL "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/raft-medium-directories.txt" \
-      -o /opt/wordlists/raft-medium-directories.txt
+
+# Wordlists locales pour ffuf, fournies par Debian
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends dirb && \
+    mkdir -p /opt/wordlists && \
+    cp /usr/share/dirb/wordlists/common.txt \
+       /opt/wordlists/common.txt && \
+    cp /usr/share/dirb/wordlists/big.txt \
+       /opt/wordlists/raft-medium-directories.txt && \
+    test -s /opt/wordlists/common.txt && \
+    test -s /opt/wordlists/raft-medium-directories.txt && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install Node.js (required for Claude Code CLI).
 # 24.x, not 20.x: Node 20 reached end of life in March 2026 and does not get
@@ -97,10 +106,16 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}
 
 WORKDIR /app
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Python dependencies via alternative PyPI mirror
+COPY requirements.txt .
+
+RUN pip install \
+    --no-cache-dir \
+    --timeout 30 \
+    --retries 2 \
+    --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    -r requirements.txt
 # Copy application code
 COPY . .
 
