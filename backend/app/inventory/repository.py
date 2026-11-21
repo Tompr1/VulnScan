@@ -275,6 +275,7 @@ def _device_issues(db: Session, device_id: int, job_id: int) -> list[dict[str, A
             "rule": f.plugin_id.removeprefix("inventory."),
             "title": f.title,
             "severity": f.severity,
+            "is_kev": bool(f.is_kev),
             "risk_score": f.risk_score,
             "confidence": f.confidence,
             "description": f.description,

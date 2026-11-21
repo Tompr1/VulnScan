@@ -266,7 +266,7 @@ def test_une_cve_exploitee_sur_un_appareil_devient_un_constat_critique_lie_a_l_a
     assert "CISA remediation deadline 2025-09-22" in finding.remediation
     assert db.query(models.InventoryAuditRun).one().warnings == ""  # complete: NVD imported, KEV loaded
     detail = client.get(f"/inventory/devices/{device_id(db, 'PC-COMPTA-04')}").json()
-    assert detail["issues"][0]["rule"] == "os_vulnerable"
+    assert (detail["issues"][0]["rule"], detail["issues"][0]["is_kev"]) == ("os_vulnerable", True)
 
 
 def test_les_lacunes_des_donnees_cve_sont_signalees_avec_l_audit(client, session_factory, db):
