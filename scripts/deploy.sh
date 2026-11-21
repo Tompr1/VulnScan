@@ -33,6 +33,21 @@ require_commands() {
   docker info >/dev/null 2>&1 || die "cannot talk to Docker (is $(whoami) in the docker group?)"
 }
 
+# Docker networks default to MTU 1500. On a host whose uplink has a smaller
+# MTU (VPN, some hypervisors), large packets from containers are dropped:
+# HTTPS from the image build hangs, then fails with "Connection reset by peer".
+check_docker_mtu() {
+  local iface mtu
+  iface=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+  [[ -n "$iface" && -r "/sys/class/net/$iface/mtu" ]] || return 0
+  mtu=$(cat "/sys/class/net/$iface/mtu")
+  if ((mtu < 1500)) && ! grep -q '"mtu"' /etc/docker/daemon.json 2>/dev/null; then
+    die "$iface has MTU $mtu but Docker uses 1500: container HTTPS will hang. Put
+  {\"mtu\": $mtu, \"default-network-opts\": {\"bridge\": {\"com.docker.network.driver.mtu\": \"$mtu\"}}}
+in /etc/docker/daemon.json, then: sudo systemctl restart docker"
+  fi
+}
+
 sync_code() {
   log "Syncing $SOURCE_DIR -> $DEPLOY_DIR"
   # data/ is created here, as the current user: if Docker created it for the
@@ -112,6 +127,7 @@ bootstrap_once() {
 
 main() {
   require_commands
+  check_docker_mtu
   sync_code
   create_env_file
   BACKEND_PORT=$(env_value BACKEND_PORT); BACKEND_PORT=${BACKEND_PORT:-8888}
