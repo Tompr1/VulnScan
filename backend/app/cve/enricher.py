@@ -21,20 +21,9 @@ import logging
 import os
 from typing import Optional
 
+from app.risk.cvss_engine import severity_from_score
+
 logger = logging.getLogger("vulnscan.cve.enricher")
-
-
-def _score_to_severity(score: float) -> str:
-    """CVSS v3 score to severity label."""
-    if score >= 9.0:
-        return "critical"
-    if score >= 7.0:
-        return "high"
-    if score >= 4.0:
-        return "medium"
-    if score > 0.0:
-        return "low"
-    return "info"
 
 
 class CveSeverityEnricher:
@@ -150,7 +139,7 @@ class CveSeverityEnricher:
             best_cvss = cd_cvss
             confidence_boost = False
 
-        severity = _score_to_severity(best_cvss)
+        severity = severity_from_score(best_cvss)
 
         # EPSS boost: if exploit probability is high (>0.5), bump severity
         # if it's currently at medium and the CVSS is borderline

@@ -32,6 +32,7 @@ META = PluginMeta(
     depends_on=["fingerprint.http"],
     consumes=["fingerprint.http", "net.open_ports"],
     provides=["cloud.storage.findings"],
+    artifact_defaults={"cloud.storage.findings": 0},
     enabled_by_default=True,
     timeout_seconds=30.0,
 )

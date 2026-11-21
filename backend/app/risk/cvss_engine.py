@@ -1,88 +1,85 @@
 """
-CVSS scoring utilities.
-Maps CVSS base scores to severity labels per CVSS v3 specification.
+CVSS helpers built on top of :class:`app.risk.severity.Severity`.
+
+The two label/score functions are kept as thin string-based adapters because
+route serializers and report generators work with raw ORM strings.
 """
+from __future__ import annotations
+
+import math
+
+from app.risk.severity import Severity
 
 
 def severity_from_score(score: float | None) -> str:
-    """
-    Convert a numeric risk/CVSS score to a severity label.
-
-    CVSS v3 thresholds:
-      0.0        → none
-      0.1 – 3.9  → low
-      4.0 – 6.9  → medium
-      7.0 – 8.9  → high
-      9.0 – 10.0 → critical
-    """
-    if score is None:
-        return "info"
-    if score >= 9.0:
-        return "critical"
-    if score >= 7.0:
-        return "high"
-    if score >= 4.0:
-        return "medium"
-    if score >= 0.1:
-        return "low"
-    return "info"
+    """Convert a numeric CVSS / risk score to its severity label."""
+    return Severity.from_score(score).value
 
 
 def cvss_baseline_from_severity(severity: str | None) -> float | None:
-    """
-    Derive a representative CVSS v3 base score from a severity label.
+    """Representative CVSS score for a severity label, or None if unknown.
 
-    Used as a fallback for plugin-discovered findings that don't map to a CVE
-    (e.g. "Exposed debug console", "Missing HSTS header") so the UI doesn't
-    show "—" for every non-CVE finding. Picks a midpoint of each band so the
-    severity round-trip is lossless via severity_from_score().
-
-      critical → 9.5  (band: 9.0–10.0)
-      high     → 8.0  (band: 7.0–8.9)
-      medium   → 5.5  (band: 4.0–6.9)
-      low      → 2.5  (band: 0.1–3.9)
-      info     → 0.0
+    Used for plugin findings that have no CVE (e.g. "Missing HSTS header") so
+    the UI does not show "—" for every non-CVE finding.
     """
-    if not severity:
-        return None
-    return {
-        "critical": 9.5,
-        "high":     8.0,
-        "medium":   5.5,
-        "low":      2.5,
-        "info":     0.0,
-    }.get(severity.lower())
+    parsed = Severity.parse(severity)
+    return parsed.baseline_cvss if parsed else None
+
+
+# CVSS v3.1 base metric weights (specification, section 7.4).
+_ATTACK_VECTOR = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}
+_ATTACK_COMPLEXITY = {"L": 0.77, "H": 0.44}
+_PRIVILEGES_REQUIRED = {"N": 0.85, "L": 0.62, "H": 0.27}
+_USER_INTERACTION = {"N": 0.85, "R": 0.62}
+_IMPACT = {"H": 0.56, "L": 0.22, "N": 0.0}
+
+_IMPACT_FACTOR = 6.42
+_EXPLOITABILITY_FACTOR = 8.22
+_MAX_SCORE = 10.0
 
 
 def cvss_v3_vector_to_score(vector: str) -> float | None:
-    """
-    Very lightweight CVSS v3 base score approximation from a vector string.
-    For full accuracy, use the `cvss` pip package.
-    Returns None if the vector can't be parsed.
-    """
-    try:
-        parts = dict(p.split(":") for p in vector.split("/") if ":" in p)
-        # Attack Vector weight
-        av = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}.get(parts.get("AV", "N"), 0.85)
-        # Attack Complexity
-        ac = {"L": 0.77, "H": 0.44}.get(parts.get("AC", "L"), 0.77)
-        # Privileges Required
-        pr = {"N": 0.85, "L": 0.62, "H": 0.27}.get(parts.get("PR", "N"), 0.85)
-        # User Interaction
-        ui = {"N": 0.85, "R": 0.62}.get(parts.get("UI", "N"), 0.85)
-        # Impact scores
-        c = {"H": 0.56, "L": 0.22, "N": 0.0}.get(parts.get("C", "N"), 0.0)
-        i = {"H": 0.56, "L": 0.22, "N": 0.0}.get(parts.get("I", "N"), 0.0)
-        a = {"H": 0.56, "L": 0.22, "N": 0.0}.get(parts.get("A", "N"), 0.0)
+    """Approximate a CVSS v3 base score from its vector string.
 
-        iss = 1 - (1 - c) * (1 - i) * (1 - a)
-        if iss == 0:
-            return 0.0
-        impact = 6.42 * iss
-        exploitability = 8.22 * av * ac * pr * ui
-        base = min(impact + exploitability, 10.0)
-        # Round up to 1 decimal
-        import math
-        return math.ceil(base * 10) / 10
-    except Exception:
+    Scope-unchanged approximation only; use the ``cvss`` package when exact
+    scores are needed. Returns None when the vector cannot be parsed.
+    """
+    metrics = _parse_vector(vector)
+    if metrics is None:
         return None
+
+    impact_subscore = 1 - (
+        (1 - _IMPACT.get(metrics.get("C", "N"), 0.0))
+        * (1 - _IMPACT.get(metrics.get("I", "N"), 0.0))
+        * (1 - _IMPACT.get(metrics.get("A", "N"), 0.0))
+    )
+    if impact_subscore == 0:
+        return 0.0
+
+    exploitability = (
+        _EXPLOITABILITY_FACTOR
+        * _ATTACK_VECTOR.get(metrics.get("AV", "N"), 0.85)
+        * _ATTACK_COMPLEXITY.get(metrics.get("AC", "L"), 0.77)
+        * _PRIVILEGES_REQUIRED.get(metrics.get("PR", "N"), 0.85)
+        * _USER_INTERACTION.get(metrics.get("UI", "N"), 0.85)
+    )
+    base = min(_IMPACT_FACTOR * impact_subscore + exploitability, _MAX_SCORE)
+    return _round_up_one_decimal(base)
+
+
+def _parse_vector(vector: str) -> dict[str, str] | None:
+    if not isinstance(vector, str):
+        return None
+    metrics: dict[str, str] = {}
+    for part in vector.split("/"):
+        if ":" not in part:
+            continue
+        key, _, value = part.partition(":")
+        if ":" in value:
+            return None
+        metrics[key] = value
+    return metrics
+
+
+def _round_up_one_decimal(value: float) -> float:
+    return math.ceil(value * 10) / 10

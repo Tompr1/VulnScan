@@ -27,6 +27,7 @@ META = PluginMeta(
     depends_on=["net.port.discovery.v2"],
     consumes=["net.open_ports", "net.service_banners"],
     provides=["infra.db.findings"],
+    artifact_defaults={"infra.db.findings": 0},
     enabled_by_default=True,
     timeout_seconds=20.0,
 )

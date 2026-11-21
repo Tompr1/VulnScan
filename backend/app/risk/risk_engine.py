@@ -1,94 +1,99 @@
 """
 Risk scoring engine.
-Computes a composite risk score from CVSS, KEV status, asset criticality,
-known exploits, and confidence.
+
+Computes a 0-10 composite risk score from CVSS, CISA KEV status, known
+exploits, asset criticality and scanner confidence.
 """
+from __future__ import annotations
 
-# When no CVSS, use a base score at the midpoint of each severity band
-_SEVERITY_BASE_SCORE = {
-    "critical": 9.5,
-    "high": 8.0,
-    "medium": 5.0,
-    "low": 2.0,
-    "info": 0.0,
-}
+from dataclasses import dataclass
 
-# Severity band floor thresholds (matching cvss_engine.severity_from_score)
-_SEVERITY_FLOOR = {
-    "critical": 9.0,
-    "high": 7.0,
-    "medium": 4.0,
-    "low": 0.1,
-    "info": 0.0,
-}
+from app.risk.severity import Severity
 
+MIN_CRITICALITY = 1
+MAX_CRITICALITY = 5
+DEFAULT_CRITICALITY = 2
 
-def _cvss_severity(score: float) -> str:
-    """Map a score to its severity label."""
-    if score >= 9.0:
-        return "critical"
-    if score >= 7.0:
-        return "high"
-    if score >= 4.0:
-        return "medium"
-    if score >= 0.1:
-        return "low"
-    return "info"
+_MAX_SCORE = 10.0
+_UNKNOWN_BASE_SCORE = 5.0
+_KEV_MULTIPLIER = 1.3
+_EXPLOIT_KNOWN_MULTIPLIER = 1.15
+_CRITICALITY_MULTIPLIER = {1: 0.8, 2: 1.0, 3: 1.1, 4: 1.2, 5: 1.3}
+# Even a very unsure finding keeps a tenth of its weight.
+_MIN_CONFIDENCE_WEIGHT = 0.1
+# At or above this confidence a CVSS-backed finding never leaves its band:
+# a CVSS 9.8 seen with confidence 0.9 stays critical instead of 8.82 (high).
+_BAND_FLOOR_MIN_CONFIDENCE = 0.8
 
 
-def compute_risk(
-    cvss: float | None,
-    kev: bool = False,
-    criticality: int = 2,
-    exploit_known: bool = False,
-    confidence: float = 1.0,
-    plugin_severity: str = "",
-) -> float:
+@dataclass(frozen=True)
+class RiskFactors:
+    """Validated inputs of the risk computation.
+
+    Building one is the only way to call :func:`compute_risk`, so the scoring
+    code never has to re-check its inputs.
     """
-    Compute a 0-10 composite risk score.
 
-    Args:
-        cvss: CVSS base score (0-10), or None if unknown
-        kev: Whether the CVE is in CISA KEV catalog
-        criticality: Asset criticality (1=low, 2=normal, 3=high, 4=critical, 5=maximum)
-        exploit_known: Whether a public exploit is known
-        confidence: Scanner confidence in the finding (0-1)
-        plugin_severity: The plugin's original severity label. Used as
-            fallback base score when no CVSS is available.
+    cvss: float | None
+    kev: bool = False
+    exploit_known: bool = False
+    criticality: int = DEFAULT_CRITICALITY
+    confidence: float = 1.0
+    plugin_severity: Severity | None = None
 
-    Returns:
-        Float risk score between 0 and 10.
+    def __post_init__(self) -> None:
+        if self.cvss is not None and not 0.0 <= self.cvss <= _MAX_SCORE:
+            raise ValueError(f"cvss must be between 0 and 10, got {self.cvss}")
+        if not MIN_CRITICALITY <= self.criticality <= MAX_CRITICALITY:
+            raise ValueError(
+                f"criticality must be between {MIN_CRITICALITY} and {MAX_CRITICALITY}, "
+                f"got {self.criticality}"
+            )
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError(f"confidence must be between 0 and 1, got {self.confidence}")
+
+
+def compute_risk(factors: RiskFactors) -> float:
+    """Return the composite risk score, rounded to two decimals."""
+    score = _base_score(factors)
+    score = min(score * _threat_multiplier(factors), _MAX_SCORE)
+    score = min(score * _CRITICALITY_MULTIPLIER[factors.criticality], _MAX_SCORE)
+    score *= max(factors.confidence, _MIN_CONFIDENCE_WEIGHT)
+    score = max(score, _band_floor(factors))
+    return round(min(score, _MAX_SCORE), 2)
+
+
+def _base_score(factors: RiskFactors) -> float:
+    if factors.cvss is not None:
+        return factors.cvss
+    if factors.plugin_severity is not None:
+        return factors.plugin_severity.baseline_cvss
+    return _UNKNOWN_BASE_SCORE
+
+
+def _threat_multiplier(factors: RiskFactors) -> float:
+    if factors.kev:
+        return _KEV_MULTIPLIER
+    if factors.exploit_known:
+        return _EXPLOIT_KNOWN_MULTIPLIER
+    return 1.0
+
+
+def _band_floor(factors: RiskFactors) -> float:
+    """Lowest score allowed when CVSS is authoritative and confidence is high."""
+    if factors.cvss is None or factors.confidence < _BAND_FLOOR_MIN_CONFIDENCE:
+        return 0.0
+    return Severity.from_score(factors.cvss).floor
+
+
+def parse_criticality(raw: object) -> int:
+    """Parse an asset criticality coming from user-editable profile options.
+
+    Anything that is not an integer falls back to the default, and integers
+    are clamped into the supported 1-5 range.
     """
-    if cvss is not None:
-        base = cvss
-    elif plugin_severity and plugin_severity.lower() in _SEVERITY_BASE_SCORE:
-        base = _SEVERITY_BASE_SCORE[plugin_severity.lower()]
-    else:
-        base = 5.0
-
-    # Remember the CVSS-derived severity before adjustments
-    original_severity = _cvss_severity(base) if cvss is not None else None
-
-    # KEV multiplier
-    if kev:
-        base = min(base * 1.3, 10.0)
-    elif exploit_known:
-        base = min(base * 1.15, 10.0)
-
-    # Asset criticality multiplier (1-5 -> 0.8-1.3)
-    crit_multiplier = {1: 0.8, 2: 1.0, 3: 1.1, 4: 1.2, 5: 1.3}.get(criticality, 1.0)
-    base = min(base * crit_multiplier, 10.0)
-
-    # Apply confidence
-    base = base * max(min(confidence, 1.0), 0.1)
-
-    # Severity floor guard: when CVSS is authoritative and confidence is
-    # reasonably high (>=0.8), don't let the score drop below the CVSS
-    # severity band floor. A CVSS 9.8 critical should stay critical even
-    # with confidence 0.9 (which would otherwise give 8.82 = high).
-    if original_severity and confidence >= 0.8:
-        floor = _SEVERITY_FLOOR.get(original_severity, 0.0)
-        if base < floor:
-            base = floor
-
-    return round(min(base, 10.0), 2)
+    try:
+        value = int(raw)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return DEFAULT_CRITICALITY
+    return max(MIN_CRITICALITY, min(value, MAX_CRITICALITY))

@@ -20,6 +20,7 @@ META = PluginMeta(
     name="UDP Port Scanner",
     category="network",
     provides=["net.open_udp_ports", "net.udp_service_responses"],
+    artifact_defaults={"net.udp_service_responses": {}},
     enabled_by_default=False,
     timeout_seconds=120.0,
 )

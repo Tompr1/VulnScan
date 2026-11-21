@@ -46,6 +46,7 @@ META = PluginMeta(
     soft_depends_on=["web.auth"],  # Run after web.auth so auth_session is available
     consumes=["fingerprint.http", "web.auth_session"],
     provides=["owasp.findings", "owasp.finding_types", "owasp.tested_categories"],
+    artifact_defaults={"owasp.findings": 0},
     enabled_by_default=True,
     timeout_seconds=120.0,
 )

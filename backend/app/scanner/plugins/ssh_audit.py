@@ -30,6 +30,7 @@ META = PluginMeta(
     depends_on=["net.port.discovery.v2"],
     consumes=["net.open_ports", "fingerprint.banners"],
     provides=["infra.ssh.audit"],
+    artifact_defaults={"infra.ssh.audit": {}},
     enabled_by_default=True,
     timeout_seconds=10.0,
 )

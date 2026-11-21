@@ -472,8 +472,13 @@ Click "Generate PoC" on any individual finding to get an AI-generated Python exp
 ## Risk Scoring
 
 ```
-Risk = (CVSS × exploit_weight) + KEV_bonus + asset_criticality × confidence
+base = CVSS  (or the plugin severity's band midpoint when there is no CVSS)
+risk = min(10, base × threat × criticality) × max(confidence, 0.1)
+       threat: ×1.3 if CISA KEV, ×1.15 if a public exploit is known
 ```
+
+A CVSS-backed finding seen with confidence ≥ 0.8 never drops below its CVSS
+band (a 9.8 stays critical). Source of truth: `backend/app/risk/`.
 
 The **Threat Intel page** uses a richer composite score that also factors in EPSS percentile and recency.
 
@@ -570,6 +575,46 @@ git pull
 docker compose build backend worker-ai worker-scan worker-data
 docker compose up -d
 # Hard-refresh the browser to bust the cached JS bundle
+```
+
+---
+
+## Development & Tests
+
+The backend ships with a pytest suite (`backend/tests`, ~250 tests, < 2 s):
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest                      # everything
+pytest tests/unit           # pure domain logic, no I/O
+pytest tests/integration    # SQLite database + FastAPI HTTP stack
+pytest --cov=app.risk --cov=app.scanner --cov=app.scan_jobs --cov-report=term-missing
+```
+
+| Layer | What is tested | Test doubles |
+|-------|----------------|--------------|
+| `tests/unit/risk` | severity bands, risk score, SLA, CVSS vectors | none (pure functions) |
+| `tests/unit/scanner` | target parsing, allowlist, budget, plugin registry, scan engine | `FakePlugin`, `FakeClock`, `SpyCancellationSignal` |
+| `tests/unit/scan_jobs` | finding processing, notifications, progress, job runner | `InMemoryScanJobRepository` (fake), `StubExecutor`, `SpyNotifier`… |
+| `tests/unit/api` | request parsing at the HTTP boundary | none |
+| `tests/integration` | SQL repository, `/scan` routes, built-in plugin contract | SQLite in memory, `SpyJobQueue` |
+
+Conventions: test names describe a behaviour (in French, e.g.
+`test_une_cible_hors_allowlist_n_est_pas_scannee`), one behaviour per test,
+Arrange / Act / Assert blocks, stubs and fakes for state, spies only where the
+interaction *is* the behaviour (a notification sent, a job queued). Shared
+doubles live in `backend/tests/fakes.py`.
+
+### Backend layout (scan pipeline)
+
+```
+app/api/schemas/   request models — input is parsed once, at the boundary (422 lists every error)
+app/scan_jobs/     scan job use case: submission, runner, processing, notifications, repository
+app/scanner/       engine + value objects (ScanTarget, AllowlistPolicy, ScanBudget, ScanProfile)
+app/risk/          Severity (single source of truth), risk score, SLA policy
+app/core/          job queue, workspace settings, config, auth
+app/worker_tasks.py  composition root of the RQ worker (wires the production adapters)
 ```
 
 ---

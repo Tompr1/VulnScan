@@ -10,25 +10,18 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from redis import Redis
-from rq import Queue
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_role
-from app.core.config import settings
 from app.db import models
-from app.worker_tasks import run_scan_job
+from app.core.job_queue import QueueUnavailableError, get_job_queue
 
 logger = logging.getLogger("vulnscan.analytics")
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
-
-
-def _redis() -> Redis:
-    return Redis.from_url(settings.REDIS_URL)
 
 
 # ─── 1. Auto Asset Discovery ────────────────────────────────────────────────
@@ -473,14 +466,12 @@ def reverify_scan(
     db.refresh(new_job)
 
     try:
-        q = Queue("scans", connection=_redis())
-        rq_timeout = settings.SCAN_JOB_TIMEOUT
-        q.enqueue(run_scan_job, new_job.id, job_timeout=rq_timeout)
+        get_job_queue().enqueue_scan(new_job.id)
         logger.info(
             "Reverify enqueued: job #%d (from #%d) target=%s fingerprints=%d",
             new_job.id, job_id, original.target, len(fingerprints),
         )
-    except Exception as e:
+    except QueueUnavailableError as e:
         new_job.status = "failed"
         new_job.meta_json = json.dumps({
             **meta,

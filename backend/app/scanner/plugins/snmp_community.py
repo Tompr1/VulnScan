@@ -27,6 +27,7 @@ META = PluginMeta(
     depends_on=["net.port.discovery.v2"],
     consumes=["net.open_ports"],
     provides=["infra.snmp.findings"],
+    artifact_defaults={"infra.snmp.findings": 0},
     enabled_by_default=True,
     timeout_seconds=15.0,
 )

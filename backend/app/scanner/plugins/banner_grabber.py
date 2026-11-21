@@ -9,6 +9,7 @@ META = PluginMeta(
     depends_on=["net.port.discovery.v2"],
     consumes=["net.open_ports"],
     provides=["fingerprint.banners"],
+    artifact_defaults={"fingerprint.banners": {"banners": []}},
     enabled_by_default=True,
     timeout_seconds=5.0,
 )

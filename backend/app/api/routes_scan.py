@@ -1,30 +1,38 @@
 import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from redis import Redis
-from rq import Queue
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_role
+from app.api.schemas.scan import (
+    CreateJobRequest,
+    CreateProfileRequest,
+    CreateScheduleRequest,
+    SuppressFindingRequest,
+    UpdateProfileRequest,
+)
 from app.core.config import settings
+from app.core.job_queue import QueueUnavailableError, ScanJobQueue, get_job_queue
 from app.db import models
 from app.risk.cvss_engine import cvss_baseline_from_severity
-from app.worker_tasks import run_scan_job
+from app.scan_jobs.submission import (
+    AssetNotFoundError,
+    JobNotFoundError,
+    ProfileNotFoundError,
+    ScanJobSubmission,
+)
+from app.scanner.cancellation import CancellationSignal, RedisCancellationSignal
+from app.scanner.plugins.loader import builtin_registry
 
 logger = logging.getLogger("vulnscan.scan")
 
 router = APIRouter(prefix="/scan", tags=["scan"])
 
 
-def _baseline_cvss(severity: str | None) -> float | None:
-    """Wrapper so route serializers can use a one-liner."""
-    return cvss_baseline_from_severity(severity)
-
-
-def _redis() -> Redis:
-    return Redis.from_url(settings.REDIS_URL)
+def get_cancellation_signal() -> CancellationSignal:
+    return RedisCancellationSignal.from_url(settings.REDIS_URL)
 
 
 def _resolve_user_id(db: Session, claims: dict) -> int | None:
@@ -41,22 +49,17 @@ def _resolve_user_id(db: Session, claims: dict) -> int | None:
 @router.get("/plugins")
 def list_plugins(user=Depends(require_role("admin", "analyst", "viewer"))):
     """Return all available scanner plugins with their metadata."""
-    from app.scanner.plugins.loader import load_plugins
-    plugins = load_plugins()
-    result = []
-    for pid, plugin in plugins.items():
-        meta = getattr(plugin, "meta", None) or getattr(plugin, "META", None)
-        if not meta:
-            continue
-        result.append({
-            "plugin_id": meta.plugin_id,
-            "name": meta.name,
-            "category": meta.category,
-            "enabled_by_default": meta.enabled_by_default,
-            "timeout_seconds": meta.timeout_seconds,
-            "depends_on": list(meta.depends_on or []),
-        })
-    # Sort by category then name
+    result = [
+        {
+            "plugin_id": plugin.meta.plugin_id,
+            "name": plugin.meta.name,
+            "category": plugin.meta.category,
+            "enabled_by_default": plugin.meta.enabled_by_default,
+            "timeout_seconds": plugin.meta.timeout_seconds,
+            "depends_on": list(plugin.meta.depends_on),
+        }
+        for plugin in builtin_registry()
+    ]
     result.sort(key=lambda p: (p["category"], p["name"]))
     return {"plugins": result}
 
@@ -65,32 +68,15 @@ def list_plugins(user=Depends(require_role("admin", "analyst", "viewer"))):
 
 @router.post("/profiles", response_model=dict)
 def create_profile(
-    body: dict,
+    body: CreateProfileRequest,
     user=Depends(require_role("admin", "analyst")),
     db: Session = Depends(get_db),
 ):
-    plugin_json = body.get("plugin_selection_json", "{}")
-    options_json = body.get("options_json", "{}")
-
-    try:
-        json.loads(plugin_json if isinstance(plugin_json, str) else json.dumps(plugin_json))
-    except Exception:
-        raise HTTPException(400, "plugin_selection_json is not valid JSON")
-    try:
-        json.loads(options_json if isinstance(options_json, str) else json.dumps(options_json))
-    except Exception:
-        raise HTTPException(400, "options_json is not valid JSON")
-
-    if not isinstance(plugin_json, str):
-        plugin_json = json.dumps(plugin_json)
-    if not isinstance(options_json, str):
-        options_json = json.dumps(options_json)
-
     row = models.Profile(
         workspace_id=user["ws"],
-        name=body.get("name", "default"),
-        plugin_selection_json=plugin_json,
-        options_json=options_json,
+        name=body.name,
+        plugin_selection_json=body.plugin_selection_text(),
+        options_json=body.options_text(),
     )
     db.add(row)
     db.commit()
@@ -170,7 +156,7 @@ def delete_profile(
 @router.put("/profiles/{profile_id}", response_model=dict)
 def update_profile(
     profile_id: int,
-    body: dict,
+    body: UpdateProfileRequest,
     user=Depends(require_role("admin", "analyst")),
     db: Session = Depends(get_db),
 ):
@@ -185,24 +171,12 @@ def update_profile(
     if not prof:
         raise HTTPException(404, "profile not found")
 
-    if "name" in body:
-        prof.name = body["name"]
-
-    if "plugin_selection_json" in body:
-        pj = body["plugin_selection_json"]
-        try:
-            json.loads(pj if isinstance(pj, str) else json.dumps(pj))
-        except Exception:
-            raise HTTPException(400, "plugin_selection_json is not valid JSON")
-        prof.plugin_selection_json = pj if isinstance(pj, str) else json.dumps(pj)
-
-    if "options_json" in body:
-        oj = body["options_json"]
-        try:
-            json.loads(oj if isinstance(oj, str) else json.dumps(oj))
-        except Exception:
-            raise HTTPException(400, "options_json is not valid JSON")
-        prof.options_json = oj if isinstance(oj, str) else json.dumps(oj)
+    if body.name is not None:
+        prof.name = body.name
+    if "plugin_selection_json" in body.model_fields_set:
+        prof.plugin_selection_json = body.plugin_selection_text()
+    if "options_json" in body.model_fields_set:
+        prof.options_json = body.options_text()
 
     try:
         db.commit()
@@ -226,102 +200,27 @@ def update_profile(
 
 @router.post("/jobs")
 def create_job(
-    body: dict,
+    body: CreateJobRequest,
     user=Depends(require_role("admin", "analyst")),
     db: Session = Depends(get_db),
+    queue: ScanJobQueue = Depends(get_job_queue),
 ):
-    target = (body.get("target") or "").strip()
-    if not target:
-        raise HTTPException(400, "target is required")
-
-    profile_id = body.get("profile_id")
-    if not profile_id:
-        raise HTTPException(400, "profile_id is required")
-
     try:
-        profile_id = int(profile_id)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "profile_id must be an integer")
-
-    scan_type = body.get("scan_type", "internal")
-    if scan_type not in ("internal", "external"):
-        scan_type = "internal"
-
-    asset_id = body.get("asset_id")
-    if asset_id is not None:
-        try:
-            asset_id = int(asset_id)
-        except (TypeError, ValueError):
-            raise HTTPException(400, "asset_id must be an integer")
-        # Validate asset belongs to workspace
-        asset_row = (
-            db.query(models.Asset)
-            .filter(models.Asset.workspace_id == user["ws"], models.Asset.id == asset_id)
-            .first()
+        job = ScanJobSubmission(db, queue).submit(
+            workspace_id=user["ws"],
+            target=body.target,
+            profile_id=body.profile_id,
+            scan_type=body.scan_type,
+            asset_id=body.asset_id,
+            meta=body.job_meta(),
+            created_by_user_id=user.get("uid") or _resolve_user_id(db, user),
         )
-        if not asset_row:
-            raise HTTPException(400, "asset_id does not match a folder in this workspace")
-
-    prof = (
-        db.query(models.Profile)
-        .filter(
-            models.Profile.workspace_id == user["ws"],
-            models.Profile.id == profile_id,
-        )
-        .first()
-    )
-    if not prof:
+    except ProfileNotFoundError:
         raise HTTPException(404, "profile not found")
-
-    # Per-job Web Authentication override (set from the New Scan dialog).
-    # Stored in meta_json under 'web_auth' so the worker can merge it into the
-    # profile's options at scan time and auto-enable the web.auth plugin.
-    web_auth_override = body.get("web_auth")
-    web_auth_ephemeral = bool(body.get("web_auth_credential_ephemeral"))
-    job_meta = None
-    if web_auth_override and isinstance(web_auth_override, dict) and web_auth_override.get("type"):
-        if web_auth_override["type"] not in ("form", "bearer", "basic", "cookie", "header"):
-            raise HTTPException(400, f"Invalid web_auth type: {web_auth_override['type']}")
-        meta_payload = {"web_auth": web_auth_override}
-        # Ephemeral credentials: the worker deletes the linked credential after the scan
-        # ends (any status). Only valid when web_auth references a credential_id.
-        if web_auth_ephemeral and web_auth_override.get("credential_id"):
-            meta_payload["web_auth_credential_ephemeral"] = True
-        job_meta = json.dumps(meta_payload)
-
-    job = models.ScanJob(
-        workspace_id=user["ws"],
-        target=target,
-        profile_id=prof.id,
-        asset_id=asset_id,
-        status="queued",
-        scan_type=scan_type,
-        meta_json=job_meta,
-        created_by_user_id=user.get("uid") or _resolve_user_id(db, user),
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-
-    try:
-        q = Queue("scans", connection=_redis())
-        # RQ timeout = scan budget + 300s headroom for post-processing & DB writes
-        rq_timeout = settings.SCAN_JOB_TIMEOUT
-        q.enqueue(run_scan_job, job.id, job_timeout=rq_timeout)
-        logger.info("Enqueued scan job #%d target=%s type=%s timeout=%ds", job.id, target, scan_type, rq_timeout)
-    except Exception as e:
-        job.status = "failed"
-        job.meta_json = json.dumps({
-            "error": f"Failed to enqueue: {e}",
-            "error_type": "queue",
-            "error_detail": (
-                "Could not submit the scan job to the task queue. "
-                "The Redis worker may be down or unreachable. "
-                "Check that the 'worker' container is running."
-            ),
-        })
-        db.commit()
-        raise HTTPException(503, f"Could not enqueue job: {e}")
+    except AssetNotFoundError:
+        raise HTTPException(400, "asset_id does not match a folder in this workspace")
+    except QueueUnavailableError as exc:
+        raise HTTPException(503, f"Could not enqueue job: {exc}")
 
     return {
         "id": job.id,
@@ -375,14 +274,14 @@ def _extract_error_info(meta_json: str | None) -> dict | None:
         return None
     try:
         meta = json.loads(meta_json)
-        if "error" in meta:
+        if isinstance(meta, dict) and "error" in meta:
             return {
                 "error": meta.get("error", "Unknown error"),
                 "error_type": meta.get("error_type", "unknown"),
                 "error_detail": meta.get("error_detail", ""),
             }
-    except Exception:
-        pass
+    except json.JSONDecodeError:
+        return None
     return None
 
 
@@ -448,7 +347,7 @@ def job_detail(
                 "references_json": f.references_json,
                 # cvss_base falls back to a severity-derived baseline so the UI
                 # doesn't show "—" for plugin findings that aren't tied to a CVE.
-                "cvss_base": f.cvss_base if f.cvss_base is not None else _baseline_cvss(f.severity),
+                "cvss_base": f.cvss_base if f.cvss_base is not None else cvss_baseline_from_severity(f.severity),
                 "risk_score": f.risk_score,
                 "confidence": f.confidence,
                 "is_kev": f.is_kev,
@@ -467,6 +366,7 @@ def cancel_job(
     job_id: int,
     user=Depends(require_role("admin", "analyst")),
     db: Session = Depends(get_db),
+    cancellation: CancellationSignal = Depends(get_cancellation_signal),
 ):
     """Cancel a running or queued scan job."""
     job = (
@@ -482,9 +382,8 @@ def cancel_job(
     if job.status not in ("queued", "running"):
         raise HTTPException(400, f"Job is already {job.status}")
 
-    # Set Redis cancel flag — worker checks this each plugin iteration
-    r = _redis()
-    r.setex(f"scan_cancel:{job_id}", 600, "1")
+    # The scan engine checks this signal before each plugin.
+    cancellation.request(job_id)
 
     # If still queued, cancel immediately
     if job.status == "queued":
@@ -516,7 +415,6 @@ def delete_job(
     if not job:
         raise HTTPException(404, "job not found")
 
-    target = job.target
     ws_id = user["ws"]
 
     # Delete AI analyses linked to this job
@@ -561,14 +459,11 @@ def delete_job(
 
 @router.post("/suppress")
 def suppress(
-    body: dict,
+    body: SuppressFindingRequest,
     user=Depends(require_role("admin", "analyst")),
     db: Session = Depends(get_db),
 ):
-    fp = body.get("fingerprint", "")
-    reason = body.get("reason", "")
-    if not fp:
-        raise HTTPException(400, "missing fingerprint")
+    fp, reason = body.fingerprint, body.reason
 
     existing = (
         db.query(models.SuppressedFinding)
@@ -595,41 +490,15 @@ def rescan_job(
     job_id: int,
     user=Depends(require_role("admin", "analyst")),
     db: Session = Depends(get_db),
+    queue: ScanJobQueue = Depends(get_job_queue),
 ):
     """Create a new scan job with the same target/profile/type as an existing job."""
-    original = (
-        db.query(models.ScanJob)
-        .filter(
-            models.ScanJob.workspace_id == user["ws"],
-            models.ScanJob.id == job_id,
-        )
-        .first()
-    )
-    if not original:
-        raise HTTPException(404, "job not found")
-
-    new_job = models.ScanJob(
-        workspace_id=user["ws"],
-        target=original.target,
-        profile_id=original.profile_id,
-        status="queued",
-        scan_type=original.scan_type or "internal",
-    )
-    db.add(new_job)
-    db.commit()
-    db.refresh(new_job)
-
     try:
-        q = Queue("scans", connection=_redis())
-        rq_timeout = settings.SCAN_JOB_TIMEOUT
-        q.enqueue(run_scan_job, new_job.id, job_timeout=rq_timeout)
-        logger.info("Rescan enqueued: job #%d (from #%d) target=%s", new_job.id, job_id, original.target)
-    except Exception as e:
-        new_job.status = "failed"
-        new_job.meta_json = json.dumps({"error": f"Failed to enqueue rescan: {e}"})
-        db.commit()
-        raise HTTPException(503, f"Could not enqueue rescan: {e}")
-
+        new_job = ScanJobSubmission(db, queue).rescan(user["ws"], job_id)
+    except JobNotFoundError:
+        raise HTTPException(404, "job not found")
+    except QueueUnavailableError as exc:
+        raise HTTPException(503, f"Could not enqueue rescan: {exc}")
     return {
         "id": new_job.id,
         "original_job_id": job_id,
@@ -719,60 +588,32 @@ def list_schedules(
 
 @router.post("/schedules")
 def create_schedule(
-    body: dict,
+    body: CreateScheduleRequest,
     user=Depends(require_role("admin", "analyst")),
     db: Session = Depends(get_db),
 ):
-    target = (body.get("target") or "").strip()
-    if not target:
-        raise HTTPException(400, "target is required")
-
-    profile_id = body.get("profile_id")
-    if not profile_id:
-        raise HTTPException(400, "profile_id is required")
-
-    schedule_type = body.get("schedule_type", "interval")  # "interval" or "custom"
-    interval = int(body.get("interval_hours", 24))
-    if interval < 1:
-        interval = 1
-
-    now_utc = datetime.now(timezone.utc)
-    custom_dt = None
-    repeat = body.get("repeat", True)
-
-    if schedule_type == "custom":
-        # Parse custom datetime from ISO string
-        raw_dt = body.get("custom_datetime", "")
-        if not raw_dt:
-            raise HTTPException(400, "custom_datetime is required for custom schedule type")
-        try:
-            custom_dt = datetime.fromisoformat(raw_dt.replace("Z", "+00:00"))
-            if custom_dt.tzinfo is None:
-                custom_dt = custom_dt.replace(tzinfo=timezone.utc)
-        except Exception:
-            raise HTTPException(400, f"Invalid datetime format: {raw_dt}. Use ISO 8601 (e.g. 2026-03-10T14:30:00)")
-        next_run = custom_dt
+    if body.schedule_type == "custom":
+        next_run = body.custom_datetime
     else:
-        next_run = now_utc + timedelta(hours=interval)
+        next_run = datetime.now(timezone.utc) + timedelta(hours=body.interval_hours)
 
     sched = models.ScanSchedule(
         workspace_id=user["ws"],
-        name=body.get("name", f"Schedule: {target}"),
-        target=target,
-        profile_id=int(profile_id),
-        scan_type=body.get("scan_type", "internal"),
-        schedule_type=schedule_type,
-        interval_hours=interval,
-        custom_datetime=custom_dt,
-        repeat=repeat,
-        enabled=body.get("enabled", True),
+        name=body.display_name,
+        target=body.target,
+        profile_id=body.profile_id,
+        scan_type=body.scan_type,
+        schedule_type=body.schedule_type,
+        interval_hours=body.interval_hours,
+        custom_datetime=body.custom_datetime,
+        repeat=body.repeat,
+        enabled=body.enabled,
         next_run_at=next_run,
     )
     db.add(sched)
     db.commit()
     db.refresh(sched)
-    mode = f"custom ({custom_dt.isoformat()})" if schedule_type == "custom" else f"every {interval}h"
-    logger.info("Schedule #%d created: %s %s", sched.id, target, mode)
+    logger.info("Schedule #%d created: %s %s", sched.id, body.target, body.schedule_type)
     return {"id": sched.id, "name": sched.name, "next_run_at": sched.next_run_at.isoformat() if sched.next_run_at else None}
 
 
