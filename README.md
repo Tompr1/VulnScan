@@ -356,6 +356,14 @@ Raw browsing of all 7 threat intel datasets at **Configuration → Datasets**.
 
 One-click refresh from the UI, or via CLI scripts under `scripts/`. Supports offline dataset upload for air-gapped environments.
 
+**Full NVD history.** The NVD dataset above only covers CVEs published in the last
+120 days (an NVD API limit per query). The complete history (300k+ CVEs) is
+imported into Postgres by `run_cve_catalog_sync` (`backend/app/cve/nvd_sync.py`):
+a resumable full import that re-queues itself until done, then incremental
+updates of modified CVEs at every dataset refresh. Scans query it by product, so
+the history never has to fit in memory. An `NVD_API_KEY` makes the import ~10×
+faster.
+
 ---
 
 ## Authenticated Web Scanning
@@ -631,6 +639,73 @@ creates `.env` with random secrets on the first run, rebuilds the containers,
 waits for `/healthz` and runs `bootstrap.sh` once. `.env` and `data/` are never
 overwritten. To roll back, re-run the deploy job of an older commit in the
 Actions tab.
+
+---
+
+### Device inventory (Microsoft Intune)
+
+`/inventory` collects managed devices (Windows, macOS, iOS/iPadOS, Android,
+Linux) and their installed applications from Intune through Microsoft Graph,
+read-only. Configure a connection with an Entra ID application granted the
+**application** permission `DeviceManagementManagedDevices.Read.All` (admin
+consent required): tenant ID, client ID, client secret (stored encrypted,
+never returned), and a daily / weekly / manual sync. Each sync runs as an
+`inventory` scan job, stores the inventory and journals what changed (OS and
+application updates, installs, removals); `GET /inventory/devices/{id}` is the
+device page. Code: `backend/app/inventory/` (GLPI or Fleet plug in as new
+`InventorySource` implementations).
+
+After each sync the job audits the inventory (`backend/app/inventory/audit/`)
+and saves one finding per device issue, linked to the device (`device_id`):
+
+| Finding (`inventory.*`) | Raised when |
+|---|---|
+| `os_unsupported` / `os_support_ending` | the OS release is past its end of security support / ends within 60 days |
+| `os_outdated` | the OS is behind the latest update of its release |
+| `android_patch_outdated` | the Android security patch level is older than 90 days |
+| `app_unsupported` | an application is on a release line its vendor no longer supports |
+| `app_outdated` | an application is behind its latest release |
+| `os_vulnerable` / `app_vulnerable` | the OS build or an application has known CVEs (one finding per product, listing its CVEs; critical when one is in CISA KEV) |
+
+Support dates and latest releases come from [endoflife.date](https://endoflife.date)
+(the worker needs outbound HTTPS to it). When the vendor's latest release is
+unknown, or too coarse (Windows monthly updates), the reference is the newest
+version installed on at least two devices of the fleet. Windows dates are those
+of Home/Pro editions, as Intune does not report the edition. An audit that could
+not check everything adds an `inventory.audit_incomplete` finding. The device
+list and page show the issues of the latest completed audit.
+
+Known CVEs come from the NVD catalog (version ranges) and the workspace's CISA
+KEV dataset. Covered: Windows 10/11 by build, macOS, iOS, iPadOS, and a curated
+list of applications whose NVD entries carry version ranges (Chrome, Edge,
+Firefox, Thunderbird, 7-Zip, Notepad++, VLC, Adobe Acrobat/Reader, Zoom, WinRAR,
+Git, Wireshark, VS Code, FortiClient, PowerShell, PuTTY, WinSCP, FileZilla,
+KeePass, Node.js, TeamViewer, AnyDesk, LibreOffice, Docker Desktop, Cisco Secure
+Client — `backend/app/inventory/audit/cves.py`). Not covered: Microsoft 365 /
+Office, Java and Citrix Workspace (NVD gives no comparable build range), Android
+(fixed by security patch level, see `android_patch_outdated`).
+
+**Alerts** (`backend/app/inventory/alerts.py`): after each audit, the workspace's
+integrations (Slack, Teams, e-mail, webhook) get ONE message listing the
+**new** device issues only, each with a link to its device page
+(`<PUBLIC_URL>/#/inventory/devices/<id>`; `PUBLIC_URL` defaults to the first
+CORS origin). An issue already reported is not repeated; one that worsens past
+the threshold or becomes actively exploited is new. The first audit of a
+connection sends a single baseline summary. Threshold: `GET/PUT
+/inventory/alert-settings` (`min_severity`, default `high`; `always_kev`,
+default `true`). Channels: notification preferences `device_vulnerability`,
+`device_os_issue`, `device_software_issue` (and `cisa_kev_match`). Inventory jobs
+do not send the generic "scan completed" message.
+
+**Web UI**: *Devices* in the navigation lists the fleet, most exposed first
+(issue count and worst severity, platform and severity filters, search), and
+manages the Intune connections (add, test, sync now, frequency, delete). A device
+page shows the issues of the latest audit (CVEs, KEV, remediation, evidence), the
+installed applications, the device properties and the change history. Alert links
+and the "Open device page" button of a finding open it directly
+(`#/inventory/devices/<id>`, also after signing in). The device events and the
+alert threshold are under *Settings → Notifications*. Frontend logic tests:
+`cd frontend && npm test` (Node 24, no dependency).
 
 ---
 

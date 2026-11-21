@@ -1,0 +1,27 @@
+name: Frontend tests
+
+# Logic tests (node --test, no dependency) and a production build, which
+# catches JSX and import errors before they reach the lab VM.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Logic tests
+        run: npm test
+      - name: Production build
+        run: npx vite build

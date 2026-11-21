@@ -1,6 +1,7 @@
 """
 Scan notifications — tells the workspace integrations (Slack, Teams, webhook,
-e-mail) that a scan completed or failed.
+e-mail) that a scan completed or failed, and alerts on new device issues
+found by an inventory audit (app.inventory.alerts).
 
 Each integration provider is a :class:`NotificationChannel`; supporting a new
 provider means adding a channel, not editing the dispatch code.
@@ -13,12 +14,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
+from app.inventory.alerts import AlertItem, InventoryAlert
 from app.risk.severity import Severity
 from app.scanner import notifier
 
 logger = logging.getLogger(__name__)
 
 TOP_FINDINGS_LIMIT = 10
+ALERT_ITEMS_LIMIT = 20  # per message; the webhook gets them all
+_SLACK_SECTION_CHARS = 2900  # Slack rejects section texts over 3000 characters
 _SEVERITIES_BY_RISK = (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW)
 
 
@@ -109,6 +113,8 @@ class NotificationChannel(Protocol):
 
     def scan_failed(self, config: dict[str, Any], failure: ScanFailure) -> None: ...
 
+    def device_alert(self, config: dict[str, Any], alert: InventoryAlert) -> None: ...
+
 
 class SlackChannel:
     def __init__(self, send: Callable[[dict, Any], Any] = notifier.send_slack_notification) -> None:
@@ -151,6 +157,22 @@ class SlackChannel:
         )
         self._send(config, {"text": text, "blocks": blocks})
 
+    def device_alert(self, config: dict[str, Any], alert: InventoryAlert) -> None:
+        lines = [_slack_line(item) for item in alert.items[:ALERT_ITEMS_LIMIT]]
+        if len(alert.items) > ALERT_ITEMS_LIMIT:
+            lines.append(f"… and {len(alert.items) - ALERT_ITEMS_LIMIT} more")
+        blocks: list[dict[str, Any]] = [
+            {"type": "header", "text": {"type": "plain_text", "text": _header(alert), "emoji": True}},
+            *(_text_section(chunk) for chunk in _chunks(lines, _SLACK_SECTION_CHARS)),
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": _slack_escape(alert.footer)}]},
+        ]
+        if alert.devices_url:
+            blocks.append({"type": "actions", "elements": [{
+                "type": "button", "text": {"type": "plain_text", "text": "Open device inventory", "emoji": True},
+                "url": alert.devices_url,
+            }]})
+        self._send(config, {"text": alert.subject, "blocks": blocks})
+
     def scan_failed(self, config: dict[str, Any], failure: ScanFailure) -> None:
         self._send(config, {
             "text": failure.message,
@@ -186,6 +208,26 @@ class TeamsChannel:
             "Low": str(summary.count(Severity.LOW)),
         })
 
+    def device_alert(self, config: dict[str, Any], alert: InventoryAlert) -> None:
+        lines = [_markdown_line(item) for item in alert.items[:ALERT_ITEMS_LIMIT]]
+        if len(alert.items) > ALERT_ITEMS_LIMIT:
+            lines.append(f"… and {len(alert.items) - ALERT_ITEMS_LIMIT} more")
+        body: list[dict[str, Any]] = [
+            {"type": "TextBlock", "size": "Large", "weight": "Bolder", "text": _header(alert), "wrap": True},
+            *({"type": "TextBlock", "text": line, "wrap": True, "spacing": "Small"} for line in lines),
+            {"type": "TextBlock", "text": alert.footer, "wrap": True, "isSubtle": True, "size": "Small"},
+        ]
+        card: dict[str, Any] = {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard", "version": "1.4", "body": body,
+        }
+        if alert.devices_url:
+            card["actions"] = [{"type": "Action.OpenUrl", "title": "Open device inventory", "url": alert.devices_url}]
+        self._send(config, {
+            "type": "message",
+            "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "content": card}],
+        })
+
     def scan_failed(self, config: dict[str, Any], failure: ScanFailure) -> None:
         self._send(config, {
             "title": "VulnScan Scan Failed",
@@ -203,6 +245,28 @@ class WebhookChannel:
 
     def scan_completed(self, config: dict[str, Any], summary: ScanSummary) -> None:
         self._send(config, {"event": "scan_done", "data": summary.webhook_payload()})
+
+    def device_alert(self, config: dict[str, Any], alert: InventoryAlert) -> None:
+        self._send(config, {"event": "inventory_alert", "data": {
+            "job_id": alert.job_id,
+            "target": alert.target,
+            "baseline": alert.baseline,
+            "resolved": alert.resolved,
+            "open_issues": alert.open_issues,
+            "issues": [
+                {
+                    "device_id": item.issue.device_id,
+                    "device": item.device_name,
+                    "rule": item.issue.rule,
+                    "title": item.headline,
+                    "severity": item.issue.severity,
+                    "is_kev": item.issue.is_kev,
+                    "fingerprint": item.issue.fingerprint,
+                    "url": item.link,
+                }
+                for item in alert.items
+            ],
+        }})
 
     def scan_failed(self, config: dict[str, Any], failure: ScanFailure) -> None:
         self._send(config, {
@@ -227,6 +291,15 @@ class EmailChannel:
 
     def scan_failed(self, config: dict[str, Any], failure: ScanFailure) -> None:
         self._send(config, f"Scan Failed: {failure.target}", failure.message)
+
+    def device_alert(self, config: dict[str, Any], alert: InventoryAlert) -> None:
+        lines = [_text_line(item) for item in alert.items[:ALERT_ITEMS_LIMIT]]
+        if len(alert.items) > ALERT_ITEMS_LIMIT:
+            lines.append(f"… and {len(alert.items) - ALERT_ITEMS_LIMIT} more")
+        body = "\n".join([*lines, "", alert.footer])
+        if alert.devices_url:
+            body += f"\n\nDevice inventory: {alert.devices_url}"
+        self._send(config, alert.subject, body)
 
 
 def default_channels() -> dict[str, NotificationChannel]:
@@ -276,6 +349,28 @@ class ScanNotifier:
     def scan_failed(self, workspace_id: int, failure: ScanFailure) -> None:
         self._dispatch(workspace_id, ["scan_failed"], lambda ch, cfg: ch.scan_failed(cfg, failure))
 
+    def device_alert(self, workspace_id: int, alert: InventoryAlert) -> None:
+        """Each integration gets only the issues of the events it subscribed
+        to (vulnerabilities, OS, software, KEV); none of them, no message."""
+        try:
+            integrations = self._source.enabled_integrations(workspace_id)
+            preferences = self._source.notification_preferences(workspace_id) if integrations else {}
+        except Exception as exc:  # notifications must never fail the job
+            logger.warning("Could not load integrations of workspace %d: %s", workspace_id, exc)
+            return
+        for integration in integrations:
+            channel = self._channels.get(integration.provider)
+            if channel is None:
+                continue
+            items = [i for i in alert.items if self._should_notify(preferences, i.issue.events, integration.provider)]
+            if not items:
+                logger.info("Device alert skipped for %s (preferences)", integration.provider)
+                continue
+            try:
+                channel.device_alert(integration.config, alert.only(items))
+            except Exception as exc:  # one broken integration must not block the others
+                logger.warning("Device alert via %s failed: %s", integration.provider, exc)
+
     def _dispatch(
         self, workspace_id: int, events: list[str], send: Callable[[NotificationChannel, dict[str, Any]], None]
     ) -> None:
@@ -298,6 +393,48 @@ class ScanNotifier:
                 send(channel, integration.config)
             except Exception as exc:  # one broken integration must not block the others
                 logger.warning("Notification via %s failed: %s", integration.provider, exc)
+
+
+def _header(alert: InventoryAlert) -> str:
+    return alert.subject.removeprefix("VulnScan: ")[:150]  # Slack header limit
+
+
+def _severity_tag(item: AlertItem) -> str:
+    tag = item.issue.severity.upper()
+    return f"{tag} · KEV" if item.issue.is_kev else tag
+
+
+def _slack_escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _slack_line(item: AlertItem) -> str:
+    device = _slack_escape(item.device_name)
+    device = f"<{item.link}|{device}>" if item.link else f"*{device}*"
+    return f"• *[{_severity_tag(item)}]* {device} — {_slack_escape(item.headline)}"
+
+
+def _markdown_line(item: AlertItem) -> str:
+    device = item.device_name.replace("[", "(").replace("]", ")")
+    device = f"[{device}]({item.link})" if item.link else f"**{device}**"
+    return f"**[{_severity_tag(item)}]** {device} — {item.headline}"
+
+
+def _text_line(item: AlertItem) -> str:
+    line = f"- [{_severity_tag(item)}] {item.device_name}: {item.headline}"
+    return f"{line}\n  {item.link}" if item.link else line
+
+
+def _chunks(lines: Sequence[str], limit: int) -> list[str]:
+    """Lines joined into texts of at most ``limit`` characters."""
+    chunks: list[str] = []
+    for line in lines:
+        line = line[:limit]
+        if chunks and len(chunks[-1]) + 1 + len(line) <= limit:
+            chunks[-1] += "\n" + line
+        else:
+            chunks.append(line)
+    return chunks
 
 
 def _field(label: str, value: str) -> dict[str, str]:

@@ -14,6 +14,7 @@ class ScanType(StrEnum):
     EXTERNAL = "external"
     API = "api"
     IAC = "iac"
+    INVENTORY = "inventory"  # device inventory from a fleet manager (Intune…)
 
     @classmethod
     def parse(cls, raw: str | None, default: ScanType | None = None) -> ScanType:

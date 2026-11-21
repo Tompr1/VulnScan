@@ -1,13 +1,16 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from app.inventory.alerts import AlertItem, InventoryAlert, KnownIssue
 from app.risk.severity import Severity
 from app.scan_jobs.notifications import (
+    EmailChannel,
     Integration,
     ScanFailure,
     ScanNotifier,
     ScanSummary,
     SlackChannel,
+    TeamsChannel,
     WebhookChannel,
     build_summary,
 )
@@ -128,3 +131,168 @@ def test_le_resume_classe_les_constats_par_risque_et_en_garde_dix():
     assert len(result.top_findings) == 10
     assert result.has_kev, "KEV is detected on every saved finding, not only the top ten"
     assert result.duration_seconds == 90
+
+
+# ── Device alerts (inventory audits) ──────────────────────────────────────────
+
+DEVICE_EVENTS_ON = {
+    "device_vulnerability": {"slack": True, "email": True, "webhook": True},
+    "device_software_issue": {"slack": True, "email": False, "webhook": True},
+}
+
+
+def alert_item(n=1, rule="app_vulnerable", severity="critical", is_kev=False, name="PC-COMPTA-04",
+               link="https://vs.example/#/inventory/devices/7") -> AlertItem:
+    title = f"Google Chrome 131 has {n} known vulnerabilities — {name}"
+    return AlertItem(KnownIssue(f"fp-{n}-{rule}", f"inventory.{rule}", severity, is_kev, 7, title), name, link)
+
+
+def device_alert(*items, **overrides) -> InventoryAlert:
+    values = {"job_id": 12, "target": "intune:Tenant", "items": items or (alert_item(),), "resolved": 2,
+              "open_issues": 30, "devices_url": "https://vs.example/#/inventory"}
+    values.update(overrides)
+    return InventoryAlert(**values)
+
+
+def captured(channel_class):
+    sent = []
+    return channel_class(lambda *args: sent.append(args)), sent
+
+
+def test_slack_liste_chaque_appareil_avec_son_lien_et_un_bouton_vers_l_inventaire():
+    channel, sent = captured(SlackChannel)
+
+    channel.device_alert({}, device_alert(alert_item(is_kev=True)))
+
+    [(_, message)] = sent
+    assert message["text"] == "VulnScan: 1 new device issue on 1 device (1 actively exploited)"
+    blocks = message["blocks"]
+    assert blocks[0]["text"]["text"] == "1 new device issue on 1 device (1 actively exploited)"
+    assert blocks[1]["text"]["text"] == (
+        "• *[CRITICAL · KEV]* <https://vs.example/#/inventory/devices/7|PC-COMPTA-04> — Google Chrome 131 has 1 known vulnerabilities"
+    )
+    assert blocks[-1]["elements"][0]["url"] == "https://vs.example/#/inventory"
+
+
+def test_slack_echappe_les_caracteres_de_controle_des_noms():
+    channel, sent = captured(SlackChannel)
+
+    channel.device_alert({}, device_alert(alert_item(name="<PC & co>", link=None), devices_url=None))
+
+    line = sent[0][1]["blocks"][1]["text"]["text"]
+    assert "*&lt;PC &amp; co&gt;*" in line
+    assert all(block["type"] != "actions" for block in sent[0][1]["blocks"])  # no URL, no button
+
+
+def test_slack_limite_le_nombre_de_lignes_et_la_taille_des_sections():
+    channel, sent = captured(SlackChannel)
+
+    channel.device_alert({}, device_alert(*(alert_item(n) for n in range(1, 31))))
+
+    sections = [b["text"]["text"] for b in sent[0][1]["blocks"] if b["type"] == "section"]
+    lines = "\n".join(sections).splitlines()
+    assert len(lines) == 21 and lines[-1] == "… and 10 more"
+    assert all(len(text) <= 2900 for text in sections)
+
+
+def test_teams_recoit_une_carte_avec_des_liens_markdown():
+    channel, sent = captured(TeamsChannel)
+
+    channel.device_alert({}, device_alert())
+
+    card = sent[0][1]["attachments"][0]["content"]
+    assert card["body"][1]["text"] == (
+        "**[CRITICAL]** [PC-COMPTA-04](https://vs.example/#/inventory/devices/7) — Google Chrome 131 has 1 known vulnerabilities"
+    )
+    assert card["actions"][0]["url"] == "https://vs.example/#/inventory"
+
+
+def test_le_webhook_recoit_tous_les_problemes_sans_limite():
+    channel, sent = captured(WebhookChannel)
+
+    channel.device_alert({}, device_alert(*(alert_item(n) for n in range(1, 31))))
+
+    payload = sent[0][1]
+    assert payload["event"] == "inventory_alert"
+    assert len(payload["data"]["issues"]) == 30
+    assert payload["data"]["issues"][0] == {
+        "device_id": 7, "device": "PC-COMPTA-04", "rule": "app_vulnerable",
+        "title": "Google Chrome 131 has 1 known vulnerabilities", "severity": "critical", "is_kev": False,
+        "fingerprint": "fp-1-app_vulnerable", "url": "https://vs.example/#/inventory/devices/7",
+    }
+    assert (payload["data"]["resolved"], payload["data"]["open_issues"], payload["data"]["baseline"]) == (2, 30, False)
+
+
+def test_l_e_mail_donne_le_lien_de_chaque_appareil():
+    channel, sent = captured(EmailChannel)
+
+    channel.device_alert({}, device_alert())
+
+    [(_, subject, body)] = sent
+    assert subject == "VulnScan: 1 new device issue on 1 device"
+    assert body.splitlines()[:2] == [
+        "- [CRITICAL] PC-COMPTA-04: Google Chrome 131 has 1 known vulnerabilities",
+        "  https://vs.example/#/inventory/devices/7",
+    ]
+    assert body.endswith("Device inventory: https://vs.example/#/inventory")
+
+
+def test_chaque_integration_ne_recoit_que_les_problemes_de_ses_evenements():
+    slack, email = SpyChannel(), SpyChannel()
+    source = StubIntegrationSource([Integration("slack", {}), Integration("email", {})], DEVICE_EVENTS_ON)
+    notifier = ScanNotifier(source, {"slack": slack, "email": email}, should_notify)
+    vulnerability, outdated = alert_item(1), alert_item(2, rule="app_outdated", severity="high")
+
+    notifier.device_alert(1, device_alert(vulnerability, outdated))
+
+    assert [i.issue.rule for i in slack.alerts[0][1].items] == ["app_vulnerable", "app_outdated"]
+    assert [i.issue.rule for i in email.alerts[0][1].items] == ["app_vulnerable"]
+
+
+def test_une_integration_sans_evenement_concerne_ne_recoit_rien():
+    email = SpyChannel()
+    source = StubIntegrationSource([Integration("email", {})], DEVICE_EVENTS_ON)
+
+    ScanNotifier(source, {"email": email}, should_notify).device_alert(1, device_alert(alert_item(rule="app_outdated")))
+
+    assert email.alerts == []
+
+
+def test_une_cve_exploitee_passe_par_l_evenement_kev_meme_si_les_vulnerabilites_sont_coupees():
+    email = SpyChannel()
+    prefs = {"device_vulnerability": {"email": False}, "cisa_kev_match": {"email": True}}
+    notifier = ScanNotifier(StubIntegrationSource([Integration("email", {})], prefs), {"email": email}, should_notify)
+
+    notifier.device_alert(1, device_alert(alert_item(1, is_kev=True), alert_item(2)))
+
+    assert [i.issue.is_kev for i in email.alerts[0][1].items] == [True]
+
+
+def test_une_integration_en_panne_n_empeche_pas_les_autres_alertes():
+    broken, email = SpyChannel(error=RuntimeError("SMTP down")), SpyChannel()
+    source = StubIntegrationSource([Integration("slack", {}), Integration("email", {})], DEVICE_EVENTS_ON)
+
+    ScanNotifier(source, {"slack": broken, "email": email}, should_notify).device_alert(1, device_alert())
+
+    assert len(email.alerts) == 1
+
+
+def test_des_integrations_illisibles_n_empechent_pas_la_fin_du_job():
+    source = StubIntegrationSource(error=RuntimeError("db down"))
+
+    ScanNotifier(source, {}, should_notify).device_alert(1, device_alert())  # no exception
+
+
+def test_slack_repartit_les_lignes_longues_sur_plusieurs_sections():
+    channel, sent = captured(SlackChannel)
+    long_items = [
+        AlertItem(KnownIssue(f"fp-{n}", "inventory.app_vulnerable", "high", False, n, "x" * 400 + f" — PC-{n}"), f"PC-{n}")
+        for n in range(20)
+    ]
+
+    channel.device_alert({}, device_alert(*long_items))
+
+    sections = [b["text"]["text"] for b in sent[0][1]["blocks"] if b["type"] == "section"]
+    assert len(sections) > 1
+    assert all(len(text) <= 2900 for text in sections)
+    assert sum(len(text.splitlines()) for text in sections) == 20

@@ -12,14 +12,25 @@ import logging
 from datetime import datetime, timezone
 from functools import partial
 
+from redis import Redis
+
 from sqlalchemy.orm import Session
 
 from app.compliance.mapper import map_compliance_by_cve_or_category
 from app.core.config import settings
-from app.core.job_queue import get_job_queue
+from app.core.job_queue import CVE_CATALOG_SYNC_TIMEOUT, get_job_queue
+from app.cve.nvd_sync import HttpNvdFeed, NvdCatalogSync
+from app.cve.sql_catalog import SqlCveCatalog, SqlSyncStateStore
 from app.cve.enricher import CveSeverityEnricher
 from app.db import models
 from app.db.session import SessionLocal
+from app.inventory.alerts import DeviceLinks, InventoryAlerter
+from app.inventory.audit.auditor import DeviceAuditor
+from app.inventory.audit.reference import workspace_reference_data
+from app.inventory.audit.rules import default_rules
+from app.inventory.audit.service import InventoryAudit
+from app.inventory.collector import InventoryCollector
+from app.inventory.repository import SqlAlertHistory, SqlInventoryRepository
 from app.risk.risk_engine import parse_criticality
 from app.scan_jobs.ai_trigger import SqlAutoAnalysisTrigger
 from app.scan_jobs.executors import default_executors
@@ -31,6 +42,7 @@ from app.scan_jobs.repository import ScanJobSnapshot, SqlIntegrationSource, SqlS
 from app.scan_jobs.runner import ScanJobRunner
 from app.scanner.engine import default_engine
 from app.scanner.profile import ScanProfile
+from app.scanner.target import ScanType
 
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO)
@@ -38,6 +50,7 @@ if not logging.getLogger().handlers:
 logger = logging.getLogger("vulnscan.worker")
 
 _CVE_DATA_DIR = os.environ.get("CVE_DATA_DIR", "/app/data/cve")
+_CVE_SYNC_LOCK = "cve_catalog_sync_lock"
 
 
 def run_scan_job(job_id: int) -> None:
@@ -45,15 +58,69 @@ def run_scan_job(job_id: int) -> None:
     build_scan_job_runner().run(job_id)
 
 
+def run_cve_catalog_sync() -> None:
+    """RQ task — imports, then keeps up to date, the NVD catalog in Postgres.
+
+    A run stops by itself when its time budget is used and saves its
+    progress; it then re-queues itself, so the multi-hour first import goes
+    through without anyone pressing a button. A failure (NVD down…) raises,
+    and is retried at the next scheduled dataset refresh.
+    """
+    redis = Redis.from_url(settings.REDIS_URL)
+    if not redis.set(_CVE_SYNC_LOCK, "1", nx=True, ex=CVE_CATALOG_SYNC_TIMEOUT):
+        logger.info("NVD catalog sync already running — skipped")
+        return
+    try:
+        report = build_cve_catalog_sync().run()
+    finally:
+        redis.delete(_CVE_SYNC_LOCK)
+    logger.info(
+        "NVD catalog sync (%s): %s — %d pages, %d CVEs, %d skipped. %s",
+        report.mode, "complete" if report.complete else "partial",
+        report.pages, report.cves, report.skipped, report.message,
+    )
+    if not report.complete:
+        get_job_queue().enqueue_cve_catalog_sync()
+
+
+def build_cve_catalog_sync() -> NvdCatalogSync:
+    api_key = os.environ.get("NVD_API_KEY", "")
+    catalog = SqlCveCatalog(SessionLocal)
+    return NvdCatalogSync(
+        feed=HttpNvdFeed(
+            lambda url, headers: _ds_fetch_url_retry(url, dict(headers), _NVD_PAGE_TIMEOUT, label="NVD catalog"),
+            api_key or None,
+        ),
+        store=catalog,
+        states=SqlSyncStateStore(SessionLocal),
+        page_size=_NVD_PAGE_SIZE,
+        budget_seconds=CVE_CATALOG_SYNC_TIMEOUT - 600,
+        # NVD rate limits: 50 requests / 30 s with a key, 5 / 30 s without.
+        pause=lambda: time.sleep(0.6 if api_key else 6.0),
+    )
+
+
 def build_scan_job_runner() -> ScanJobRunner:
     repository = SqlScanJobRepository(SessionLocal)
+    notifier = ScanNotifier(SqlIntegrationSource(SessionLocal))
     return ScanJobRunner(
         repository=repository,
-        executors=default_executors(default_engine),
+        executors=default_executors(default_engine, lambda: InventoryCollector(SessionLocal), build_inventory_audit),
         processor_factory=partial(_build_finding_processor, repository, _open_cvss_enricher()),
-        notifier=ScanNotifier(SqlIntegrationSource(SessionLocal)),
+        notifier=notifier,
         graph_factory=open_finding_graph,
         ai_trigger=SqlAutoAnalysisTrigger(SessionLocal, get_job_queue(), settings.available_ai_providers),
+        announcers={
+            ScanType.INVENTORY: InventoryAlerter(SqlAlertHistory(SessionLocal), notifier, DeviceLinks(settings.public_url)),
+        },
+    )
+
+
+def build_inventory_audit() -> InventoryAudit:
+    return InventoryAudit(
+        SqlInventoryRepository(SessionLocal),
+        DeviceAuditor(default_rules()),
+        lambda workspace_id: workspace_reference_data(workspace_id, SessionLocal),
     )
 
 

@@ -59,6 +59,7 @@ class Finding:
     is_kev: bool = False
     confidence: float = 1.0
     affected: str = ""
+    device_id: int | None = None  # inventory audit: the device the finding is about
 
 
 @dataclass

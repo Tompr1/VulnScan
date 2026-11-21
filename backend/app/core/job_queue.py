@@ -18,6 +18,10 @@ from app.core.config import settings
 
 SCAN_TASK = "app.worker_tasks.run_scan_job"
 AI_ANALYSIS_TASK = "app.worker_tasks.run_ai_analysis"
+CVE_CATALOG_SYNC_TASK = "app.worker_tasks.run_cve_catalog_sync"
+# Above the sync's own time budget (NvdCatalogSync.budget_seconds), so a run
+# always stops by itself and saves its progress before RQ would kill it.
+CVE_CATALOG_SYNC_TIMEOUT = 7200
 
 
 class QueueUnavailableError(RuntimeError):
@@ -32,6 +36,10 @@ class AiAnalysisQueue(Protocol):
     def enqueue_ai_analysis(self, analysis_id: int) -> None: ...
 
 
+class CveCatalogSyncQueue(Protocol):
+    def enqueue_cve_catalog_sync(self) -> None: ...
+
+
 class RqJobQueue:
     def __init__(self, redis_url: str, scan_timeout: int, ai_analysis_timeout: int) -> None:
         self._redis_url = redis_url
@@ -44,9 +52,13 @@ class RqJobQueue:
     def enqueue_ai_analysis(self, analysis_id: int) -> None:
         self._enqueue("ai", AI_ANALYSIS_TASK, analysis_id, self._ai_analysis_timeout)
 
-    def _enqueue(self, queue_name: str, task: str, argument: int, timeout: int) -> None:
+    def enqueue_cve_catalog_sync(self) -> None:
+        self._enqueue("datasets", CVE_CATALOG_SYNC_TASK, None, CVE_CATALOG_SYNC_TIMEOUT)
+
+    def _enqueue(self, queue_name: str, task: str, argument: int | None, timeout: int) -> None:
+        arguments = () if argument is None else (argument,)
         try:
-            Queue(queue_name, connection=Redis.from_url(self._redis_url)).enqueue(task, argument, job_timeout=timeout)
+            Queue(queue_name, connection=Redis.from_url(self._redis_url)).enqueue(task, *arguments, job_timeout=timeout)
         except RedisError as exc:
             raise QueueUnavailableError(str(exc)) from exc
 

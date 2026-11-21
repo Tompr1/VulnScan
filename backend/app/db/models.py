@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Text, Boolean, DateTime, ForeignKey, Float
+from sqlalchemy import String, Integer, Text, Boolean, DateTime, ForeignKey, Float, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
@@ -67,7 +67,9 @@ class ScanJob(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
     target: Mapped[str] = mapped_column(String(512))
-    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id"))
+    # Nullable in the database since the startup migration: API, IaC and
+    # inventory jobs have no scan profile.
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("profiles.id"), nullable=True)
     asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(50), default="queued")  # queued|running|done|failed|cancelled
     scan_type: Mapped[str] = mapped_column(String(20), default="internal")  # internal|external
@@ -150,6 +152,10 @@ class Finding(Base):
     compliance_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_kev: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    # Set on inventory audit findings: the device page the alert links to.
+    device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("inventory_devices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
 
 class SuppressedFinding(Base):
@@ -237,3 +243,133 @@ class AiAnalysis(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+
+# ── CVE catalog (global: the same NVD data serves every workspace) ──────────
+# Imported page by page from the NVD API (app/cve/nvd_sync.py) and queried by
+# product, so the whole history never has to be held in memory.
+
+class CveEntry(Base):
+    __tablename__ = "cve_catalog"
+    cve_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    severity: Mapped[str] = mapped_column(String(16), default="medium")
+    cvss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    references_json: Mapped[str] = mapped_column(Text, default="[]")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CveCpeMatch(Base):
+    __tablename__ = "cve_cpe_matches"
+    __table_args__ = (Index("ix_cve_cpe_matches_product", "vendor", "product"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cve_id: Mapped[str] = mapped_column(ForeignKey("cve_catalog.cve_id", ondelete="CASCADE"), index=True)
+    part: Mapped[str] = mapped_column(String(1))
+    vendor: Mapped[str] = mapped_column(String(128))  # canonical vendor (aliases resolved)
+    product: Mapped[str] = mapped_column(String(255))
+    version: Mapped[str] = mapped_column(Text, default="*")
+    start_including: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_excluding: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_including: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_excluding: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CveSyncState(Base):
+    """Progress of a catalog import, so an interrupted run resumes."""
+
+    __tablename__ = "cve_sync_state"
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)  # "nvd"
+    full_import_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    full_import_next_index: Mapped[int] = mapped_column(Integer, default=0)
+    full_import_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    full_import_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Changes up to this instant are in the catalog; the next incremental run starts here.
+    synced_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ── Device inventory (fleet managers: Intune, later GLPI / Fleet) ───────────
+
+class InventoryConnection(Base):
+    """A fleet manager tenant to collect devices from. The secret is stored
+    encrypted (app.core.crypto) and never returned by the API."""
+
+    __tablename__ = "inventory_connections"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="intune")
+    name: Mapped[str] = mapped_column(String(255))
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    client_id: Mapped[str] = mapped_column(String(64))
+    client_secret_enc: Mapped[str] = mapped_column(Text)
+    sync_frequency: Mapped[str] = mapped_column(String(16), default="daily")  # manual | daily | weekly
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    # Set when a sync is queued, so the scheduler does not queue it twice.
+    last_sync_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # queued | ok | error
+    last_sync_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class InventoryDevice(Base):
+    __tablename__ = "inventory_devices"
+    __table_args__ = (UniqueConstraint("connection_id", "external_id", name="uq_inventory_device_source_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    connection_id: Mapped[int] = mapped_column(ForeignKey("inventory_connections.id", ondelete="CASCADE"), index=True)
+    external_id: Mapped[str] = mapped_column(String(128))
+    name: Mapped[str] = mapped_column(String(255))
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    os_name: Mapped[str] = mapped_column(String(64), default="")
+    os_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    manufacturer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    serial_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    user_principal_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ownership: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    compliance_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    is_encrypted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    security_patch_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_check_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    # Set when the device disappears from the fleet manager; history is kept.
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class InventoryDeviceApp(Base):
+    __tablename__ = "inventory_device_apps"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("inventory_devices.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(512))
+    version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    publisher: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class InventoryDeviceChange(Base):
+    """Journal of what changed on a device between two collections."""
+
+    __tablename__ = "inventory_device_changes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("inventory_devices.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    subject: Mapped[str] = mapped_column(String(512))
+    before: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    after: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class InventoryAuditRun(Base):
+    """One audit of a connection's inventory, run by an inventory job whose
+    findings hold the issues. The device page shows the latest completed one;
+    the alert policy compares two consecutive ones."""
+
+    __tablename__ = "inventory_audit_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(ForeignKey("inventory_connections.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("scan_jobs.id", ondelete="CASCADE"), index=True)
+    audited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    devices: Mapped[int] = mapped_column(Integer, default=0)
+    issues: Mapped[int] = mapped_column(Integer, default=0)
+    # Lifecycle sources that could not be read, rule failures… empty when complete.
+    warnings: Mapped[str] = mapped_column(Text, default="")

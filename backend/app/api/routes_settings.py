@@ -18,6 +18,7 @@ from app.core.password import hash_password, verify_password
 from app.core.workspace_settings import (
     DEFAULT_NOTIFICATION_PREFS,
     get_workspace_setting,
+    notification_preferences,
     set_workspace_setting,
 )
 from app.db import models
@@ -519,10 +520,7 @@ def reset_sla(user=Depends(require_role("admin", "analyst")), db: Session = Depe
 
 # ── Notification Preferences ───────────────────────────────────────────────
 
-_VALID_NOTIF_EVENTS = {
-    "critical_finding", "cisa_kev_match", "scan_completed",
-    "scan_failed", "new_asset_discovered", "weekly_digest",
-}
+_VALID_NOTIF_EVENTS = set(DEFAULT_NOTIFICATION_PREFS)
 _VALID_NOTIF_CHANNELS = {"email", "slack", "webhook"}
 
 
@@ -532,7 +530,7 @@ def get_notification_prefs(
     user=Depends(require_role("admin", "analyst", "viewer")),
     db: Session = Depends(get_db),
 ):
-    return get_workspace_setting(db, user["ws"], "notification_preferences", DEFAULT_NOTIFICATION_PREFS)
+    return notification_preferences(db, user["ws"])
 
 
 @router.put("/notifications")
@@ -554,7 +552,7 @@ def put_notification_prefs(
         }
 
     # Merge with defaults so missing keys get defaults
-    current = get_workspace_setting(db, user["ws"], "notification_preferences", DEFAULT_NOTIFICATION_PREFS)
+    current = notification_preferences(db, user["ws"])
     current.update(cleaned)
     set_workspace_setting(db, user["ws"], "notification_preferences", current)
     return current

@@ -1,10 +1,29 @@
 import re
 from packaging.version import Version, InvalidVersion
 
+# Upstream version schemes PEP 440 cannot read, rewritten as post-releases so
+# that their order is preserved:
+#   OpenSSH portable  9.6p1  -> 9.6.post1    (9.6 < 9.6p1 < 9.7)
+#   OpenSSL letters   1.1.1w -> 1.1.1.post23 (1.1.1v < 1.1.1w; "za" > "z")
+_OPENSSH_PORTABLE = re.compile(r"^(\d+(?:\.\d+)*)p(\d+)$", re.IGNORECASE)
+_OPENSSL_LETTERS = re.compile(r"^(\d+(?:\.\d+)+)([a-z]{1,2})$", re.IGNORECASE)
+
+
+def _letters_to_number(letters: str) -> int:
+    value = 0
+    for letter in letters.lower():
+        value = value * 27 + (ord(letter) - ord("a") + 1)
+    return value
+
+
 def normalize(v: str) -> str:
     v = (v or "").strip()
     v = v.split(":",1)[-1]
     v = re.sub(r"[^0-9A-Za-z\.\-\+~]", "", v)
+    if m := _OPENSSH_PORTABLE.match(v):
+        return f"{m.group(1)}.post{m.group(2)}"
+    if m := _OPENSSL_LETTERS.match(v):
+        return f"{m.group(1)}.post{_letters_to_number(m.group(2))}"
     return v
 
 def parse(v: str):

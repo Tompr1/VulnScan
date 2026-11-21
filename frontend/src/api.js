@@ -287,6 +287,28 @@ export const analyticsApi = {
 };
 
 // ── Scan ─────────────────────────────────────────────────────────────
+// ── Device inventory (Intune) ────────────────────────────────────────
+export const inventoryApi = {
+  listConnections:  ()         => api("/inventory/connections"),
+  createConnection: (body)     => api("/inventory/connections", { method: "POST", body }),
+  updateConnection: (id, body) => api(`/inventory/connections/${id}`, { method: "PUT", body }),
+  deleteConnection: (id)       => api(`/inventory/connections/${id}`, { method: "DELETE" }),
+  testConnection:   (id)       => api(`/inventory/connections/${id}/test`, { method: "POST" }),
+  syncConnection:   (id)       => api(`/inventory/connections/${id}/sync`, { method: "POST" }),
+
+  listDevices: ({ platform, q } = {}) => {
+    const params = new URLSearchParams();
+    if (platform) params.set("platform", platform);
+    if (q) params.set("q", q);
+    const query = params.toString();
+    return api(`/inventory/devices${query ? `?${query}` : ""}`);
+  },
+  getDevice: (id) => api(`/inventory/devices/${id}`),
+
+  getAlertSettings:  ()     => api("/inventory/alert-settings"),
+  saveAlertSettings: (body) => api("/inventory/alert-settings", { method: "PUT", body }),
+};
+
 export const scanApi = {
   listJobs:   ()       => api("/scan/jobs"),
   getJob:     (id)     => api(`/scan/jobs/${id}`),

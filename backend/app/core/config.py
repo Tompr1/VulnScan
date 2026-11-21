@@ -90,6 +90,9 @@ class Settings(BaseModel):
 
     # CORS: comma-separated origins, or "*" for all (NOT recommended in production)
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:8888")
+    # Address of the web UI, for links in alerts (e.g. https://vulnscan.example.com).
+    # Empty: the first CORS origin, which is where the UI is served from.
+    PUBLIC_URL: str = os.getenv("PUBLIC_URL", "")
 
     # ── Platform Update ────────────────────────────────────────────
     GITHUB_REPO: str = os.getenv("GITHUB_REPO", "Gondrong/VulnScan-Platform")
@@ -142,6 +145,14 @@ class Settings(BaseModel):
         if self.CORS_ORIGINS == "*":
             return ["*"]
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
+    @property
+    def public_url(self) -> str | None:
+        """Base URL of the web UI for links sent outside (alerts)."""
+        if self.PUBLIC_URL.strip():
+            return self.PUBLIC_URL.strip().rstrip("/")
+        origins = [o for o in self.cors_origins_list() if o != "*"]
+        return origins[0].rstrip("/") if origins else None
 
     def available_ai_providers(self) -> list[dict]:
         """Return list of configured AI providers."""

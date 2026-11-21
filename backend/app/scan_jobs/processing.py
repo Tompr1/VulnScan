@@ -51,6 +51,7 @@ class ProcessedFinding:
     compliance: list[str]
     is_kev: bool
     cve: str | None
+    device_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -148,6 +149,7 @@ class FindingProcessor:
             compliance=self._map_compliance(finding.cve, finding.plugin_id),
             is_kev=finding.is_kev,
             cve=finding.cve if finding.cve and finding.cve.startswith("CVE-") else None,
+            device_id=finding.device_id,
         )
 
 

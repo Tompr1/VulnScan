@@ -28,6 +28,8 @@ from app.api.routes_assets import router as assets_router
 from app.api.routes_reports import router as reports_router
 from app.api.routes_events import router as events_router
 from app.api.routes_analytics import router as analytics_router
+from app.api.routes_inventory import router as inventory_router
+from app.api.validation import install_validation_error_handler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("vulnscan")
@@ -61,6 +63,10 @@ else:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+
+# 422 responses never echo passwords, secrets or tokens back.
+install_validation_error_handler(app)
 
 
 @app.exception_handler(Exception)
@@ -145,6 +151,14 @@ def _run_migrations(db: Session) -> None:
         """
         ALTER TABLE scan_jobs
             ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+        """,
+        # Inventory audit findings link to their device (created by create_all above).
+        """
+        ALTER TABLE findings
+            ADD COLUMN IF NOT EXISTS device_id INTEGER REFERENCES inventory_devices(id) ON DELETE SET NULL;
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS ix_findings_device_id ON findings (device_id);
         """,
     ]
     for sql in migrations:
@@ -640,6 +654,7 @@ def _schedule_loop():
                 from app.api.routes_settings import DEFAULT_DATASET_REFRESH
                 from app.core.workspace_settings import get_workspace_setting
                 ws_rows = db.query(models.Workspace).all()
+                catalog_sync_queued = False
                 for ws_row in ws_rows:
                     cfg = get_workspace_setting(db, ws_row.id, "dataset_refresh", DEFAULT_DATASET_REFRESH)
                     if not cfg.get("enabled"):
@@ -657,8 +672,33 @@ def _schedule_loop():
                         "Scheduled dataset refresh queued for workspace %d (every %sh)",
                         ws_row.id, cfg.get("interval_hours", 24),
                     )
+                    if not catalog_sync_queued:
+                        # The NVD catalog is global: one sync for all workspaces.
+                        from app.core.job_queue import get_job_queue
+                        get_job_queue().enqueue_cve_catalog_sync()
+                        catalog_sync_queued = True
             except Exception as e_feat5:
                 logger.warning("Scheduled dataset refresh error: %s", e_feat5)
+
+            # ── Device inventory sync (Intune…) ───────────────────────────
+            # Each connection is synced daily or weekly; the request time is
+            # recorded, so a sync still queued is never queued twice.
+            try:
+                from app.core.job_queue import get_job_queue
+                from app.inventory.scheduling import queue_due_syncs
+                from app.scan_jobs.submission import ScanJobSubmission
+
+                queued = queue_due_syncs(
+                    SessionLocal,
+                    lambda session, connection: ScanJobSubmission(session, get_job_queue()).submit_inventory(
+                        connection, None, now_utc,
+                    ),
+                    now_utc,
+                )
+                if queued:
+                    logger.info("Scheduled inventory sync queued for %d connection(s)", queued)
+            except Exception as e_inventory:
+                logger.warning("Scheduled inventory sync error: %s", e_inventory)
 
             # ── Feature 3: Database Backup ────────────────────────────────
             # Run pg_dump every 1440 ticks (≈24 hours), keep last 7 backups.
@@ -867,4 +907,5 @@ app.include_router(assets_router)
 app.include_router(reports_router)
 app.include_router(events_router)
 app.include_router(analytics_router)
+app.include_router(inventory_router)
 

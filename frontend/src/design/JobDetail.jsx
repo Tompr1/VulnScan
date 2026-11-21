@@ -22,6 +22,7 @@ function adaptFinding(f, target) {
     evidence: f.evidence,
     compliance: parseJsonArr(f.compliance_json),
     fingerprint: f.fingerprint,
+    deviceId: f.device_id ?? null,
   };
 }
 function parseJsonArr(s) { try { return s ? JSON.parse(s) : []; } catch { return []; } }
@@ -617,7 +618,7 @@ function AIResultModal({ analysisId, close }) {
   );
 }
 
-export function FindingDrawer({ finding, close }) {
+export function FindingDrawer({ finding, close, openDevice }) {
   const [tab, setTab] = useState("overview");
   const [aiMatch, setAiMatch] = useState(null); // {entry, analysis} or null
   const [aiLoading, setAiLoading] = useState(false);
@@ -719,11 +720,14 @@ export function FindingDrawer({ finding, close }) {
         <div className="drawer-body">
           {tab === "overview" && (
             <div>
-              <div style={{fontSize: 14, lineHeight: 1.7, color: "var(--text-1)"}}>{f.desc || "No description available."}</div>
+              <div style={{fontSize: 14, lineHeight: 1.7, color: "var(--text-1)", whiteSpace: "pre-wrap"}}>{f.desc || "No description available."}</div>
               <div style={{marginTop: 24}}>
                 <div className="eyebrow">Details</div>
                 <dl className="dl">
                   <dt>Host</dt><dd className="mono">{f.host}{f.port ? `:${f.port}` : ""}</dd>
+                  {f.deviceId != null && openDevice && <><dt>Device</dt><dd>
+                    <button className="btn btn-sm" onClick={() => openDevice(f.deviceId)}><Icons.Monitor size={12}/> Open device page</button>
+                  </dd></>}
                   <dt>Plugin</dt><dd className="mono">{f.plugin}</dd>
                   {f.cve && <><dt>CVE</dt><dd className="mono"><a style={{color: "var(--brand-text)"}}>{f.cve}</a></dd></>}
                   <dt>Fingerprint</dt><dd className="mono" style={{fontSize: 11, wordBreak: "break-all"}}>{f.fingerprint || "—"}</dd>
