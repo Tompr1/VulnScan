@@ -47,7 +47,10 @@ services:
       retries: 12
 
   backend:
+    # Built once here; the three workers run the same image (building it per
+    # service unpacked four copies in parallel and filled the disk).
     build: ./backend
+    image: vulnscan-backend:latest
     env_file:
       - .env
     depends_on:
@@ -80,7 +83,8 @@ services:
   # worker-data   → dataset refresh (NVD, KEV, EPSS, …)
 
   worker-scan:
-    build: ./backend
+    image: vulnscan-backend:latest
+    pull_policy: never
     env_file:
       - .env
     depends_on:
@@ -100,7 +104,8 @@ services:
     restart: unless-stopped
 
   worker-ai:
-    build: ./backend
+    image: vulnscan-backend:latest
+    pull_policy: never
     env_file:
       - .env
     depends_on:
@@ -120,7 +125,8 @@ services:
     restart: unless-stopped
 
   worker-data:
-    build: ./backend
+    image: vulnscan-backend:latest
+    pull_policy: never
     env_file:
       - .env
     depends_on:
