@@ -2,7 +2,9 @@ from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
 from app.db.session import SessionLocal
 from app.db import models
 from app.cve.dataset_loader import load_json
-from app.cve.version_cmp import parse, is_likely_patched, extract_distro_patch
+from app.cve.cpe import Cpe
+from app.cve.matcher import CveCatalog, CveHit, InMemoryCveCatalog, ProductCandidate, find_vulnerabilities
+from app.cve.version_cmp import is_likely_patched
 from app.scanner.context import stable_fingerprint
 
 META = PluginMeta(
@@ -16,78 +18,53 @@ META = PluginMeta(
     timeout_seconds=6.0,
 )
 
-def split_cpe23(cpe: str):
-    parts = (cpe or "").split(":")
-    if len(parts) < 6: return None
-    return {"part": parts[2], "vendor": parts[3], "product": parts[4], "version": parts[5] if len(parts) > 5 else "*"}
+def _component_names(matched_cpe: str) -> tuple[str, str] | None:
+    """("Vendor", "Product") for display, from a CPE name."""
+    cpe = Cpe.parse(matched_cpe)
+    if cpe is None:
+        return None
+    return cpe.vendor.replace("_", " ").title(), cpe.product.replace("_", " ").title()
 
-# Vendor aliases — NVD uses different vendor names for the same software.
-# Maps alias → canonical name so both sides of a CPE comparison normalize.
-_VENDOR_ALIASES = {
-    "f5": "nginx",              # F5 acquired nginx; NVD uses both
-    "pivotal_software": "vmware",  # VMware acquired Pivotal; Spring Boot
-    "pivotal": "vmware",
-    "oracle": "sun",            # Oracle acquired Sun; some old Java CVEs
-    "sun": "oracle",
-}
 
-def _normalize_vendor(vendor: str) -> str:
-    return _VENDOR_ALIASES.get(vendor, vendor)
+def _hit(hit: CveHit) -> dict:
+    """Plain-dict view of a hit, published as the cve.nvd_hits artifact."""
+    candidate = hit.candidate.context
+    record, versions = hit.record, hit.match.versions
+    return {
+        "cve": record.cve_id,
+        "summary": record.summary,
+        "severity": record.severity,
+        "cvss": record.cvss,
+        "refs": list(record.references),
+        "matched_cpe": candidate.get("cpe23"),
+        "installed_version": candidate.get("version"),
+        "confidence": candidate.get("confidence", 0.6),
+        "source": candidate.get("source", ""),
+        "raw_version": candidate.get("raw_version", ""),
+        "versionEndExcluding": versions.end_excluding,
+        "versionEndIncluding": versions.end_including,
+        "version_range": versions.describe(),
+    }
 
-def same_family(a: str, b: str) -> bool:
-    aa=split_cpe23(a); bb=split_cpe23(b)
-    if not (aa and bb): return False
-    return (
-        aa["part"] == bb["part"]
-        and _normalize_vendor(aa["vendor"]) == _normalize_vendor(bb["vendor"])
-        and aa["product"] == bb["product"]
-    )
 
-def range_ok(installed: str | None, m: dict) -> bool:
-    vsi=m.get("versionStartIncluding"); vee=m.get("versionEndExcluding")
-    vei=m.get("versionEndIncluding"); vse=m.get("versionStartExcluding")
-    if not vsi and not vee and not vei and not vse:
-        return True
-    if not installed:
-        return False
-    v=parse(installed)
-    if not v: return False
-    if vsi:
-        x=parse(vsi)
-        if x and v < x: return False
-    if vse:
-        x=parse(vse)
-        if x and v <= x: return False
-    if vee:
-        x=parse(vee)
-        if x and v >= x: return False
-    if vei:
-        x=parse(vei)
-        if x and v > x: return False
-    return True
+def find_nvd_hits(candidates: list[dict], catalog: CveCatalog) -> list[dict]:
+    """CVE hits for the CPE candidates built from the target's fingerprints."""
+    products = [
+        ProductCandidate(cpe, c.get("version"), c)
+        for c in candidates
+        if (cpe := Cpe.parse(c.get("cpe23")))
+    ]
+    return [_hit(h) for h in find_vulnerabilities(catalog, products)]
 
-def _build_version_range_str(m: dict) -> str:
-    """Build a human-readable version range string from NVD match data."""
-    parts = []
-    if m.get("versionStartIncluding"):
-        parts.append(f">= {m['versionStartIncluding']}")
-    if m.get("versionStartExcluding"):
-        parts.append(f"> {m['versionStartExcluding']}")
-    if m.get("versionEndIncluding"):
-        parts.append(f"<= {m['versionEndIncluding']}")
-    if m.get("versionEndExcluding"):
-        parts.append(f"< {m['versionEndExcluding']}")
-    return " and ".join(parts) if parts else "all versions"
 
 def _build_remediation(cve: str, h: dict) -> str:
     """Build remediation text for a CVE finding."""
     parts = []
 
     # Parse affected component
-    cpe_info = split_cpe23(h.get("matched_cpe", ""))
-    if cpe_info:
-        vendor = cpe_info["vendor"].replace("_", " ").title()
-        product = cpe_info["product"].replace("_", " ").title()
+    names = _component_names(h.get("matched_cpe", ""))
+    if names:
+        vendor, product = names
         version = h.get("installed_version", "unknown")
         parts.append(
             f"[AFFECTED COMPONENT] {vendor} {product} version {version}"
@@ -135,37 +112,19 @@ class Check(Plugin):
         os_id = (os_info.get("os_id") or os_info.get("id") or os_info.get("distro") or "").lower()
 
         db = SessionLocal()
-        hits=[]
         try:
-            ds = db.query(models.CveDataset).filter(
-                models.CveDataset.workspace_id==ws_id,
-                models.CveDataset.kind=="nvd_cpe_cve",
-                models.CveDataset.enabled==True
-            ).all()
-            for d in ds:
-                data = load_json(d.path)
-                for item in data or []:
-                    for m in item.get("matches", []) or []:
-                        cpe_db = m.get("cpe23")
-                        if not cpe_db: continue
-                        for c in cands:
-                            if same_family(cpe_db, c.get("cpe23","")) and range_ok(c.get("version"), m):
-                                hits.append({
-                                    "cve": item.get("cve"),
-                                    "summary": item.get("summary",""),
-                                    "severity": item.get("severity","medium"),
-                                    "cvss": item.get("cvss"),
-                                    "refs": item.get("refs", []),
-                                    "matched_cpe": c.get("cpe23"),
-                                    "installed_version": c.get("version"),
-                                    "confidence": c.get("confidence", 0.6),
-                                    "versionEndExcluding": m.get("versionEndExcluding"),
-                                    "versionEndIncluding": m.get("versionEndIncluding"),
-                                    "version_range": _build_version_range_str(m),
-                                })
-                                break
+            paths = [
+                d.path
+                for d in db.query(models.CveDataset).filter(
+                    models.CveDataset.workspace_id == ws_id,
+                    models.CveDataset.kind == "nvd_cpe_cve",
+                    models.CveDataset.enabled == True,  # noqa: E712 (SQL expression)
+                )
+            ]
         finally:
             db.close()
+        catalog = InMemoryCveCatalog.from_flattened(item for path in paths for item in (load_json(path) or []))
+        hits = find_nvd_hits(cands, catalog)
 
         findings=[]
         for h in hits[:3000]:
@@ -175,9 +134,7 @@ class Check(Plugin):
             version_range = h.get("version_range", "all versions")
 
             # Build detailed description
-            cpe_info = split_cpe23(h.get("matched_cpe", ""))
-            product_name = cpe_info["product"].replace("_", " ").title() if cpe_info else "unknown"
-            vendor_name = cpe_info["vendor"].replace("_", " ").title() if cpe_info else "unknown"
+            vendor_name, product_name = _component_names(h.get("matched_cpe", "")) or ("unknown", "unknown")
 
             # Check for distro-backported patches on banner/SSH-sourced CPEs
             cpe_source = h.get("source", "")

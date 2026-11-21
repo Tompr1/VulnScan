@@ -13,7 +13,9 @@ from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
 from app.db.session import SessionLocal
 from app.db import models
 from app.cve.dataset_loader import load_json
-from app.cve.version_cmp import parse, match_expr, is_likely_patched
+from app.cve.cpe import Cpe
+from app.cve.matcher import InMemoryCveCatalog, ProductCandidate, find_vulnerabilities
+from app.cve.version_cmp import match_expr, is_likely_patched
 from app.scanner.context import stable_fingerprint
 
 META = PluginMeta(
@@ -325,50 +327,6 @@ def pkg_to_cpe(name: str, version: str) -> list[dict]:
     return results
 
 
-def same_family(a: str, b: str) -> bool:
-    """Check if two CPE strings belong to the same vendor:product."""
-    pa = (a or "").split(":")
-    pb = (b or "").split(":")
-    if len(pa) < 6 or len(pb) < 6:
-        return False
-    return pa[3] == pb[3] and pa[4] == pb[4]
-
-
-def range_ok(installed: str | None, m: dict) -> bool:
-    """Check if installed version falls in the vulnerable range."""
-    vsi = m.get("versionStartIncluding")
-    vse = m.get("versionStartExcluding")
-    vei = m.get("versionEndIncluding")
-    vee = m.get("versionEndExcluding")
-
-    if not vsi and not vse and not vei and not vee:
-        return True  # no range specified = all versions affected
-    if not installed:
-        return False
-
-    v = parse(installed)
-    if not v:
-        return False
-
-    if vsi:
-        x = parse(vsi)
-        if x and v < x:
-            return False
-    if vse:
-        x = parse(vse)
-        if x and v <= x:
-            return False
-    if vei:
-        x = parse(vei)
-        if x and v > x:
-            return False
-    if vee:
-        x = parse(vee)
-        if x and v >= x:
-            return False
-    return True
-
-
 def _is_installed_package(pkg: dict) -> bool:
     ecosystem = (pkg.get("ecosystem") or "").lower()
     if ecosystem == "deb":
@@ -410,51 +368,37 @@ def match_osv(pkgs, db_data):
 
 
 def match_nvd(pkgs, nvd_data):
+    """Match installed packages against the flattened NVD dataset.
+
+    Package names are turned into CPE candidates (pkg_to_cpe); one hit is kept
+    per (CVE, package).
     """
-    Match packages against NVD CPE dataset.
-    Converts package names to CPE candidates and checks version ranges.
-    """
-    # Build CPE candidates from all packages
-    cpe_candidates = []
-    for p in pkgs:
-        cpes = pkg_to_cpe(p["name"], p["version"])
-        cpe_candidates.extend(cpes)
+    candidates = [
+        ProductCandidate(cpe, c["version"], c)
+        for p in pkgs
+        for c in pkg_to_cpe(p["name"], p["version"])
+        if (cpe := Cpe.parse(c["cpe23"]))
+    ]
+    catalog = nvd_data if isinstance(nvd_data, InMemoryCveCatalog) else InMemoryCveCatalog.from_flattened(nvd_data or [])
 
-    if not cpe_candidates:
-        return []
-
-    hits = []
-    seen_cves = set()
-
-    for item in nvd_data or []:
-        cve_id = item.get("cve", "")
-        if not cve_id.startswith("CVE-"):
+    hits, seen = [], set()
+    for hit in find_vulnerabilities(catalog, candidates):
+        package = hit.candidate.context["package"]
+        if (hit.record.cve_id, package) in seen:
             continue
-
-        for m in item.get("matches", []) or []:
-            cpe_db = m.get("cpe23")
-            if not cpe_db:
-                continue
-
-            for c in cpe_candidates:
-                if same_family(cpe_db, c["cpe23"]) and range_ok(c.get("version"), m):
-                    hit_key = (cve_id, c["package"])
-                    if hit_key not in seen_cves:
-                        seen_cves.add(hit_key)
-                        hits.append({
-                            "cve": cve_id,
-                            "package": c["package"],
-                            "ecosystem": "nvd",
-                            "installed": c["version"],
-                            "severity": item.get("severity", "medium"),
-                            "cvss": item.get("cvss"),
-                            "cwe": item.get("cwe", ""),
-                            "refs": item.get("refs", []),
-                            "summary": item.get("summary", ""),
-                            "matched_cpe": cpe_db,
-                        })
-                    break
-
+        seen.add((hit.record.cve_id, package))
+        hits.append({
+            "cve": hit.record.cve_id,
+            "package": package,
+            "ecosystem": "nvd",
+            "installed": hit.candidate.version,
+            "severity": hit.record.severity,
+            "cvss": hit.record.cvss,
+            "cwe": "",
+            "refs": list(hit.record.references),
+            "summary": hit.record.summary,
+            "matched_cpe": str(hit.match.cpe),
+        })
     return hits
 
 
