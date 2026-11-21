@@ -67,12 +67,13 @@ class InventoryCollector(Protocol):
 
 
 class InventoryAuditor(Protocol):
-    def run(self, connection_id: int, job_id: int) -> list[Finding]: ...
+    def run(self, connection_id: int, workspace_id: int, job_id: int) -> list[Finding]: ...
 
 
 class InventoryScanExecutor:
     """Collects a fleet manager inventory (devices, apps, versions), stores
-    it, then audits it: the findings are the issues of each device."""
+    it, then audits it (support, versions, known CVEs): the findings are the
+    issues of each device."""
 
     requires_profile = False
     # Inventory findings name users and devices, and validating outdated
@@ -98,7 +99,7 @@ class InventoryScanExecutor:
         await asyncio.to_thread(self._collector_factory().collect, connection_id, job.workspace_id)
         await progress(0, 2, self.COLLECT_ID, "Device inventory", "done")
         await progress(1, 2, self.AUDIT_ID, "OS and software audit", "running")
-        findings = await asyncio.to_thread(self._audit_factory().run, connection_id, job.id)
+        findings = await asyncio.to_thread(self._audit_factory().run, connection_id, job.workspace_id, job.id)
         await progress(1, 2, self.AUDIT_ID, "OS and software audit", "done")
         return findings
 

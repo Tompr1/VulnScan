@@ -4,6 +4,9 @@ November 2026, and a StaticSupportCatalog built from them.
 """
 from __future__ import annotations
 
+from app.cve.kev import InMemoryKevCatalog, KevEntry
+from app.cve.matcher import CveRecord, InMemoryCveCatalog
+from app.inventory.audit.base import ReferenceData
 from app.inventory.audit.catalog import EndOfLifeCycle
 from app.inventory.audit.lifecycle import CatalogUnavailableError, SupportCycle
 
@@ -88,3 +91,19 @@ class StaticSupportCatalog:
         if product in self._unavailable:
             raise CatalogUnavailableError(f"endoflife.date unreachable for {product}")
         return self._products.get(product, ())
+
+
+def reference_data(
+    lifecycle=None,
+    cves: tuple[CveRecord, ...] = (),
+    kev: tuple[KevEntry, ...] = (),
+    notes: tuple[str, ...] = (),
+    cve_catalog=None,
+) -> ReferenceData:
+    """Reference data of an audit: canned lifecycle, CVEs and KEV."""
+    return ReferenceData(
+        lifecycle=lifecycle or StaticSupportCatalog(),
+        cves=cve_catalog or InMemoryCveCatalog(cves),
+        kev=InMemoryKevCatalog(kev),
+        notes=notes,
+    )

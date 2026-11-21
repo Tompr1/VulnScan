@@ -25,7 +25,7 @@ from app.cve.enricher import CveSeverityEnricher
 from app.db import models
 from app.db.session import SessionLocal
 from app.inventory.audit.auditor import DeviceAuditor
-from app.inventory.audit.catalog import EndOfLifeDateCatalog
+from app.inventory.audit.reference import workspace_reference_data
 from app.inventory.audit.rules import default_rules
 from app.inventory.audit.service import InventoryAudit
 from app.inventory.collector import InventoryCollector
@@ -111,7 +111,11 @@ def build_scan_job_runner() -> ScanJobRunner:
 
 
 def build_inventory_audit() -> InventoryAudit:
-    return InventoryAudit(SqlInventoryRepository(SessionLocal), DeviceAuditor(default_rules(), EndOfLifeDateCatalog))
+    return InventoryAudit(
+        SqlInventoryRepository(SessionLocal),
+        DeviceAuditor(default_rules()),
+        lambda workspace_id: workspace_reference_data(workspace_id, SessionLocal),
+    )
 
 
 def _build_finding_processor(

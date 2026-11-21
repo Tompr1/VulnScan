@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from app.inventory.audit.auditor import AuditOutcome, DeviceAuditor
-from app.inventory.audit.rules import AuditIssue
+from app.inventory.audit.base import AuditIssue, ReferenceData
 from app.inventory.domain import Device
 from app.scanner.context import stable_fingerprint
 from app.scanner.plugins.base import Finding
@@ -51,15 +51,17 @@ class InventoryAudit:
         self,
         store: AuditStore,
         auditor: DeviceAuditor,
+        reference: Callable[[int], ReferenceData],  # by workspace
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
         self._store = store
         self._auditor = auditor
+        self._reference = reference
         self._clock = clock
 
-    def run(self, connection_id: int, job_id: int) -> list[Finding]:
+    def run(self, connection_id: int, workspace_id: int, job_id: int) -> list[Finding]:
         audited = self._store.devices_to_audit(connection_id)
-        outcome = self._auditor.audit([entry.device for entry in audited])
+        outcome = self._auditor.audit([entry.device for entry in audited], self._reference(workspace_id))
         findings = [
             device_finding(issue, entry)
             for entry in audited
@@ -92,6 +94,9 @@ def device_finding(issue: AuditIssue, audited: AuditedDevice) -> Finding:
         # suppression list recognise the same issue from one day to the next.
         fingerprint=stable_fingerprint("inventory", issue.rule, device.external_id, issue.subject),
         references=list(issue.references),
+        cvss=issue.cvss,
+        cve=issue.cve,
+        is_kev=issue.is_kev,
         confidence=issue.confidence,
         affected=device.name,
         device_id=audited.id,
@@ -106,7 +111,7 @@ def audit_warnings(outcome: AuditOutcome) -> tuple[str, ...]:
                         "End-of-support checks were skipped for them; versions were compared with the fleet only.")
     if outcome.rule_errors:
         warnings.append(f"{outcome.rule_errors} audit checks failed on unexpected device data (see the worker logs).")
-    return tuple(warnings)
+    return tuple(warnings) + outcome.notes
 
 
 def incomplete_audit_finding(connection_id: int, warnings: Sequence[str]) -> Finding:
@@ -116,7 +121,8 @@ def incomplete_audit_finding(connection_id: int, warnings: Sequence[str]) -> Fin
         severity="info",
         description="Part of the device audit could not run: a device without issues is not necessarily up to date.\n\n"
                     + "\n".join(f"- {warning}" for warning in warnings),
-        remediation="Check that the worker can reach https://endoflife.date, then run the inventory sync again.",
+        remediation="Fix the causes listed above (the worker must reach https://endoflife.date; NVD and CISA KEV "
+                    "datasets must be loaded), then run the inventory sync again.",
         fingerprint=stable_fingerprint("inventory", INCOMPLETE_AUDIT_RULE, connection_id),
     )
 

@@ -15,8 +15,12 @@ from app.api.deps import get_db
 from app.api.routes_inventory import get_inventory_read_model, router
 from app.core.auth import require_auth
 from app.core.job_queue import get_job_queue
+from app.cve.nvd import parse_vulnerability
+from app.cve.nvd_sync import SyncState
+from app.cve.sql_catalog import SqlCveCatalog, SqlSyncStateStore
 from app.db import models
 from app.inventory.audit.auditor import DeviceAuditor
+from app.inventory.audit.reference import NO_KEV_DATASET, NVD_IMPORT_RUNNING, workspace_reference_data
 from app.inventory.audit.rules import default_rules
 from app.inventory.audit.service import InventoryAudit
 from app.inventory.domain import Device, InstalledApp, InventorySnapshot, Platform
@@ -29,7 +33,8 @@ from app.scan_jobs.repository import SqlScanJobRepository
 from app.scan_jobs.runner import ScanJobRunner
 from app.scanner.target import ScanType
 from tests.fakes import SpyGraph, SpyJobQueue, SpyNotifier, StubAiTrigger, no_compliance
-from tests.unit.inventory.eol_fixtures import StaticSupportCatalog
+from tests.unit.cve.nvd_fixtures import nvd_entry
+from tests.unit.inventory.eol_fixtures import StaticSupportCatalog, reference_data
 
 pytestmark = pytest.mark.integration
 
@@ -91,7 +96,8 @@ def add_inventory_job(db, connection_id, job_id, status="queued"):
 def run_inventory_job(session_factory, job_id, catalog=None):
     audit = InventoryAudit(
         SqlInventoryRepository(session_factory),
-        DeviceAuditor(default_rules(), lambda: catalog or StaticSupportCatalog(), today=lambda: date(2026, 11, 21)),
+        DeviceAuditor(default_rules(), today=lambda: date(2026, 11, 21)),
+        lambda workspace_id: reference_data(catalog),
     )
     ScanJobRunner(
         repository=SqlScanJobRepository(session_factory),
@@ -199,3 +205,81 @@ def test_supprimer_la_connexion_garde_les_constats_mais_retire_le_lien_et_les_au
     db.expire_all()
     assert db.query(models.InventoryAuditRun).count() == 0
     assert [f.device_id for f in db.query(models.Finding).filter_by(job_id=100)] == [None, None]
+
+
+# ── Known vulnerabilities, from the real SQL catalog and a KEV dataset ────────
+
+def store_cves(session_factory, *entries, import_done=True):
+    SqlCveCatalog(session_factory).upsert([parse_vulnerability(entry) for entry in entries])
+    if import_done:
+        SqlSyncStateStore(session_factory).save(SyncState(full_import_completed_at=SYNCED_AT))
+
+
+def load_kev(db, tmp_path, *rows):
+    path = tmp_path / "kev.json"
+    path.write_text(json.dumps(list(rows)))
+    db.add(models.CveDataset(workspace_id=1, name="CISA KEV", kind="cisa_kev", path=str(path), enabled=True))
+    db.commit()
+
+
+def run_with_workspace_reference(session_factory, job_id):
+    audit = InventoryAudit(
+        SqlInventoryRepository(session_factory),
+        DeviceAuditor(default_rules(), today=lambda: date(2026, 11, 21)),
+        lambda workspace_id: workspace_reference_data(workspace_id, session_factory, lifecycle=StaticSupportCatalog),
+    )
+    ScanJobRunner(
+        repository=SqlScanJobRepository(session_factory),
+        executors={ScanType.INVENTORY: InventoryScanExecutor(AlreadyCollected, lambda: audit)},
+        processor_factory=lambda job, profile: FindingProcessor(FindingFilterPolicy(), no_compliance),
+        notifier=SpyNotifier(),
+        graph_factory=SpyGraph,
+        ai_trigger=StubAiTrigger(),
+    ).run(job_id)
+
+
+WINDOWS_CVE = nvd_entry("CVE-2025-1001", cvss=7.8, matches=[{
+    "vulnerable": True, "criteria": "cpe:2.3:o:microsoft:windows_11_23h2:*:*:*:*:*:*:x64:*",
+    "versionEndExcluding": "10.0.22631.6060",
+}])
+OFFICE_CVE = nvd_entry("CVE-2025-1002", cvss=9.8, matches=[{
+    "vulnerable": True, "criteria": "cpe:2.3:a:microsoft:365_apps:-:*:*:*:enterprise:*:*:*",
+}])
+
+
+def test_une_cve_exploitee_sur_un_appareil_devient_un_constat_critique_lie_a_l_appareil(client, session_factory, db, tmp_path):
+    connection = create(client)
+    seed(session_factory, connection["id"])
+    store_cves(session_factory, WINDOWS_CVE, OFFICE_CVE)
+    load_kev(db, tmp_path, {"cveID": "CVE-2025-1001", "dateAdded": "2025-09-01", "dueDate": "2025-09-22",
+                            "knownRansomwareCampaignUse": "Unknown"})
+    add_inventory_job(db, connection["id"], job_id=100)
+
+    run_with_workspace_reference(session_factory, 100)
+
+    db.expire_all()
+    finding = db.query(models.Finding).filter_by(job_id=100, plugin_id="inventory.os_vulnerable").one()
+    assert (finding.device_id, finding.is_kev, finding.severity) == (device_id(db, "PC-COMPTA-04"), True, "critical")
+    assert finding.title == ("Windows 11 23H2 10.0.22631.4317 has 1 known vulnerability, 1 actively exploited — PC-COMPTA-04")
+    assert "CISA remediation deadline 2025-09-22" in finding.remediation
+    assert db.query(models.InventoryAuditRun).one().warnings == ""  # complete: NVD imported, KEV loaded
+    detail = client.get(f"/inventory/devices/{device_id(db, 'PC-COMPTA-04')}").json()
+    assert detail["issues"][0]["rule"] == "os_vulnerable"
+
+
+def test_les_lacunes_des_donnees_cve_sont_signalees_avec_l_audit(client, session_factory, db):
+    connection = create(client)
+    seed(session_factory, connection["id"])
+    store_cves(session_factory, WINDOWS_CVE, import_done=False)
+    add_inventory_job(db, connection["id"], job_id=100)
+
+    run_with_workspace_reference(session_factory, 100)
+
+    db.expire_all()
+    warnings = db.query(models.InventoryAuditRun).one().warnings.splitlines()
+    assert warnings == [NVD_IMPORT_RUNNING, NO_KEV_DATASET]
+    notice = db.query(models.Finding).filter_by(job_id=100, plugin_id="inventory.audit_incomplete").one()
+    assert NO_KEV_DATASET in notice.description
+    # The CVE is still found from what the catalog already holds, without the KEV flag.
+    vulnerable = db.query(models.Finding).filter_by(job_id=100, plugin_id="inventory.os_vulnerable").one()
+    assert vulnerable.is_kev is False

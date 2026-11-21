@@ -665,6 +665,7 @@ and saves one finding per device issue, linked to the device (`device_id`):
 | `android_patch_outdated` | the Android security patch level is older than 90 days |
 | `app_unsupported` | an application is on a release line its vendor no longer supports |
 | `app_outdated` | an application is behind its latest release |
+| `os_vulnerable` / `app_vulnerable` | the OS build or an application has known CVEs (one finding per product, listing its CVEs; critical when one is in CISA KEV) |
 
 Support dates and latest releases come from [endoflife.date](https://endoflife.date)
 (the worker needs outbound HTTPS to it). When the vendor's latest release is
@@ -673,6 +674,16 @@ version installed on at least two devices of the fleet. Windows dates are those
 of Home/Pro editions, as Intune does not report the edition. An audit that could
 not check everything adds an `inventory.audit_incomplete` finding. The device
 list and page show the issues of the latest completed audit.
+
+Known CVEs come from the NVD catalog (version ranges) and the workspace's CISA
+KEV dataset. Covered: Windows 10/11 by build, macOS, iOS, iPadOS, and a curated
+list of applications whose NVD entries carry version ranges (Chrome, Edge,
+Firefox, Thunderbird, 7-Zip, Notepad++, VLC, Adobe Acrobat/Reader, Zoom, WinRAR,
+Git, Wireshark, VS Code, FortiClient, PowerShell, PuTTY, WinSCP, FileZilla,
+KeePass, Node.js, TeamViewer, AnyDesk, LibreOffice, Docker Desktop, Cisco Secure
+Client — `backend/app/inventory/audit/cves.py`). Not covered: Microsoft 365 /
+Office, Java and Citrix Workspace (NVD gives no comparable build range), Android
+(fixed by security patch level, see `android_patch_outdated`).
 
 ---
 

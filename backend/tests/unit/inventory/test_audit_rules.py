@@ -8,19 +8,17 @@ import pytest
 
 from app.inventory.audit.auditor import DeviceAuditor
 from app.inventory.audit.fleet import FleetBaseline, app_family, newest_apps, os_line
+from app.inventory.audit.base import AuditContext, AuditPolicy, LifecycleLookup
 from app.inventory.audit.rules import (
     AndroidPatchLevelRule,
     AppSupportRule,
     AppUpdateRule,
-    AuditContext,
-    AuditPolicy,
-    LifecycleLookup,
     OsSupportRule,
     OsUpdateRule,
     default_rules,
 )
 from app.inventory.domain import Device, InstalledApp, Platform
-from tests.unit.inventory.eol_fixtures import StaticSupportCatalog
+from tests.unit.inventory.eol_fixtures import StaticSupportCatalog, reference_data
 
 TODAY = date(2026, 11, 21)
 _ids = iter(range(1, 10_000))
@@ -315,15 +313,15 @@ def test_une_politique_d_audit_incoherente_est_refusee(values):
 
 # ── DeviceAuditor ─────────────────────────────────────────────────────────────
 
-def auditor(catalog=None, rules=None) -> DeviceAuditor:
-    return DeviceAuditor(rules or default_rules(), lambda: catalog or StaticSupportCatalog(), today=lambda: TODAY)
+def auditor(rules=None) -> DeviceAuditor:
+    return DeviceAuditor(rules or default_rules(), today=lambda: TODAY)
 
 
 def test_l_audit_regroupe_les_constats_par_appareil():
     old = windows("10.0.22631.4317", InstalledApp("Notepad++", "8.9.2"))
     fine = windows("10.0.26200.7171")
 
-    outcome = auditor().audit([old, fine])
+    outcome = auditor().audit([old, fine], reference_data())
 
     assert set(outcome.issues) == {old.external_id}
     assert sorted(issue.rule for issue in outcome.issues[old.external_id]) == ["app_outdated", "os_unsupported"]
@@ -332,7 +330,7 @@ def test_l_audit_regroupe_les_constats_par_appareil():
 
 
 def test_l_audit_signale_les_produits_dont_le_cycle_de_vie_n_a_pas_pu_etre_verifie():
-    outcome = auditor(StaticSupportCatalog(unavailable=("windows",))).audit([windows("10.0.22631.4317")])
+    outcome = auditor().audit([windows("10.0.22631.4317")], reference_data(StaticSupportCatalog(unavailable=("windows",))))
 
     assert outcome.unavailable_products == frozenset({"windows"})
     assert not outcome.complete
@@ -349,22 +347,27 @@ def test_une_regle_en_echec_sur_un_appareil_n_empeche_pas_l_audit_des_autres():
     odd = windows("10.0.22631.4317", name="PC-BIZARRE")
     normal = windows("10.0.22631.4317")
 
-    outcome = auditor(rules=[ExplodingRule(), OsSupportRule()]).audit([odd, normal])
+    outcome = auditor(rules=[ExplodingRule(), OsSupportRule()]).audit([odd, normal], reference_data())
 
     assert set(outcome.issues) == {odd.external_id, normal.external_id}
     assert outcome.rule_errors == 1
     assert not outcome.complete
 
 
-def test_un_catalogue_neuf_est_utilise_a_chaque_audit():
-    created = []
+def test_les_lacunes_connues_des_donnees_de_reference_rendent_l_audit_incomplet():
+    outcome = auditor().audit([windows()], reference_data(notes=("No CISA KEV dataset is loaded.",)))
 
-    def factory():
-        created.append(StaticSupportCatalog())
-        return created[-1]
+    assert outcome.notes == ("No CISA KEV dataset is loaded.",)
+    assert not outcome.complete
 
-    audit = DeviceAuditor(default_rules(), factory, today=lambda: TODAY)
-    audit.audit([])
-    audit.audit([])
 
-    assert len(created) == 2
+class BrokenCveCatalog:
+    def records_for(self, products):
+        raise ConnectionError("database unreachable")
+
+
+def test_un_catalogue_cve_illisible_n_empeche_pas_l_audit_du_cycle_de_vie():
+    outcome = auditor().audit([windows("10.0.22631.4317")], reference_data(cve_catalog=BrokenCveCatalog()))
+
+    assert [issue.rule for issues in outcome.issues.values() for issue in issues] == ["os_unsupported"]
+    assert outcome.notes == ("The CVE catalog could not be read: known vulnerabilities were not checked.",)

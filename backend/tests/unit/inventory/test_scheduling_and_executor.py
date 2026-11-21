@@ -40,8 +40,8 @@ class StubAudit:
         self.calls = calls
         self.findings = list(findings)
 
-    def run(self, connection_id, job_id):
-        self.calls.append(("audit", connection_id, job_id))
+    def run(self, connection_id, workspace_id, job_id):
+        self.calls.append(("audit", connection_id, workspace_id, job_id))
         return self.findings
 
 
@@ -62,7 +62,7 @@ async def test_un_job_d_inventaire_collecte_puis_audite_la_connexion_qu_il_desig
 
     findings = await executor(calls, [issue]).execute(job({"inventory_connection_id": 3}), ScanProfile(), progress)
 
-    assert calls == [("collect", 3, 1), ("audit", 3, 9)]
+    assert calls == [("collect", 3, 1), ("audit", 3, 1, 9)]
     assert findings == [issue]
     assert events == [
         ("inventory.collect", "running"), ("inventory.collect", "done"),

@@ -7,81 +7,15 @@ objects. Adding a check is adding a class to ``default_rules()``.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
-from dataclasses import dataclass, field
 from datetime import date
-from typing import Protocol
 
-from app.inventory.audit.fleet import FleetBaseline, FleetVersion, app_family, newest_apps
-from app.inventory.audit.lifecycle import (
-    CatalogUnavailableError,
-    SupportCatalog,
-    SupportCycle,
-    is_older,
-    is_precise_enough,
-)
+from app.inventory.audit.base import AuditContext, AuditIssue, DeviceRule
+from app.inventory.audit.cves import SoftwareVulnerabilities, summarize
+from app.inventory.audit.fleet import FleetVersion, app_family, newest_apps
+from app.inventory.audit.lifecycle import SupportCycle, is_older, is_precise_enough
 from app.inventory.audit.products import InstalledRelease, identify_app, identify_os
 from app.inventory.domain import Device, InstalledApp, Platform
-
-
-@dataclass(frozen=True)
-class AuditIssue:
-    """One problem on one device. ``subject`` identifies it across audits
-    (with the rule and the device), so it deliberately leaves out versions:
-    Chrome going from one outdated version to another is the same issue."""
-
-    rule: str
-    subject: str
-    title: str
-    severity: str
-    description: str
-    remediation: str
-    evidence: tuple[tuple[str, str], ...] = ()
-    confidence: float = 1.0
-    references: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class AuditPolicy:
-    support_warning_days: int = 60  # warn before an OS loses support
-    app_support_grace_days: int = 14  # Chrome / Firefox majors expire every few weeks
-    android_patch_max_age_days: int = 90
-    fleet_min_devices: int = 2
-
-    def __post_init__(self) -> None:
-        if min(self.support_warning_days, self.app_support_grace_days, self.android_patch_max_age_days) < 0:
-            raise ValueError("audit policy durations cannot be negative")
-        if self.fleet_min_devices < 1:
-            raise ValueError("fleet_min_devices must be at least 1")
-
-
-class LifecycleLookup:
-    """Vendor lifecycle of a release, remembering which products could not be
-    checked (endoflife.date unreachable) so the audit can say so."""
-
-    def __init__(self, catalog: SupportCatalog) -> None:
-        self._catalog = catalog
-        self.unavailable: set[str] = set()
-
-    def cycle_of(self, release: InstalledRelease) -> SupportCycle | None:
-        try:
-            cycles = self._catalog.cycles(release.product.slug)
-        except CatalogUnavailableError:
-            self.unavailable.add(release.product.slug)
-            return None
-        return release.cycle_in(cycles)
-
-
-@dataclass
-class AuditContext:
-    today: date
-    lifecycle: LifecycleLookup
-    fleet: FleetBaseline
-    policy: AuditPolicy = field(default_factory=AuditPolicy)
-
-
-class DeviceRule(Protocol):
-    def evaluate(self, device: Device, context: AuditContext) -> Iterable[AuditIssue]: ...
+from app.risk.severity import Severity
 
 
 # ── Operating system ──────────────────────────────────────────────────────────
@@ -228,8 +162,57 @@ class AppUpdateRule:
         return issues
 
 
+# ── Known vulnerabilities ─────────────────────────────────────────────────────
+
+class VulnerableSoftwareRule:
+    """Known CVEs on the OS build or an installed application. One issue per
+    vulnerable product, listing its CVEs: the fix is one update, and 300
+    devices behind on Windows would otherwise mean tens of thousands of
+    findings a day."""
+
+    MAX_LISTED = 15
+
+    def evaluate(self, device: Device, context: AuditContext) -> list[AuditIssue]:
+        return [self._issue(found) for found in context.vulnerabilities.for_device(device)]
+
+    def _issue(self, found: SoftwareVulnerabilities) -> AuditIssue:
+        software, vulnerabilities, exploited = found.software, found.vulnerabilities, found.exploited
+        title = software.identity.title
+        count = len(vulnerabilities)
+        headline = f"{title} {software.version} has {count} known {'vulnerability' if count == 1 else 'vulnerabilities'}"
+        if exploited:
+            headline += f", {len(exploited)} actively exploited"
+        most_urgent = vulnerabilities[0]
+        highest = found.highest_cvss
+        installed = f"{title if software.is_os else software.name} {software.version}"
+        return AuditIssue(
+            rule="os_vulnerable" if software.is_os else "app_vulnerable",
+            # A product that becomes actively exploited is a new issue (and a new alert).
+            subject=software.identity.key + (":kev" if exploited else ""),
+            title=headline,
+            severity=_cve_severity(highest, bool(exploited)),
+            description="\n".join([f"{installed} is affected by:", *summarize(vulnerabilities, self.MAX_LISTED)]),
+            remediation=_cve_remediation(found),
+            evidence=(
+                ("Installed", installed),
+                ("Known vulnerabilities", str(count)),
+                ("Actively exploited (CISA KEV)", ", ".join(v.cve_id for v in exploited) or "none"),
+                ("Highest CVSS", f"{highest:.1f}" if highest is not None else "not scored"),
+                ("Fixed in", found.fixed_in or "see each CVE"),
+            ),
+            confidence=0.9,  # curated product identification, NVD version ranges
+            references=tuple(f"https://nvd.nist.gov/vuln/detail/{v.cve_id}" for v in vulnerabilities[:5]),
+            cve=most_urgent.cve_id,
+            cvss=highest,
+            is_kev=bool(exploited),
+        )
+
+
 def default_rules() -> list[DeviceRule]:
-    return [OsSupportRule(), OsUpdateRule(), AndroidPatchLevelRule(), AppSupportRule(), AppUpdateRule()]
+    return [
+        OsSupportRule(), OsUpdateRule(), AndroidPatchLevelRule(), AppSupportRule(), AppUpdateRule(),
+        VulnerableSoftwareRule(),
+    ]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -259,6 +242,34 @@ def _outdated_app(app: InstalledApp, latest: str, source: str, confidence: float
         confidence=confidence,
         references=(release.product.reference_url,) if release else (),
     )
+
+
+def _cve_severity(highest_cvss: float | None, exploited: bool) -> str:
+    if exploited:
+        return Severity.CRITICAL.value
+    # NVD has not scored every recent CVE yet: keep those visible.
+    return Severity.from_score(highest_cvss).value if highest_cvss is not None else Severity.MEDIUM.value
+
+
+def _cve_remediation(found: SoftwareVulnerabilities) -> str:
+    software, fixed_in = found.software, found.fixed_in
+    if software.is_os and software.identity.title.startswith("Windows"):
+        action = "Install the latest Windows cumulative update"
+        action += f" (build {fixed_in} or later)." if fixed_in else "."
+    elif fixed_in:
+        action = f"Update {software.identity.title} to {fixed_in} or later."
+    else:
+        action = f"Update {software.identity.title} to its latest version (see each CVE for the fixed release)."
+    exploited = found.exploited
+    if not exploited:
+        return action
+    dues = sorted(v.kev.due_date for v in exploited if v.kev.due_date)
+    verb = "is" if len(exploited) == 1 else "are"
+    urgency = f"{len(exploited)} of these CVEs {verb} exploited by attackers (CISA KEV): patch first"
+    urgency += f"; CISA remediation deadline {dues[0].isoformat()}." if dues else "."
+    if any(v.kev.ransomware for v in exploited):
+        urgency += " Used in ransomware campaigns."
+    return f"{urgency}\n\n{action}"
 
 
 def _support_end(cycle: SupportCycle) -> tuple[str, str]:
