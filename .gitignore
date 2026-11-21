@@ -57,3 +57,7 @@ data/update-result.json
 .pytest_cache/
 .coverage
 htmlcov/
+
+# iCloud Drive conflict copies ("engine 2.py", "index 2"): never source code
+* 2.*
+* 2
