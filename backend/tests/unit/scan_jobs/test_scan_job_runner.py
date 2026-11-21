@@ -100,6 +100,17 @@ def test_le_job_passe_en_analyse_quand_une_analyse_ia_est_lancee():
     assert h.ai_trigger.calls == [(10, WS, 1)]
 
 
+def test_l_analyse_ia_automatique_n_est_pas_proposee_pour_un_type_de_scan_qui_l_exclut():
+    # Inventory audits name users and devices: they never go to an AI provider automatically.
+    h = Harness(executor=StubExecutor(findings=[finding("Outdated OS")], ai_analysis=False), ai_trigger=StubAiTrigger(queues=True))
+    h.add_job()
+
+    h.runner.run(10)
+
+    assert h.ai_trigger.calls == []
+    assert h.repository.status_of(10) == "done"
+
+
 def test_un_echec_de_lancement_de_l_analyse_ia_ne_fait_pas_echouer_le_scan():
     h = Harness(ai_trigger=StubAiTrigger(error=RuntimeError("redis down")))
     h.add_job()

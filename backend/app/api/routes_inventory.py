@@ -95,6 +95,11 @@ def update_connection(
 def delete_connection(connection_id: int, user=Depends(require_role("admin")), db: Session = Depends(get_db)):
     row = _connection_or_404(db, user["ws"], connection_id)
     devices = db.query(models.InventoryDevice.id).filter(models.InventoryDevice.connection_id == row.id)
+    # Findings stay (job history) but lose their device link.
+    db.query(models.Finding).filter(models.Finding.device_id.in_(devices)).update(
+        {models.Finding.device_id: None}, synchronize_session=False
+    )
+    db.query(models.InventoryAuditRun).filter(models.InventoryAuditRun.connection_id == row.id).delete(synchronize_session=False)
     db.query(models.InventoryDeviceChange).filter(models.InventoryDeviceChange.device_id.in_(devices)).delete(synchronize_session=False)
     db.query(models.InventoryDeviceApp).filter(models.InventoryDeviceApp.device_id.in_(devices)).delete(synchronize_session=False)
     removed = db.query(models.InventoryDevice).filter(models.InventoryDevice.connection_id == row.id).delete(synchronize_session=False)

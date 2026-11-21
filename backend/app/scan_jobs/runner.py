@@ -129,7 +129,8 @@ class ScanJobRunner:
         self._notifier.scan_completed(job.workspace_id, build_summary(
             job.id, job.target, job.scan_type, report.saved, report.severity_counts(), job.created_at, finished_at,
         ))
-        self._queue_ai_analysis(job, len(report.saved))
+        if executor.ai_analysis:
+            self._queue_ai_analysis(job, len(report.saved))
 
     def _executor_for(self, job: ScanJobSnapshot) -> ScanExecutor | None:
         try:

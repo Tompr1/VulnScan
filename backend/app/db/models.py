@@ -152,6 +152,10 @@ class Finding(Base):
     compliance_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_kev: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    # Set on inventory audit findings: the device page the alert links to.
+    device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("inventory_devices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
 
 class SuppressedFinding(Base):
@@ -353,3 +357,19 @@ class InventoryDeviceChange(Base):
     before: Mapped[str | None] = mapped_column(String(255), nullable=True)
     after: Mapped[str | None] = mapped_column(String(255), nullable=True)
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class InventoryAuditRun(Base):
+    """One audit of a connection's inventory, run by an inventory job whose
+    findings hold the issues. The device page shows the latest completed one;
+    the alert policy compares two consecutive ones."""
+
+    __tablename__ = "inventory_audit_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(ForeignKey("inventory_connections.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("scan_jobs.id", ondelete="CASCADE"), index=True)
+    audited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    devices: Mapped[int] = mapped_column(Integer, default=0)
+    issues: Mapped[int] = mapped_column(Integer, default=0)
+    # Lifecycle sources that could not be read, rule failures… empty when complete.
+    warnings: Mapped[str] = mapped_column(Text, default="")

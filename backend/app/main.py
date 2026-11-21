@@ -152,6 +152,14 @@ def _run_migrations(db: Session) -> None:
         ALTER TABLE scan_jobs
             ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
         """,
+        # Inventory audit findings link to their device (created by create_all above).
+        """
+        ALTER TABLE findings
+            ADD COLUMN IF NOT EXISTS device_id INTEGER REFERENCES inventory_devices(id) ON DELETE SET NULL;
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS ix_findings_device_id ON findings (device_id);
+        """,
     ]
     for sql in migrations:
         try:

@@ -655,6 +655,25 @@ application updates, installs, removals); `GET /inventory/devices/{id}` is the
 device page. Code: `backend/app/inventory/` (GLPI or Fleet plug in as new
 `InventorySource` implementations).
 
+After each sync the job audits the inventory (`backend/app/inventory/audit/`)
+and saves one finding per device issue, linked to the device (`device_id`):
+
+| Finding (`inventory.*`) | Raised when |
+|---|---|
+| `os_unsupported` / `os_support_ending` | the OS release is past its end of security support / ends within 60 days |
+| `os_outdated` | the OS is behind the latest update of its release |
+| `android_patch_outdated` | the Android security patch level is older than 90 days |
+| `app_unsupported` | an application is on a release line its vendor no longer supports |
+| `app_outdated` | an application is behind its latest release |
+
+Support dates and latest releases come from [endoflife.date](https://endoflife.date)
+(the worker needs outbound HTTPS to it). When the vendor's latest release is
+unknown, or too coarse (Windows monthly updates), the reference is the newest
+version installed on at least two devices of the fleet. Windows dates are those
+of Home/Pro editions, as Intune does not report the edition. An audit that could
+not check everything adds an `inventory.audit_incomplete` finding. The device
+list and page show the issues of the latest completed audit.
+
 ---
 
 ## Changelog

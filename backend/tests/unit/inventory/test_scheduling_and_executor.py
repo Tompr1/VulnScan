@@ -5,6 +5,7 @@ import pytest
 from app.inventory.scheduling import is_due
 from app.scan_jobs.executors import InventoryScanExecutor
 from app.scan_jobs.repository import ScanJobSnapshot
+from app.scanner.plugins.base import Finding
 from app.scanner.profile import ScanProfile
 
 NOW = datetime(2026, 11, 21, 6, 0, tzinfo=timezone.utc)
@@ -27,37 +28,60 @@ def test_une_connexion_est_synchronisee_selon_sa_frequence(frequency, last, due)
 
 
 class SpyCollector:
-    def __init__(self):
-        self.calls = []
+    def __init__(self, calls=None):
+        self.calls = calls if calls is not None else []
 
     def collect(self, connection_id, workspace_id):
-        self.calls.append((connection_id, workspace_id))
+        self.calls.append(("collect", connection_id, workspace_id))
+
+
+class StubAudit:
+    def __init__(self, calls, findings=()):
+        self.calls = calls
+        self.findings = list(findings)
+
+    def run(self, connection_id, job_id):
+        self.calls.append(("audit", connection_id, job_id))
+        return self.findings
 
 
 def job(meta):
     return ScanJobSnapshot(id=9, workspace_id=1, target="intune:Tenant", scan_type="inventory", profile_id=None, meta=meta)
 
 
-async def test_un_job_d_inventaire_collecte_la_connexion_qu_il_designe():
-    collector, events = SpyCollector(), []
+def executor(calls, findings=()):
+    return InventoryScanExecutor(lambda: SpyCollector(calls), lambda: StubAudit(calls, findings))
+
+
+async def test_un_job_d_inventaire_collecte_puis_audite_la_connexion_qu_il_designe():
+    calls, events = [], []
+    issue = Finding("inventory.os_unsupported", "Windows 11 23H2 (W) is no longer supported — PC-04", device_id=7)
 
     async def progress(*args):
-        events.append(args[-1])
+        events.append((args[2], args[-1]))
 
-    findings = await InventoryScanExecutor(lambda: collector).execute(job({"inventory_connection_id": 3}), ScanProfile(), progress)
+    findings = await executor(calls, [issue]).execute(job({"inventory_connection_id": 3}), ScanProfile(), progress)
 
-    assert collector.calls == [(3, 1)]
-    assert findings == []
-    assert events == ["running", "done"]
+    assert calls == [("collect", 3, 1), ("audit", 3, 9)]
+    assert findings == [issue]
+    assert events == [
+        ("inventory.collect", "running"), ("inventory.collect", "done"),
+        ("inventory.audit", "running"), ("inventory.audit", "done"),
+    ]
 
 
 async def test_un_job_d_inventaire_sans_connexion_est_refuse():
+    calls = []
+
     async def progress(*_):
         return None
 
     with pytest.raises(ValueError, match="inventory connection"):
-        await InventoryScanExecutor(SpyCollector).execute(job({}), ScanProfile(), progress)
+        await executor(calls).execute(job({}), ScanProfile(), progress)
+    assert calls == []
 
 
-def test_un_job_d_inventaire_n_a_pas_besoin_de_profil():
-    assert InventoryScanExecutor(SpyCollector).requires_profile is False
+def test_un_job_d_inventaire_n_a_pas_besoin_de_profil_ni_d_analyse_ia():
+    inventory = executor([])
+
+    assert (inventory.requires_profile, inventory.ai_analysis) == (False, False)

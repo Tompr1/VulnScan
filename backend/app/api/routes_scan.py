@@ -355,6 +355,7 @@ def job_detail(
                 "sla_days": f.sla_days,
                 "compliance_json": f.compliance_json,
                 "created_at": f.created_at.isoformat() if f.created_at else None,
+                "device_id": f.device_id,
             }
             for f in findings
         ],

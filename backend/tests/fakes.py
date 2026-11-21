@@ -269,8 +269,15 @@ class InMemoryScanJobRepository:
 
 
 class StubExecutor:
-    def __init__(self, findings: list[Finding] | None = None, error: Exception | None = None, requires_profile: bool = True) -> None:
+    def __init__(
+        self,
+        findings: list[Finding] | None = None,
+        error: Exception | None = None,
+        requires_profile: bool = True,
+        ai_analysis: bool = True,
+    ) -> None:
         self.requires_profile = requires_profile
+        self.ai_analysis = ai_analysis
         self._findings = findings or []
         self._error = error
         self.received_profiles: list[ScanProfile] = []
