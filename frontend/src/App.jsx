@@ -9,6 +9,8 @@ import { ThreatIntel } from "./design/ThreatIntel.jsx";
 import { AttackGraph } from "./design/AttackGraph.jsx";
 import { Analytics } from "./design/Analytics.jsx";
 import { LoginPage } from "./design/Login.jsx";
+import { Inventory } from "./design/Inventory.jsx";
+import { INVENTORY_HASH, deviceHash, parseInventoryHash } from "./design/inventoryModel.js";
 import {
   getToken, logout as apiLogout,
   scanApi, credentialsApi, datasetsApi, assetsApi, reportsApi, threatIntelApi,
@@ -16,7 +18,11 @@ import {
 
 export default function App() {
   const [authed, setAuthed] = useState(() => !!getToken());
-  const [page, setPage] = useState("dashboard");
+  // Inventory pages live in the URL hash, so alert links (#/inventory/devices/<id>)
+  // open the device page, also after signing in.
+  const initialRoute = parseInventoryHash(window.location.hash);
+  const [page, setPage] = useState(initialRoute ? initialRoute.page : "dashboard");
+  const [openedDevice, setOpenedDevice] = useState(initialRoute ? initialRoute.deviceId : null);
   const [settingsTab, setSettingsTab] = useState(null);
   const [openedJob, setOpenedJob] = useState(null);
   const [openedAsset, setOpenedAsset] = useState(null);
@@ -56,6 +62,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const follow = () => {
+      const route = parseInventoryHash(window.location.hash);
+      if (!route) return;
+      setOpenedJob(null); setOpenedAsset(null);
+      setPage(route.page);
+      setOpenedDevice(route.deviceId);
+    };
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+  }, []);
+
+  const openDevice = useCallback((id) => { window.location.hash = deviceHash(id); }, []);
+  const closeDevice = useCallback(() => { window.location.hash = INVENTORY_HASH; }, []);
+
+  useEffect(() => {
     if (!authed) return;
     refreshCounts();
     const t = setInterval(refreshCounts, 12000);
@@ -69,6 +90,7 @@ export default function App() {
   const crumbs = ((p) => {
     if (p === "dashboard")    return ["VulnScan", "Dashboard"];
     if (p === "assets")       return openedAsset ? ["VulnScan", "Assets", openedAsset.name] : ["VulnScan", "Assets"];
+    if (p === "inventory")    return openedDevice != null ? ["VulnScan", "Devices", `#${openedDevice}`] : ["VulnScan", "Devices"];
     if (p === "jobs")         return openedJob ? ["VulnScan", "Scans", `#${openedJob.id}`] : ["VulnScan", "Scan jobs"];
     if (p === "profiles")     return ["VulnScan", "Profiles"];
     if (p === "reports")      return ["VulnScan", "Reports"];
@@ -81,7 +103,17 @@ export default function App() {
     return ["VulnScan"];
   })(page);
 
-  function setPageWrap(p, tab) { setOpenedJob(null); setOpenedAsset(null); setSettingsTab(p === "settings" ? (tab || null) : null); setPage(p); }
+  function setPageWrap(p, tab) {
+    setOpenedJob(null); setOpenedAsset(null); setOpenedDevice(null);
+    setSettingsTab(p === "settings" ? (tab || null) : null);
+    setPage(p);
+    if (p === "inventory") {
+      if (window.location.hash !== INVENTORY_HASH) window.location.hash = INVENTORY_HASH;
+    } else if (parseInventoryHash(window.location.hash)) {
+      // Leaving the inventory: drop its hash without adding a history entry.
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }
 
   return (
     <div className="shell" data-screen-label={page}>
@@ -98,6 +130,7 @@ export default function App() {
 
           {page === "jobs" && !openedJob && <Jobs openJob={setOpenedJob}/>}
           {page === "jobs" &&  openedJob && <JobDetail job={openedJob} back={() => setOpenedJob(null)} openDrawer={setDrawerFinding}/>}
+          {page === "inventory"   && <Inventory deviceId={openedDevice} openDevice={openDevice} closeDevice={closeDevice}/>}
           {page === "profiles"    && <Profiles/>}
           {page === "reports"     && <Reports/>}
           {page === "credentials" && <Credentials/>}
@@ -108,7 +141,8 @@ export default function App() {
           {page === "settings"    && <Settings initialTab={settingsTab}/>}
         </div>
       </div>
-      {drawerFinding && <FindingDrawer finding={drawerFinding} close={() => setDrawerFinding(null)}/>}
+      {drawerFinding && <FindingDrawer finding={drawerFinding} close={() => setDrawerFinding(null)}
+                                       openDevice={(id) => { setDrawerFinding(null); openDevice(id); }}/>}
     </div>
   );
 }

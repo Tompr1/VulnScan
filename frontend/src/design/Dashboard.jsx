@@ -320,7 +320,7 @@ export function Dashboard({ openDrawer, setPage }) {
                     id: f.id, title: f.title, severity: f.severity,
                     host: f._target, plugin: f.plugin_id,
                     risk: f.risk_score, cvss: f.cvss_base, confidence: f.confidence,
-                    sla: f.sla_days, kev: !!f.is_kev,
+                    sla: f.sla_days, kev: !!f.is_kev, deviceId: f.device_id ?? null,
                     desc: f.description, remediation: f.remediation, evidence: f.evidence,
                   })}
                        style={{padding: "12px 18px", borderBottom: "1px solid var(--line)", cursor: "pointer", display: "flex", alignItems: "center", gap: 12}}

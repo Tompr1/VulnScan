@@ -697,6 +697,16 @@ default `true`). Channels: notification preferences `device_vulnerability`,
 `device_os_issue`, `device_software_issue` (and `cisa_kev_match`). Inventory jobs
 do not send the generic "scan completed" message.
 
+**Web UI**: *Devices* in the navigation lists the fleet, most exposed first
+(issue count and worst severity, platform and severity filters, search), and
+manages the Intune connections (add, test, sync now, frequency, delete). A device
+page shows the issues of the latest audit (CVEs, KEV, remediation, evidence), the
+installed applications, the device properties and the change history. Alert links
+and the "Open device page" button of a finding open it directly
+(`#/inventory/devices/<id>`, also after signing in). The device events and the
+alert threshold are under *Settings → Notifications*. Frontend logic tests:
+`cd frontend && npm test` (Node 24, no dependency).
+
 ---
 
 ## Changelog

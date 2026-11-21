@@ -9,6 +9,7 @@ export function Nav({ page, setPage, onSignOut, counts = {}, version = "" }) {
     ]},
     { section: "Scanning", items: [
       { id: "assets", label: "Assets", icon: Icons.Folder, count: counts.assets },
+      { id: "inventory", label: "Devices", icon: Icons.Monitor },
       { id: "jobs", label: "Scan Jobs", icon: Icons.Scan, count: counts.jobs },
       { id: "profiles", label: "Profiles", icon: Icons.Layers, count: counts.profiles },
       { id: "reports", label: "Reports", icon: Icons.FileText, count: counts.reports },

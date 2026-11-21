@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Icons, Status } from "./icons.jsx";
-import { scanApi, credentialsApi, datasetsApi, settingsApi, integrationsApi, aiApi, slaApi, threatIntelApi, notificationPrefsApi, autoAiApi, slaAlertApi, autoReportApi, canEdit, isAdmin } from "../api.js";
+import { scanApi, credentialsApi, datasetsApi, settingsApi, integrationsApi, aiApi, slaApi, threatIntelApi, notificationPrefsApi, autoAiApi, slaAlertApi, autoReportApi, inventoryApi, canEdit, isAdmin } from "../api.js";
 
 function countPluginSelection(json) {
   try {
@@ -1610,6 +1610,10 @@ const NOTIF_EVENTS = [
   { key: "scan_failed",          label: "Scan failed" },
   { key: "new_asset_discovered", label: "New asset discovered" },
   { key: "weekly_digest",        label: "Weekly digest" },
+  // Device inventory audits: new detections only, one message per audit
+  { key: "device_vulnerability",  label: "Devices — known vulnerabilities (CVE)" },
+  { key: "device_os_issue",       label: "Devices — OS out of support or not up to date" },
+  { key: "device_software_issue", label: "Devices — software out of support or not up to date" },
 ];
 const NOTIF_CHANNELS = ["email", "slack", "webhook"];
 
@@ -1699,8 +1703,60 @@ function NotificationPrefsPanel() {
             </tbody>
           </table>
         )}
+        <DeviceAlertThreshold/>
       </div>
     </>
+  );
+}
+
+// Which NEW device issues are alerted after an inventory audit (the channels
+// are chosen above, on the "Devices — …" rows).
+function DeviceAlertThreshold() {
+  const [settings, setSettings] = useState(null);
+  const [msg, setMsg] = useState("");
+  const editable = isAdmin();
+
+  useEffect(() => {
+    inventoryApi.getAlertSettings().then(setSettings).catch(() => setMsg("Failed to load the device alert threshold"));
+  }, []);
+
+  const save = (changes) => {
+    const updated = { ...settings, ...changes };
+    setSettings(updated);
+    setMsg("");
+    inventoryApi.saveAlertSettings(updated)
+      .then(r => { setSettings(r); setMsg("Saved"); })
+      .catch(e => setMsg(`Failed to save: ${e.message}`));
+  };
+
+  if (!settings) return msg ? <div style={{marginTop: 16, fontSize: 12, color: "var(--err)"}}>{msg}</div> : null;
+  return (
+    <div style={{marginTop: 24, paddingTop: 18, borderTop: "1px solid var(--line)"}}>
+      <div style={{fontSize: 13.5, fontWeight: 600, color: "var(--text-0)"}}>Device alert threshold</div>
+      <div style={{fontSize: 12.5, color: "var(--text-3)", margin: "4px 0 12px"}}>
+        After each inventory audit, only issues that are new since the previous audit are sent, in one message with a link to each device.
+      </div>
+      <div style={{display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap"}}>
+        <label style={{display: "flex", gap: 8, alignItems: "center", fontSize: 13}}>
+          Alert from
+          <select className="form-input" style={{width: 140}} value={settings.min_severity} disabled={!editable}
+                  onChange={e => save({ min_severity: e.target.value })}>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+            <option value="info">Everything</option>
+          </select>
+        </label>
+        <label style={{display: "flex", gap: 8, alignItems: "center", fontSize: 13}}>
+          <input type="checkbox" checked={settings.always_kev} disabled={!editable} style={{accentColor: "var(--brand)"}}
+                 onChange={e => save({ always_kev: e.target.checked })}/>
+          Always alert on actively exploited CVEs (CISA KEV), whatever their severity
+        </label>
+        {msg && <span style={{fontSize: 12, color: msg.startsWith("Failed") ? "var(--err)" : "var(--ok)"}}>{msg}</span>}
+        {!editable && <span style={{fontSize: 12, color: "var(--text-3)"}}>Only an administrator can change it.</span>}
+      </div>
+    </div>
   );
 }
 
