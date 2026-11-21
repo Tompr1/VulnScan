@@ -21,19 +21,21 @@ class _GraphModel(BaseModel):
 
 
 class GraphManagedDevice(_GraphModel):
-    id: str = Field(min_length=1)
-    device_name: str = Field(alias="deviceName", min_length=1)
-    operating_system: str = Field(alias="operatingSystem", default="")
-    os_version: str | None = Field(alias="osVersion", default=None)
-    model: str | None = None
-    manufacturer: str | None = None
-    serial_number: str | None = Field(alias="serialNumber", default=None)
-    user_principal_name: str | None = Field(alias="userPrincipalName", default=None)
-    compliance_state: str | None = Field(alias="complianceState", default=None)
+    # Lengths match the inventory_devices columns: an oversized value is
+    # rejected here (record skipped and counted) rather than failing the save.
+    id: str = Field(min_length=1, max_length=128)
+    device_name: str = Field(alias="deviceName", min_length=1, max_length=255)
+    operating_system: str = Field(alias="operatingSystem", default="", max_length=64)
+    os_version: str | None = Field(alias="osVersion", default=None, max_length=128)
+    model: str | None = Field(default=None, max_length=255)
+    manufacturer: str | None = Field(default=None, max_length=255)
+    serial_number: str | None = Field(alias="serialNumber", default=None, max_length=255)
+    user_principal_name: str | None = Field(alias="userPrincipalName", default=None, max_length=255)
+    compliance_state: str | None = Field(alias="complianceState", default=None, max_length=32)
     is_encrypted: bool | None = Field(alias="isEncrypted", default=None)
     last_sync: datetime | None = Field(alias="lastSyncDateTime", default=None)
-    owner_type: str | None = Field(alias="managedDeviceOwnerType", default=None)
-    android_security_patch_level: str | None = Field(alias="androidSecurityPatchLevel", default=None)
+    owner_type: str | None = Field(alias="managedDeviceOwnerType", default=None, max_length=32)
+    android_security_patch_level: str | None = Field(alias="androidSecurityPatchLevel", default=None, max_length=32)
 
     @field_validator("last_sync")
     @classmethod
@@ -46,9 +48,9 @@ class GraphManagedDevice(_GraphModel):
 
 class GraphDetectedApp(_GraphModel):
     id: str = Field(min_length=1)
-    display_name: str = Field(alias="displayName", min_length=1)
-    version: str | None = None
-    publisher: str | None = None
+    display_name: str = Field(alias="displayName", min_length=1, max_length=512)
+    version: str | None = Field(default=None, max_length=255)
+    publisher: str | None = Field(default=None, max_length=512)
     platform: str | None = None
     device_count: int = Field(alias="deviceCount", default=0, ge=0)
 

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Text, Boolean, DateTime, ForeignKey, Float, Index
+from sqlalchemy import String, Integer, Text, Boolean, DateTime, ForeignKey, Float, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
@@ -281,3 +281,73 @@ class CveSyncState(Base):
     full_import_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Changes up to this instant are in the catalog; the next incremental run starts here.
     synced_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ── Device inventory (fleet managers: Intune, later GLPI / Fleet) ───────────
+
+class InventoryConnection(Base):
+    """A fleet manager tenant to collect devices from. The secret is stored
+    encrypted (app.core.crypto) and never returned by the API."""
+
+    __tablename__ = "inventory_connections"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="intune")
+    name: Mapped[str] = mapped_column(String(255))
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    client_id: Mapped[str] = mapped_column(String(64))
+    client_secret_enc: Mapped[str] = mapped_column(Text)
+    sync_frequency: Mapped[str] = mapped_column(String(16), default="daily")  # manual | daily | weekly
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # ok | error
+    last_sync_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class InventoryDevice(Base):
+    __tablename__ = "inventory_devices"
+    __table_args__ = (UniqueConstraint("connection_id", "external_id", name="uq_inventory_device_source_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    connection_id: Mapped[int] = mapped_column(ForeignKey("inventory_connections.id", ondelete="CASCADE"), index=True)
+    external_id: Mapped[str] = mapped_column(String(128))
+    name: Mapped[str] = mapped_column(String(255))
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    os_name: Mapped[str] = mapped_column(String(64), default="")
+    os_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    manufacturer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    serial_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    user_principal_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ownership: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    compliance_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    is_encrypted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    security_patch_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_check_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    # Set when the device disappears from the fleet manager; history is kept.
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class InventoryDeviceApp(Base):
+    __tablename__ = "inventory_device_apps"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("inventory_devices.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(512))
+    version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    publisher: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class InventoryDeviceChange(Base):
+    """Journal of what changed on a device between two collections."""
+
+    __tablename__ = "inventory_device_changes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("inventory_devices.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    subject: Mapped[str] = mapped_column(String(512))
+    before: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    after: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
