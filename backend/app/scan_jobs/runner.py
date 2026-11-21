@@ -3,7 +3,9 @@ ScanJobRunner — the scan job use case, from a queued job to saved findings.
 
     load job → resolve profile → mark running → execute scan
              → process findings → save → publish to graph → mark done
-             → notify → maybe queue AI analysis
+             → announce (generic "scan completed", or the scan type's own
+               announcer: inventory jobs alert on new device issues)
+             → maybe queue AI analysis
 
 Every collaborator is injected; ``app.worker_tasks`` wires the production ones.
 """
@@ -12,14 +14,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import traceback
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
+from typing import Any, Protocol
 
 from app.scan_jobs.ai_trigger import AutoAnalysisTrigger
 from app.scan_jobs.executors import ScanExecutor
 from app.scan_jobs.graph import FindingGraph
-from app.scan_jobs.notifications import ScanFailure, ScanNotifier, build_summary
-from app.scan_jobs.processing import FindingProcessor, ProcessingReport
+from app.scan_jobs.notifications import ScanFailure, ScanNotifier, ScanSummary, build_summary
+from app.scan_jobs.processing import FindingProcessor, ProcessedFinding, ProcessingReport
 from app.scan_jobs.progress import ThrottledProgressWriter
 from app.scan_jobs.repository import JobCompletion, JobFailure, ScanJobRepository, ScanJobSnapshot
 from app.scanner.profile import ScanProfile
@@ -28,6 +31,11 @@ from app.scanner.target import ScanType
 logger = logging.getLogger(__name__)
 
 ProcessorFactory = Callable[[ScanJobSnapshot, ScanProfile], FindingProcessor]
+
+
+class CompletionAnnouncer(Protocol):
+    def announce(self, job: ScanJobSnapshot, findings: Sequence[ProcessedFinding], summary: ScanSummary) -> Any:
+        """Tell the workspace about a finished job (instead of "scan completed")."""
 
 
 def _utc_now() -> datetime:
@@ -44,6 +52,7 @@ class ScanJobRunner:
         graph_factory: Callable[[], FindingGraph],
         ai_trigger: AutoAnalysisTrigger,
         clock: Callable[[], datetime] = _utc_now,
+        announcers: Mapping[ScanType, CompletionAnnouncer] | None = None,
     ) -> None:
         self._repository = repository
         self._executors = executors
@@ -52,6 +61,7 @@ class ScanJobRunner:
         self._graph_factory = graph_factory
         self._ai_trigger = ai_trigger
         self._clock = clock
+        self._announcers = dict(announcers or {})
 
     def run(self, job_id: int) -> None:
         job = self._repository.load_job(job_id)
@@ -126,9 +136,14 @@ class ScanJobRunner:
         ), finished_at)
         logger.info("Job #%d done: %d saved, %d dropped of %d", job.id, len(report.saved), report.dropped, report.total)
 
-        self._notifier.scan_completed(job.workspace_id, build_summary(
+        summary = build_summary(
             job.id, job.target, job.scan_type, report.saved, report.severity_counts(), job.created_at, finished_at,
-        ))
+        )
+        announcer = self._announcers.get(ScanType.parse(job.scan_type))
+        if announcer is None:
+            self._notifier.scan_completed(job.workspace_id, summary)
+        else:
+            self._announce(announcer, job, report.saved, summary)
         if executor.ai_analysis:
             self._queue_ai_analysis(job, len(report.saved))
 
@@ -156,6 +171,15 @@ class ScanJobRunner:
                     logger.debug("Graph upsert failed for %s: %s", finding.fingerprint, exc)
         finally:
             graph.close()
+
+    @staticmethod
+    def _announce(
+        announcer: CompletionAnnouncer, job: ScanJobSnapshot, saved: Sequence[ProcessedFinding], summary: ScanSummary
+    ) -> None:
+        try:
+            announcer.announce(job, saved, summary)
+        except Exception as exc:  # the job itself succeeded: an alert failure must not fail it
+            logger.warning("Completion announcement failed for job #%d: %s", job.id, exc)
 
     def _queue_ai_analysis(self, job: ScanJobSnapshot, saved_findings: int) -> None:
         try:

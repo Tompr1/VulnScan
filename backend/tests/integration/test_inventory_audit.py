@@ -15,21 +15,23 @@ from app.api.deps import get_db
 from app.api.routes_inventory import get_inventory_read_model, router
 from app.core.auth import require_auth
 from app.core.job_queue import get_job_queue
+from app.core.workspace_settings import set_workspace_setting
 from app.cve.nvd import parse_vulnerability
 from app.cve.nvd_sync import SyncState
 from app.cve.sql_catalog import SqlCveCatalog, SqlSyncStateStore
 from app.db import models
+from app.inventory.alerts import DeviceLinks, InventoryAlerter
 from app.inventory.audit.auditor import DeviceAuditor
 from app.inventory.audit.reference import NO_KEV_DATASET, NVD_IMPORT_RUNNING, workspace_reference_data
 from app.inventory.audit.rules import default_rules
 from app.inventory.audit.service import InventoryAudit
 from app.inventory.domain import Device, InstalledApp, InventorySnapshot, Platform
-from app.inventory.repository import SqlInventoryReadModel, SqlInventoryRepository
+from app.inventory.repository import SqlAlertHistory, SqlInventoryReadModel, SqlInventoryRepository
 from app.inventory.sync import InventorySync
 from app.scan_jobs.executors import InventoryScanExecutor
 from app.scan_jobs.filtering import FindingFilterPolicy
 from app.scan_jobs.processing import FindingProcessor
-from app.scan_jobs.repository import SqlScanJobRepository
+from app.scan_jobs.repository import SqlIntegrationSource, SqlScanJobRepository
 from app.scan_jobs.runner import ScanJobRunner
 from app.scanner.target import ScanType
 from tests.fakes import SpyGraph, SpyJobQueue, SpyNotifier, StubAiTrigger, no_compliance
@@ -283,3 +285,126 @@ def test_les_lacunes_des_donnees_cve_sont_signalees_avec_l_audit(client, session
     # The CVE is still found from what the catalog already holds, without the KEV flag.
     vulnerable = db.query(models.Finding).filter_by(job_id=100, plugin_id="inventory.os_vulnerable").one()
     assert vulnerable.is_kev is False
+
+
+# ── Alerts on new device issues ───────────────────────────────────────────────
+
+def run_and_alert(session_factory, job_id, notifier, catalog=None):
+    audit = InventoryAudit(
+        SqlInventoryRepository(session_factory),
+        DeviceAuditor(default_rules(), today=lambda: date(2026, 11, 21)),
+        lambda workspace_id: reference_data(catalog),
+    )
+    ScanJobRunner(
+        repository=SqlScanJobRepository(session_factory),
+        executors={ScanType.INVENTORY: InventoryScanExecutor(AlreadyCollected, lambda: audit)},
+        processor_factory=lambda job, profile: FindingProcessor(FindingFilterPolicy(), no_compliance),
+        notifier=notifier,
+        graph_factory=SpyGraph,
+        ai_trigger=StubAiTrigger(),
+        announcers={ScanType.INVENTORY: InventoryAlerter(SqlAlertHistory(session_factory), notifier, DeviceLinks("https://vs.example"))},
+    ).run(job_id)
+
+
+def resync(session_factory, connection_id, **builds):
+    """A new collection: same devices, possibly other Windows builds."""
+    devices = (
+        Device("d1", "PC-COMPTA-04", Platform.WINDOWS, os_name="Windows", os_version=builds.get("d1", "10.0.22631.4317"),
+               apps=(InstalledApp("Notepad++ (64-bit x64)", "8.9.2"),)),
+        Device("d2", "PC-RH-01", Platform.WINDOWS, os_name="Windows", os_version=builds.get("d2", "10.0.26200.7171")),
+    )
+    InventorySync(SqlInventoryRepository(session_factory)).apply(connection_id, 1, InventorySnapshot("intune", devices, SYNCED_AT))
+
+
+@pytest.fixture
+def alerted(client, session_factory, db):
+    connection = create(client)
+    resync(session_factory, connection["id"])
+    return connection
+
+
+def test_le_premier_audit_envoie_un_bilan_et_pas_de_message_de_fin_de_scan(alerted, session_factory, db):
+    notifier = SpyNotifier()
+    add_inventory_job(db, alerted["id"], job_id=100)
+
+    run_and_alert(session_factory, 100, notifier)
+
+    [(workspace, alert)] = notifier.alerts
+    assert (workspace, alert.baseline) == (1, True)
+    # High and above only: the outdated Notepad++ (low) stays out.
+    assert [(i.issue.rule, i.device_name, i.link) for i in alert.items] == [
+        ("os_unsupported", "PC-COMPTA-04", f"https://vs.example/#/inventory/devices/{device_id(db, 'PC-COMPTA-04')}"),
+    ]
+    assert notifier.completed == []
+
+
+def test_un_audit_sans_nouveaute_n_envoie_rien(alerted, session_factory, db):
+    notifier = SpyNotifier()
+    for job_id in (100, 101):
+        add_inventory_job(db, alerted["id"], job_id=job_id)
+        run_and_alert(session_factory, job_id, notifier)
+
+    assert len(notifier.alerts) == 1  # the baseline only
+
+
+def test_seul_le_nouveau_probleme_est_alerte_avec_les_problemes_resolus(alerted, session_factory, db):
+    notifier = SpyNotifier()
+    add_inventory_job(db, alerted["id"], job_id=100)
+    run_and_alert(session_factory, 100, notifier)
+    # PC-COMPTA-04 is upgraded, PC-RH-01 is reinstalled on an unsupported release.
+    resync(session_factory, alerted["id"], d1="10.0.26200.7171", d2="10.0.22631.4317")
+    add_inventory_job(db, alerted["id"], job_id=101)
+
+    run_and_alert(session_factory, 101, notifier)
+
+    alert = notifier.alerts[-1][1]
+    assert (alert.baseline, [i.device_name for i in alert.items]) == (False, ["PC-RH-01"])
+    assert alert.resolved == 1  # PC-COMPTA-04 no longer unsupported
+
+
+def test_un_audit_dont_le_job_a_echoue_n_est_pas_la_reference(alerted, session_factory, db):
+    notifier = SpyNotifier()
+    add_inventory_job(db, alerted["id"], job_id=100)
+    run_and_alert(session_factory, 100, notifier)
+    # Job 101 audited but failed before saving its findings: no issue on record.
+    add_inventory_job(db, alerted["id"], job_id=101, status="failed")
+    db.add(models.InventoryAuditRun(connection_id=alerted["id"], job_id=101, audited_at=SYNCED_AT, devices=2, issues=0))
+    db.commit()
+    add_inventory_job(db, alerted["id"], job_id=102)
+
+    run_and_alert(session_factory, 102, notifier)
+
+    assert len(notifier.alerts) == 1  # compared with job 100: nothing new
+
+
+def test_le_seuil_d_alerte_se_regle_par_l_api(client):
+    assert client.get("/inventory/alert-settings").json() == {"min_severity": "high", "always_kev": True}
+
+    response = client.put("/inventory/alert-settings", json={"min_severity": "critical", "always_kev": False})
+
+    assert response.json() == {"min_severity": "critical", "always_kev": False}
+    assert client.get("/inventory/alert-settings").json() == {"min_severity": "critical", "always_kev": False}
+
+
+@pytest.mark.parametrize("body", [{"min_severity": "urgent"}, {"always_kev": "oui"}, {"min_severity": "high", "extra": 1}])
+def test_un_seuil_d_alerte_invalide_est_refuse(client, body):
+    assert client.put("/inventory/alert-settings", json=body).status_code == 422
+
+
+def test_le_seuil_reglable_change_ce_qui_est_alerte(alerted, client, session_factory, db):
+    client.put("/inventory/alert-settings", json={"min_severity": "low", "always_kev": True})
+    notifier = SpyNotifier()
+    add_inventory_job(db, alerted["id"], job_id=100)
+
+    run_and_alert(session_factory, 100, notifier)
+
+    assert sorted(i.issue.rule for i in notifier.alerts[0][1].items) == ["app_outdated", "os_unsupported"]
+
+
+def test_les_preferences_enregistrees_avant_les_alertes_d_appareil_recoivent_leurs_valeurs_par_defaut(session_factory, db, workspace):
+    set_workspace_setting(db, 1, "notification_preferences", {"scan_completed": {"email": True, "slack": False, "webhook": False}})
+
+    preferences = SqlIntegrationSource(session_factory).notification_preferences(1)
+
+    assert preferences["scan_completed"] == {"email": True, "slack": False, "webhook": False}
+    assert preferences["device_vulnerability"] == {"email": True, "slack": True, "webhook": True}

@@ -16,7 +16,9 @@ from typing import Any
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.core.workspace_settings import INVENTORY_ALERTS_KEY, get_workspace_setting
 from app.db import models
+from app.inventory.alerts import AlertSettings, KnownIssue
 from app.inventory.audit.service import AuditedDevice, AuditRun
 from app.inventory.changes import DeviceChange
 from app.inventory.domain import Device, InstalledApp, InventorySnapshot, Platform
@@ -172,6 +174,41 @@ class SqlInventoryReadModel:
                     for c in changes
                 ],
             }
+
+
+class SqlAlertHistory:
+    """What the alert policy compares an audit with (AlertHistory)."""
+
+    def __init__(self, session_factory: SessionFactory) -> None:
+        self._session_factory = session_factory
+
+    def previous_issues(self, job_id: int) -> list[KnownIssue] | None:
+        with self._session_factory() as db:
+            run = db.query(models.InventoryAuditRun).filter(models.InventoryAuditRun.job_id == job_id).first()
+            if run is None:
+                return None
+            previous = (
+                _completed_audits(db)
+                .filter(models.InventoryAuditRun.connection_id == run.connection_id, models.InventoryAuditRun.id < run.id)
+                .order_by(models.InventoryAuditRun.id.desc())
+                .first()
+            )
+            if previous is None:
+                return None
+            return [KnownIssue.of(row) for row in db.query(models.Finding).filter(models.Finding.job_id == previous.job_id)]
+
+    def device_names(self, device_ids: Collection[int]) -> dict[int, str]:
+        if not device_ids:
+            return {}
+        with self._session_factory() as db:
+            rows = db.query(models.InventoryDevice.id, models.InventoryDevice.name).filter(
+                models.InventoryDevice.id.in_(list(device_ids))
+            )
+            return dict(rows.all())
+
+    def alert_settings(self, workspace_id: int) -> AlertSettings:
+        with self._session_factory() as db:
+            return AlertSettings.from_stored(get_workspace_setting(db, workspace_id, INVENTORY_ALERTS_KEY, {}))
 
 
 _NO_ISSUES = {"issue_count": 0, "highest_severity": None}

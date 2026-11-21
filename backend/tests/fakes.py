@@ -169,6 +169,7 @@ class SpyChannel:
     def __init__(self, error: Exception | None = None) -> None:
         self.completed: list[tuple[dict, ScanSummary]] = []
         self.failed: list[tuple[dict, ScanFailure]] = []
+        self.alerts: list[tuple[dict, Any]] = []
         self._error = error
 
     def scan_completed(self, config: dict, summary: ScanSummary) -> None:
@@ -181,6 +182,11 @@ class SpyChannel:
             raise self._error
         self.failed.append((config, failure))
 
+    def device_alert(self, config: dict, alert: Any) -> None:
+        if self._error:
+            raise self._error
+        self.alerts.append((config, alert))
+
 
 class SpyNotifier:
     """Stands in for ScanNotifier in runner tests."""
@@ -188,12 +194,16 @@ class SpyNotifier:
     def __init__(self) -> None:
         self.completed: list[tuple[int, ScanSummary]] = []
         self.failed: list[tuple[int, ScanFailure]] = []
+        self.alerts: list[tuple[int, Any]] = []
 
     def scan_completed(self, workspace_id: int, summary: ScanSummary) -> None:
         self.completed.append((workspace_id, summary))
 
     def scan_failed(self, workspace_id: int, failure: ScanFailure) -> None:
         self.failed.append((workspace_id, failure))
+
+    def device_alert(self, workspace_id: int, alert: Any) -> None:
+        self.alerts.append((workspace_id, alert))
 
 
 # ── Scan job runner collaborators ─────────────────────────────────────────────

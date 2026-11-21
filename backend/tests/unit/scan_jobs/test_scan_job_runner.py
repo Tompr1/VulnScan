@@ -218,3 +218,48 @@ def test_un_job_ne_reference_un_identifiant_ephemere_que_s_il_est_marque_comme_t
     unmarked = ScanJobSnapshot(1, WS, "t", "internal", 1, {"web_auth": {"type": "form", "credential_id": 8}})
 
     assert (marked.ephemeral_credential_id, unmarked.ephemeral_credential_id) == (8, None)
+
+
+class SpyAnnouncer:
+    def __init__(self, error=None):
+        self.calls = []
+        self.error = error
+
+    def announce(self, job, findings, summary):
+        self.calls.append((job.id, [f.title for f in findings], summary.saved_count))
+        if self.error:
+            raise self.error
+
+
+def runner_with_announcer(announcer):
+    h = Harness()
+    h.runner = ScanJobRunner(
+        repository=h.repository,
+        executors={ScanType.INTERNAL: h.executor},
+        processor_factory=lambda job, profile: FindingProcessor(FindingFilterPolicy(), no_compliance),
+        notifier=h.notifier,
+        graph_factory=lambda: h.graph,
+        ai_trigger=h.ai_trigger,
+        clock=h.clock.utc_now,
+        announcers={ScanType.INTERNAL: announcer},
+    )
+    h.add_job()
+    return h
+
+
+def test_un_type_de_scan_avec_son_annonceur_remplace_la_notification_de_fin():
+    announcer = SpyAnnouncer()
+    h = runner_with_announcer(announcer)
+
+    h.runner.run(10)
+
+    assert announcer.calls == [(10, ["XSS"], 1)]
+    assert h.notifier.completed == []
+
+
+def test_un_echec_d_annonce_ne_fait_pas_echouer_le_job():
+    h = runner_with_announcer(SpyAnnouncer(error=RuntimeError("Slack down")))
+
+    h.runner.run(10)
+
+    assert h.repository.status_of(10) == "done"

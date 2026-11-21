@@ -55,3 +55,13 @@ class UpdateIntuneConnectionRequest(BaseModel):
     @classmethod
     def _name_not_blank(cls, value: str | None) -> str | None:
         return _stripped_name(value)
+
+
+class AlertSettingsRequest(BaseModel):
+    """Which new device issues are alerted: at least ``min_severity``, plus
+    every actively exploited one (CISA KEV) when ``always_kev``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_severity: Literal["critical", "high", "medium", "low", "info"] = "high"
+    always_kev: bool = True

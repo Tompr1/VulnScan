@@ -685,6 +685,18 @@ Client — `backend/app/inventory/audit/cves.py`). Not covered: Microsoft 365 /
 Office, Java and Citrix Workspace (NVD gives no comparable build range), Android
 (fixed by security patch level, see `android_patch_outdated`).
 
+**Alerts** (`backend/app/inventory/alerts.py`): after each audit, the workspace's
+integrations (Slack, Teams, e-mail, webhook) get ONE message listing the
+**new** device issues only, each with a link to its device page
+(`<PUBLIC_URL>/#/inventory/devices/<id>`; `PUBLIC_URL` defaults to the first
+CORS origin). An issue already reported is not repeated; one that worsens past
+the threshold or becomes actively exploited is new. The first audit of a
+connection sends a single baseline summary. Threshold: `GET/PUT
+/inventory/alert-settings` (`min_severity`, default `high`; `always_kev`,
+default `true`). Channels: notification preferences `device_vulnerability`,
+`device_os_issue`, `device_software_issue` (and `cisa_kev_match`). Inventory jobs
+do not send the generic "scan completed" message.
+
 ---
 
 ## Changelog

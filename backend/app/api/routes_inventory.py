@@ -13,11 +13,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_role
-from app.api.schemas.inventory import CreateIntuneConnectionRequest, UpdateIntuneConnectionRequest
+from app.api.schemas.inventory import AlertSettingsRequest, CreateIntuneConnectionRequest, UpdateIntuneConnectionRequest
 from app.core.crypto import encrypt_str
 from app.core.job_queue import QueueUnavailableError, ScanJobQueue, get_job_queue
+from app.core.workspace_settings import INVENTORY_ALERTS_KEY, get_workspace_setting, set_workspace_setting
 from app.db import models
 from app.db.session import SessionLocal
+from app.inventory.alerts import AlertSettings
 from app.inventory.collector import SourceFactory, credentials_of, intune_source
 from app.inventory.domain import Platform
 from app.inventory.intune.graph_client import GraphError
@@ -137,6 +139,23 @@ def sync_connection(
     except QueueUnavailableError as exc:
         raise HTTPException(503, f"Could not enqueue inventory sync: {exc}")
     return {"job_id": job.id, "status": job.status}
+
+
+# ─── Alerts ────────────────────────────────────────────────────────────────────
+
+@router.get("/alert-settings")
+def get_alert_settings(user=Depends(require_role("admin", "analyst", "viewer")), db: Session = Depends(get_db)):
+    """Threshold of the alerts on new device issues (channels are chosen in
+    the notification preferences: device_vulnerability, device_os_issue,
+    device_software_issue, cisa_kev_match)."""
+    return AlertSettings.from_stored(get_workspace_setting(db, user["ws"], INVENTORY_ALERTS_KEY, {})).to_stored()
+
+
+@router.put("/alert-settings")
+def put_alert_settings(body: AlertSettingsRequest, user=Depends(require_role("admin")), db: Session = Depends(get_db)):
+    settings = AlertSettings.from_stored(body.model_dump())
+    set_workspace_setting(db, user["ws"], INVENTORY_ALERTS_KEY, settings.to_stored())
+    return settings.to_stored()
 
 
 # ─── Devices ───────────────────────────────────────────────────────────────────

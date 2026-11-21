@@ -17,11 +17,7 @@ from typing import Any, Protocol
 
 from sqlalchemy.orm import Session
 
-from app.core.workspace_settings import (
-    DEFAULT_NOTIFICATION_PREFS,
-    NOTIFICATION_PREFERENCES_KEY,
-    get_workspace_setting,
-)
+from app.core.workspace_settings import notification_preferences
 from app.cve.dataset_loader import load_json
 from app.db import models
 from app.scan_jobs.notifications import Integration
@@ -238,7 +234,7 @@ class SqlIntegrationSource:
 
     def notification_preferences(self, workspace_id: int) -> dict[str, Any]:
         with self._session_factory() as db:
-            return get_workspace_setting(db, workspace_id, NOTIFICATION_PREFERENCES_KEY, DEFAULT_NOTIFICATION_PREFS)
+            return notification_preferences(db, workspace_id)
 
 
 def _finding_row(job: ScanJobSnapshot, finding: ProcessedFinding) -> models.Finding:

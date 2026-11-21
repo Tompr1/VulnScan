@@ -24,12 +24,13 @@ from app.cve.sql_catalog import SqlCveCatalog, SqlSyncStateStore
 from app.cve.enricher import CveSeverityEnricher
 from app.db import models
 from app.db.session import SessionLocal
+from app.inventory.alerts import DeviceLinks, InventoryAlerter
 from app.inventory.audit.auditor import DeviceAuditor
 from app.inventory.audit.reference import workspace_reference_data
 from app.inventory.audit.rules import default_rules
 from app.inventory.audit.service import InventoryAudit
 from app.inventory.collector import InventoryCollector
-from app.inventory.repository import SqlInventoryRepository
+from app.inventory.repository import SqlAlertHistory, SqlInventoryRepository
 from app.risk.risk_engine import parse_criticality
 from app.scan_jobs.ai_trigger import SqlAutoAnalysisTrigger
 from app.scan_jobs.executors import default_executors
@@ -41,6 +42,7 @@ from app.scan_jobs.repository import ScanJobSnapshot, SqlIntegrationSource, SqlS
 from app.scan_jobs.runner import ScanJobRunner
 from app.scanner.engine import default_engine
 from app.scanner.profile import ScanProfile
+from app.scanner.target import ScanType
 
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO)
@@ -100,13 +102,17 @@ def build_cve_catalog_sync() -> NvdCatalogSync:
 
 def build_scan_job_runner() -> ScanJobRunner:
     repository = SqlScanJobRepository(SessionLocal)
+    notifier = ScanNotifier(SqlIntegrationSource(SessionLocal))
     return ScanJobRunner(
         repository=repository,
         executors=default_executors(default_engine, lambda: InventoryCollector(SessionLocal), build_inventory_audit),
         processor_factory=partial(_build_finding_processor, repository, _open_cvss_enricher()),
-        notifier=ScanNotifier(SqlIntegrationSource(SessionLocal)),
+        notifier=notifier,
         graph_factory=open_finding_graph,
         ai_trigger=SqlAutoAnalysisTrigger(SessionLocal, get_job_queue(), settings.available_ai_providers),
+        announcers={
+            ScanType.INVENTORY: InventoryAlerter(SqlAlertHistory(SessionLocal), notifier, DeviceLinks(settings.public_url)),
+        },
     )
 
 
