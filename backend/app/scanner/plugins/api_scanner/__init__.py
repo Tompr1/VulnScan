@@ -4,7 +4,7 @@ Comprehensive API testing: ingests OpenAPI/Swagger/Postman specs,
 dispatches to injection, config, and GraphQL sub-modules.
 
 This plugin can run in two modes:
-1. Engine mode: called by scan_target() as part of a normal scan
+1. Engine mode: run by the ScanEngine as part of a normal scan
 2. Standalone mode: called directly by the API scanner endpoint
 """
 import asyncio
@@ -64,7 +64,7 @@ class Check(Plugin):
 
     async def run(self, target: str, ctx: ScanContext) -> PluginResult:
         """
-        Engine mode: called by scan_target() during a normal scan.
+        Engine mode: run by the ScanEngine during a normal scan.
         Attempts to auto-discover an API spec and run checks.
         """
         findings = []

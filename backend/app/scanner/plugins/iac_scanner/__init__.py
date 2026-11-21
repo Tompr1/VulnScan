@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
 
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
@@ -142,12 +141,3 @@ class Check:
                     pass
 
         return all_findings
-
-    async def run(self, target: str, ctx: Any) -> Any:
-        """
-        Engine-mode placeholder. The IaC scanner is upload-driven so it never
-        runs as part of a normal scan_target() flow — but we implement run()
-        to satisfy the Plugin protocol if it's ever loaded.
-        """
-        from app.scanner.plugins.base import PluginResult
-        return PluginResult(findings=[], artifacts={})

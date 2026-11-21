@@ -28,6 +28,7 @@ META = PluginMeta(
     depends_on=["fingerprint.http"],
     consumes=["fingerprint.http", "net.open_ports"],
     provides=["web.host_header.findings"],
+    artifact_defaults={"web.host_header.findings": 0},
     enabled_by_default=True,
     timeout_seconds=20.0,
 )

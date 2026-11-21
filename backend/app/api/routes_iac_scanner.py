@@ -10,13 +10,11 @@ import base64
 import json
 import logging
 
-import redis
-from rq import Queue
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_role
-from app.core.config import settings
+from app.core.job_queue import QueueUnavailableError, get_job_queue
 from app.db import models
 
 logger = logging.getLogger("vulnscan.api.iac_scanner")
@@ -136,18 +134,12 @@ async def create_iac_scan_job(
     db.refresh(job)
 
     try:
-        redis_conn = redis.from_url(settings.REDIS_URL)
-        q = Queue("scans", connection=redis_conn)
-        from app.worker_tasks import run_scan_job
-        q.enqueue(
-            run_scan_job, job.id,
-            job_timeout=settings.SCAN_JOB_TIMEOUT,
-        )
+        get_job_queue().enqueue_scan(job.id)
         logger.info(
             "IaC scan job #%d queued: filename=%s kinds=%s size=%d",
             job.id, upload.filename, requested_kinds or "all", len(raw),
         )
-    except Exception as e:
+    except QueueUnavailableError as e:
         job.status = "failed"
         job.meta_json = json.dumps({"error": str(e)})
         db.commit()

@@ -35,6 +35,7 @@ META = PluginMeta(
     depends_on=["fingerprint.http"],
     consumes=["fingerprint.http", "net.open_ports"],
     provides=["web.ssti.findings"],
+    artifact_defaults={"web.ssti.findings": 0},
     enabled_by_default=True,
     timeout_seconds=30.0,
 )

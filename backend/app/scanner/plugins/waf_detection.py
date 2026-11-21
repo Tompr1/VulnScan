@@ -36,6 +36,7 @@ META = PluginMeta(
     depends_on=["fingerprint.http"],
     consumes=["fingerprint.http", "net.open_ports"],
     provides=["web.waf.findings"],
+    artifact_defaults={"web.waf.findings": {}},
     enabled_by_default=True,
     timeout_seconds=25.0,
 )

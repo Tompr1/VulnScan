@@ -19,7 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ── External pentest tools ─────────────────────────────────────────
 
-# Nuclei (ProjectDiscovery) — template-based vulnerability scanning
+# Nuclei (ProjectDiscovery) — template-based vulnerability scanning.
+# Only the template update is optional (it needs network at build time): a
+# failed binary download must fail the build, not ship an image without nuclei.
 ARG NUCLEI_VERSION=3.3.7
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_${ARCH}.zip" \
@@ -27,7 +29,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
     unzip -o /tmp/nuclei.zip -d /usr/local/bin/ && \
     chmod +x /usr/local/bin/nuclei && \
     rm /tmp/nuclei.zip && \
-    nuclei -update-templates -silent || true
+    (nuclei -update-templates -silent || echo "WARNING: nuclei templates not updated")
 
 # testssl.sh — comprehensive TLS/SSL testing
 

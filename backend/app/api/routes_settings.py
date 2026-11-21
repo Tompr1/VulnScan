@@ -15,6 +15,11 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_role
 from app.core.config import settings
 from app.core.password import hash_password, verify_password
+from app.core.workspace_settings import (
+    DEFAULT_NOTIFICATION_PREFS,
+    get_workspace_setting,
+    set_workspace_setting,
+)
 from app.db import models
 
 logger = logging.getLogger("vulnscan.settings")
@@ -484,40 +489,9 @@ DEFAULT_SLA = {
 }
 
 
-def _get_setting(db: Session, ws: int, key: str, default: dict) -> dict:
-    row = db.query(models.WorkspaceSetting).filter(
-        models.WorkspaceSetting.workspace_id == ws,
-        models.WorkspaceSetting.key == key,
-    ).first()
-    if not row:
-        return default
-    try:
-        return json.loads(row.value_json)
-    except Exception:
-        return default
-
-
-def _set_setting(db: Session, ws: int, key: str, value: dict) -> None:
-    row = db.query(models.WorkspaceSetting).filter(
-        models.WorkspaceSetting.workspace_id == ws,
-        models.WorkspaceSetting.key == key,
-    ).first()
-    if row:
-        row.value_json = json.dumps(value)
-        row.updated_at = datetime.now(timezone.utc)
-    else:
-        row = models.WorkspaceSetting(
-            workspace_id=ws,
-            key=key,
-            value_json=json.dumps(value),
-        )
-        db.add(row)
-    db.commit()
-
-
 @router.get("/sla")
 def get_sla(user=Depends(require_role("admin", "analyst", "viewer")), db: Session = Depends(get_db)):
-    return _get_setting(db, user["ws"], "sla", DEFAULT_SLA)
+    return get_workspace_setting(db, user["ws"], "sla", DEFAULT_SLA)
 
 
 class SLAUpdate(BaseModel):
@@ -530,16 +504,16 @@ class SLAUpdate(BaseModel):
 
 @router.put("/sla")
 def put_sla(body: SLAUpdate, user=Depends(require_role("admin", "analyst")), db: Session = Depends(get_db)):
-    current = _get_setting(db, user["ws"], "sla", DEFAULT_SLA)
+    current = get_workspace_setting(db, user["ws"], "sla", DEFAULT_SLA)
     incoming = body.dict(exclude_unset=True)
     current.update(incoming)
-    _set_setting(db, user["ws"], "sla", current)
+    set_workspace_setting(db, user["ws"], "sla", current)
     return current
 
 
 @router.post("/sla/reset")
 def reset_sla(user=Depends(require_role("admin", "analyst")), db: Session = Depends(get_db)):
-    _set_setting(db, user["ws"], "sla", DEFAULT_SLA)
+    set_workspace_setting(db, user["ws"], "sla", DEFAULT_SLA)
     return DEFAULT_SLA
 
 
@@ -551,14 +525,6 @@ _VALID_NOTIF_EVENTS = {
 }
 _VALID_NOTIF_CHANNELS = {"email", "slack", "webhook"}
 
-DEFAULT_NOTIFICATION_PREFS = {
-    "critical_finding":     {"email": True,  "slack": True,  "webhook": True},
-    "cisa_kev_match":       {"email": True,  "slack": True,  "webhook": False},
-    "scan_completed":       {"email": False, "slack": True,  "webhook": False},
-    "scan_failed":          {"email": True,  "slack": True,  "webhook": True},
-    "new_asset_discovered": {"email": False, "slack": False, "webhook": True},
-    "weekly_digest":        {"email": True,  "slack": False, "webhook": False},
-}
 
 
 @router.get("/notifications")
@@ -566,7 +532,7 @@ def get_notification_prefs(
     user=Depends(require_role("admin", "analyst", "viewer")),
     db: Session = Depends(get_db),
 ):
-    return _get_setting(db, user["ws"], "notification_preferences", DEFAULT_NOTIFICATION_PREFS)
+    return get_workspace_setting(db, user["ws"], "notification_preferences", DEFAULT_NOTIFICATION_PREFS)
 
 
 @router.put("/notifications")
@@ -588,9 +554,9 @@ def put_notification_prefs(
         }
 
     # Merge with defaults so missing keys get defaults
-    current = _get_setting(db, user["ws"], "notification_preferences", DEFAULT_NOTIFICATION_PREFS)
+    current = get_workspace_setting(db, user["ws"], "notification_preferences", DEFAULT_NOTIFICATION_PREFS)
     current.update(cleaned)
-    _set_setting(db, user["ws"], "notification_preferences", current)
+    set_workspace_setting(db, user["ws"], "notification_preferences", current)
     return current
 
 
@@ -599,7 +565,7 @@ def reset_notification_prefs(
     user=Depends(require_role("admin", "analyst")),
     db: Session = Depends(get_db),
 ):
-    _set_setting(db, user["ws"], "notification_preferences", DEFAULT_NOTIFICATION_PREFS)
+    set_workspace_setting(db, user["ws"], "notification_preferences", DEFAULT_NOTIFICATION_PREFS)
     return DEFAULT_NOTIFICATION_PREFS
 
 
@@ -618,7 +584,7 @@ def get_auto_ai(
     db: Session = Depends(get_db),
 ):
     """Return auto AI analysis configuration."""
-    config = _get_setting(db, user["ws"], "auto_ai_analysis", DEFAULT_AUTO_AI)
+    config = get_workspace_setting(db, user["ws"], "auto_ai_analysis", DEFAULT_AUTO_AI)
     # Providers offered to the UI. `available_ai_providers()` only knows about
     # env-configured ones, so anything added through Settings > AI Providers
     # (OpenRouter, a local LLM, …) has to be merged in here — otherwise it can
@@ -662,7 +628,7 @@ def put_auto_ai(
     db: Session = Depends(get_db),
 ):
     """Update auto AI analysis configuration."""
-    current = _get_setting(db, user["ws"], "auto_ai_analysis", DEFAULT_AUTO_AI)
+    current = get_workspace_setting(db, user["ws"], "auto_ai_analysis", DEFAULT_AUTO_AI)
     incoming = body.dict(exclude_unset=True)
 
     _valid_modes = ("validate", "full", "full_exploit", "validate_then_exploit")
@@ -670,7 +636,7 @@ def put_auto_ai(
         raise HTTPException(400, f"Mode must be one of: {', '.join(_valid_modes)}")
 
     current.update(incoming)
-    _set_setting(db, user["ws"], "auto_ai_analysis", current)
+    set_workspace_setting(db, user["ws"], "auto_ai_analysis", current)
     logger.info("Auto AI analysis updated by %s: %s", user.get("sub", "?"), current)
     return current
 
@@ -688,7 +654,7 @@ def get_sla_alert(
     user=Depends(require_role("admin", "analyst", "viewer")),
     db: Session = Depends(get_db),
 ):
-    return _get_setting(db, user["ws"], "sla_breach_alert", DEFAULT_SLA_ALERT)
+    return get_workspace_setting(db, user["ws"], "sla_breach_alert", DEFAULT_SLA_ALERT)
 
 
 class SLAAlertUpdate(BaseModel):
@@ -702,12 +668,12 @@ def put_sla_alert(
     user=Depends(require_role("admin", "analyst")),
     db: Session = Depends(get_db),
 ):
-    current = _get_setting(db, user["ws"], "sla_breach_alert", DEFAULT_SLA_ALERT)
+    current = get_workspace_setting(db, user["ws"], "sla_breach_alert", DEFAULT_SLA_ALERT)
     incoming = body.dict(exclude_unset=True)
     if "interval_minutes" in incoming and incoming["interval_minutes"] < 15:
         raise HTTPException(400, "Interval must be at least 15 minutes")
     current.update(incoming)
-    _set_setting(db, user["ws"], "sla_breach_alert", current)
+    set_workspace_setting(db, user["ws"], "sla_breach_alert", current)
     logger.info("SLA breach alert updated by %s: %s", user.get("sub", "?"), current)
     return current
 
@@ -726,7 +692,7 @@ def get_dataset_refresh(
     db: Session = Depends(get_db),
 ):
     """Return scheduled dataset refresh configuration."""
-    return _get_setting(db, user["ws"], "dataset_refresh", DEFAULT_DATASET_REFRESH)
+    return get_workspace_setting(db, user["ws"], "dataset_refresh", DEFAULT_DATASET_REFRESH)
 
 
 class DatasetRefreshUpdate(BaseModel):
@@ -741,14 +707,14 @@ def put_dataset_refresh(
     db: Session = Depends(get_db),
 ):
     """Update scheduled dataset refresh configuration."""
-    current = _get_setting(db, user["ws"], "dataset_refresh", DEFAULT_DATASET_REFRESH)
+    current = get_workspace_setting(db, user["ws"], "dataset_refresh", DEFAULT_DATASET_REFRESH)
     incoming = body.dict(exclude_unset=True)
     if "interval_hours" in incoming:
         iv = incoming["interval_hours"]
         if not isinstance(iv, int) or not (1 <= iv <= 168):
             raise HTTPException(400, "interval_hours must be between 1 and 168")
     current.update(incoming)
-    _set_setting(db, user["ws"], "dataset_refresh", current)
+    set_workspace_setting(db, user["ws"], "dataset_refresh", current)
     logger.info("Dataset refresh schedule updated by %s: %s", user.get("sub", "?"), current)
     return current
 
@@ -765,7 +731,7 @@ def get_auto_report(
     db: Session = Depends(get_db),
 ):
     """Return auto report generation configuration."""
-    return _get_setting(db, user["ws"], "auto_report", DEFAULT_AUTO_REPORT)
+    return get_workspace_setting(db, user["ws"], "auto_report", DEFAULT_AUTO_REPORT)
 
 
 class AutoReportUpdate(BaseModel):
@@ -780,13 +746,13 @@ def put_auto_report(
     db: Session = Depends(get_db),
 ):
     """Update auto report generation configuration."""
-    current = _get_setting(db, user["ws"], "auto_report", DEFAULT_AUTO_REPORT)
+    current = get_workspace_setting(db, user["ws"], "auto_report", DEFAULT_AUTO_REPORT)
     incoming = body.dict(exclude_unset=True)
 
     if "format" in incoming and incoming["format"] not in ("pdf",):
         raise HTTPException(400, "Format must be: pdf")
 
     current.update(incoming)
-    _set_setting(db, user["ws"], "auto_report", current)
+    set_workspace_setting(db, user["ws"], "auto_report", current)
     logger.info("Auto report config updated by %s: %s", user.get("sub", "?"), current)
     return current

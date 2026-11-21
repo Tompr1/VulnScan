@@ -52,3 +52,8 @@ data/claude-config/
 # Update system
 data/update-trigger.json
 data/update-result.json
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/

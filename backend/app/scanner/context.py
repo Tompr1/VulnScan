@@ -39,17 +39,12 @@ class ScanContext:
     def set(self, key: str, value: Any) -> None:
         self._artifacts[key] = value
 
-    # FIX: add put() as alias for set() — engine.py uses ctx.put(...)
-    def put(self, key: str, value: Any) -> None:
-        self._artifacts[key] = value
-
     def get(self, key: str, default: Any = None) -> Any:
         return self._artifacts.get(key, default)
 
     def has(self, key: str) -> bool:
         return key in self._artifacts
 
-    # FIX: add dedup() method — engine.py calls ctx.dedup(fingerprint)
     def dedup(self, fingerprint: str) -> bool:
         """
         Returns True if this fingerprint has NOT been seen before (i.e. it's new).

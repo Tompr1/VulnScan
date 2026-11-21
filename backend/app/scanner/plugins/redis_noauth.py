@@ -28,6 +28,7 @@ META = PluginMeta(
     soft_depends_on=["infra.db.auth_check"],
     consumes=["net.open_ports"],
     provides=["infra.redis.findings"],
+    artifact_defaults={"infra.redis.findings": 0},
     enabled_by_default=True,
     timeout_seconds=15.0,
 )

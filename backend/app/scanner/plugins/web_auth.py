@@ -34,6 +34,7 @@ META = PluginMeta(
     name="Web Authentication Session",
     category="web_auth",
     provides=["web.auth_session"],
+    artifact_defaults={"web.auth_session": None},
     enabled_by_default=False,
     timeout_seconds=20.0,
 )

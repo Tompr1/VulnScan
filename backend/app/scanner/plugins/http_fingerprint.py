@@ -12,6 +12,7 @@ META = PluginMeta(
     depends_on=["net.port.discovery.v2"],
     consumes=["net.open_ports"],
     provides=["fingerprint.http"],
+    artifact_defaults={"fingerprint.http": {"http": []}},
     enabled_by_default=True,
     timeout_seconds=30.0,
 )

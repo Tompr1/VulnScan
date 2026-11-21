@@ -298,7 +298,7 @@ def _schedule_loop():
     from pathlib import Path
     from redis import Redis
     from rq import Queue
-    from app.worker_tasks import run_scan_job
+    from app.core.job_queue import get_job_queue
 
     logger.info("Scheduler started")
 
@@ -340,9 +340,7 @@ def _schedule_loop():
                     db.commit()
                     db.refresh(job)
 
-                    q = Queue("scans", connection=Redis.from_url(settings.REDIS_URL))
-                    rq_timeout = settings.SCAN_JOB_TIMEOUT
-                    q.enqueue(run_scan_job, job.id, job_timeout=rq_timeout)
+                    get_job_queue().enqueue_scan(job.id)
 
                     sched.last_run_at = now_utc
 
@@ -503,7 +501,7 @@ def _schedule_loop():
             # Generate PDF reports for scan jobs that finished in the last 5 min
             # when the workspace has auto_report enabled.
             try:
-                from app.api.routes_settings import _get_setting
+                from app.core.workspace_settings import get_workspace_setting
                 five_min_ago = now_utc - timedelta(minutes=5)
                 recent_done_jobs = (
                     db.query(models.ScanJob)
@@ -516,7 +514,7 @@ def _schedule_loop():
                 )
                 for rj in recent_done_jobs:
                     try:
-                        auto_cfg = _get_setting(
+                        auto_cfg = get_workspace_setting(
                             db, rj.workspace_id, "auto_report",
                             {"enabled": False, "format": "pdf"},
                         )
@@ -561,7 +559,7 @@ def _schedule_loop():
                     # Get workspaces that have SLA alerts enabled
                     enabled_ws_ids = []
                     for ws_obj in db.query(models.Workspace).all():
-                        sla_cfg = _get_setting(
+                        sla_cfg = get_workspace_setting(
                             db, ws_obj.id, "sla_breach_alert",
                             {"enabled": False},
                         )
@@ -639,10 +637,11 @@ def _schedule_loop():
             # remembered to press the button — which is how a 4-day-old,
             # silently incomplete NVD dataset ended up in production.
             try:
-                from app.api.routes_settings import _get_setting, DEFAULT_DATASET_REFRESH
+                from app.api.routes_settings import DEFAULT_DATASET_REFRESH
+                from app.core.workspace_settings import get_workspace_setting
                 ws_rows = db.query(models.Workspace).all()
                 for ws_row in ws_rows:
-                    cfg = _get_setting(db, ws_row.id, "dataset_refresh", DEFAULT_DATASET_REFRESH)
+                    cfg = get_workspace_setting(db, ws_row.id, "dataset_refresh", DEFAULT_DATASET_REFRESH)
                     if not cfg.get("enabled"):
                         continue
                     interval_ticks = max(1, int(cfg.get("interval_hours", 24)) * 60)

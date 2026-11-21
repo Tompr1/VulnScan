@@ -1,17 +1,26 @@
 """
-Plugin loader — discovers all scanner plugins and sorts them by dependency order.
+Plugin registry — discovers scanner plugins, orders them by dependency and
+resolves which ones a profile enables.
+
+The registry is a plain object built from a list of :class:`Plugin`
+instances, so tests can build one from fakes without importing the 70
+built-in plugin modules.
 """
+from __future__ import annotations
+
+import functools
 import importlib
 import logging
-from typing import TYPE_CHECKING
+from collections import deque
+from collections.abc import Iterable, Iterator, Mapping
 
-if TYPE_CHECKING:
-    from app.scanner.plugins.base import Plugin
+from app.scanner.plugins.base import Plugin, PluginMeta
 
 logger = logging.getLogger("vulnscan.loader")
 
-# All built-in plugin modules (relative to app.scanner.plugins)
-_BUILTIN_PLUGINS = [
+# Built-in plugin modules (relative to app.scanner.plugins). The list order is
+# the tie-breaker of the topological sort, so it is kept explicit.
+BUILTIN_PLUGIN_MODULES: tuple[str, ...] = (
     "port_scan",
     "nmap_portscan",
     "nmap_external",
@@ -34,7 +43,7 @@ _BUILTIN_PLUGINS = [
     "cve_verifier",
     "dir_crawl",
     "file_inclusion",
-    # Infrastructure scanning plugins
+    # Infrastructure
     "dns_enum",
     "db_auth_check",
     "ssh_audit",
@@ -45,7 +54,7 @@ _BUILTIN_PLUGINS = [
     "graphql_scanner",
     "security_headers",
     "mqtt_scanner",
-    # Tier 2 — infrastructure & injection plugins
+    # Tier 2 — infrastructure & injection
     "snmp_community",
     "ftp_anon",
     "redis_noauth",
@@ -65,127 +74,148 @@ _BUILTIN_PLUGINS = [
     "websocket_check",
     "k8s_api",
     "unauth_api",
-    # Tier 4 — deep injection testing (advanced payloads + bypass)
+    # Tier 4 — deep injection testing
     "deep_sqli",
     "deep_cmdi",
     "advanced_xss",
     # Tier 5 — API-specific scanning (OpenAPI/Postman/GraphQL)
     "api_scanner",
-    # Tier 6 — Authenticated web scanning + UDP discovery (opt-in)
+    # Tier 6 — authenticated web scanning + UDP discovery (opt-in)
     "web_auth",
     "udp_portscan",
     # Tier 7 — passive recon & intelligence gathering
-    "wayback_urls",             # Wayback Machine URL discovery
-    "subdomain_takeover",       # subdomain takeover detection
-    "github_secret_scan",       # GitHub secret/credential leak scan (opt-in)
-    "dns_history",              # DNS history & passive intelligence (CT, SPF, DMARC)
-    "cms_vuln_scanner",         # CMS-specific checks (WordPress, Drupal, Joomla)
-    "ssl_grading",              # SSL/TLS A+ to F grading
-    "sca_scanner",              # SCA/dependency scanning (exposed manifests + known vulns)
-    "screenshot_capture",       # web service metadata capture
+    "wayback_urls",
+    "subdomain_takeover",
+    "github_secret_scan",
+    "dns_history",
+    "cms_vuln_scanner",
+    "ssl_grading",
+    "sca_scanner",
+    "screenshot_capture",
     # External tool integrations
-    "subfinder_external",       # passive subdomain enum (early recon)
-    "httpx_external",           # HTTP probing (after subfinder + nmap)
-    "ffuf_external",            # directory fuzzing (after HTTP fingerprint)
-    "testssl_external",         # deep TLS audit (after nmap finds TLS ports)
-    "nuclei_external",          # template-based vuln scanning
-    "sqlmap_external",          # advanced SQL injection testing (last — needs URLs)
+    "subfinder_external",
+    "httpx_external",
+    "ffuf_external",
+    "testssl_external",
+    "nuclei_external",
+    "sqlmap_external",
     # Tier 8 — CIS Benchmark auditing (opt-in, requires SSH)
-    "cis_benchmark",            # CIS Benchmark server hardening audit
-    "sca_server",               # Server-side SCA dependency audit via SSH
-]
+    "cis_benchmark",
+    "sca_server",
+)
+
+_PLUGIN_PACKAGE = "app.scanner.plugins"
 
 
-def load_plugins(plugin_selection: dict | None = None) -> dict[str, "Plugin"]:
-    """
-    Import all plugin modules and return a dict of {plugin_id: Plugin instance}.
+class PluginRegistry:
+    """Immutable collection of plugins indexed by ``plugin_id``."""
 
-    Args:
-        plugin_selection: Dict of {plugin_id: bool} controlling which plugins
-                          are enabled. If None, all plugins are loaded (filtering
-                          happens later in engine._enabled()).
+    def __init__(self, plugins: Iterable[Plugin]) -> None:
+        self._plugins: dict[str, Plugin] = {}
+        for plugin in plugins:
+            plugin_id = plugin.meta.plugin_id
+            if plugin_id in self._plugins:
+                raise ValueError(f"Duplicate plugin id: {plugin_id}")
+            self._plugins[plugin_id] = plugin
+        self._order = _topological_order(self._plugins)
 
-    Returns:
-        Dict mapping plugin_id -> Plugin instance.
-    """
-    from app.scanner.plugins.base import Plugin, PluginMeta  # noqa: F401
+    @classmethod
+    def discover(cls, module_names: Iterable[str] = BUILTIN_PLUGIN_MODULES) -> PluginRegistry:
+        """Import plugin modules and build a registry from their ``Check`` classes.
 
-    plugins: dict[str, "Plugin"] = {}
+        A module that fails to import or does not follow the plugin contract is
+        skipped with a warning, so one broken plugin cannot take the scanner down.
+        """
+        return cls(p for p in (_load_module_plugin(name) for name in module_names) if p)
 
-    for module_name in _BUILTIN_PLUGINS:
-        full_name = f"app.scanner.plugins.{module_name}"
-        try:
-            mod = importlib.import_module(full_name)
-        except Exception as e:
-            logger.warning("Failed to import plugin %s: %s", full_name, e)
-            continue
+    def __contains__(self, plugin_id: object) -> bool:
+        return plugin_id in self._plugins
 
-        # Each plugin module must expose a META and a Check class
-        meta = getattr(mod, "META", None)
-        check_cls = getattr(mod, "Check", None)
+    def __iter__(self) -> Iterator[Plugin]:
+        return iter(self._plugins.values())
 
-        if meta is None or check_cls is None:
-            logger.warning("Plugin %s missing META or Check class — skipping", full_name)
-            continue
+    def __len__(self) -> int:
+        return len(self._plugins)
 
-        instance = check_cls()
-        instance.meta = meta  # store as .meta for engine.py access
-        instance.META = meta  # backwards compat
-        plugins[meta.plugin_id] = instance
+    def get(self, plugin_id: str) -> Plugin:
+        return self._plugins[plugin_id]
 
-    return plugins
+    def execution_order(self) -> list[str]:
+        """All plugin ids, each one after the plugins it depends on."""
+        return list(self._order)
+
+    def resolve_enabled(self, selection: Mapping[str, bool]) -> list[str]:
+        """Plugin ids to run for a profile selection, in execution order.
+
+        - an empty selection enables the plugins that are on by default;
+        - a plugin absent from a non-empty selection keeps its default, so
+          existing profiles pick up newly added plugins;
+        - hard dependencies of an enabled plugin are enabled too.
+        """
+        enabled = {
+            plugin_id
+            for plugin_id, plugin in self._plugins.items()
+            if selection.get(plugin_id, plugin.meta.enabled_by_default)
+        }
+        self._add_hard_dependencies(enabled)
+        return [plugin_id for plugin_id in self._order if plugin_id in enabled]
+
+    def _add_hard_dependencies(self, enabled: set[str]) -> None:
+        pending = list(enabled)
+        while pending:
+            plugin = self._plugins[pending.pop()]
+            for dependency in plugin.meta.depends_on:
+                if dependency in self._plugins and dependency not in enabled:
+                    enabled.add(dependency)
+                    pending.append(dependency)
 
 
-def topo_sort(plugins: dict[str, "Plugin"] | list["Plugin"]) -> list[str]:
-    """
-    Sort plugins so that each plugin runs after its dependencies.
-    Uses Kahn's algorithm (BFS topological sort).
+def _load_module_plugin(module_name: str) -> Plugin | None:
+    full_name = f"{_PLUGIN_PACKAGE}.{module_name}"
+    try:
+        module = importlib.import_module(full_name)
+    except Exception as exc:  # any import-time failure must not stop the scanner
+        logger.warning("Failed to import plugin %s: %s", full_name, exc)
+        return None
 
-    Accepts either a dict {plugin_id: Plugin} or a list of Plugins.
-    Returns a list of plugin_id strings in dependency order.
-    """
-    # Normalize input to dict
-    if isinstance(plugins, list):
-        by_id: dict[str, "Plugin"] = {}
-        for p in plugins:
-            meta = getattr(p, "meta", None) or getattr(p, "META", None)
-            if meta:
-                by_id[meta.plugin_id] = p
-    else:
-        by_id = dict(plugins)
+    meta = getattr(module, "META", None)
+    check_cls = getattr(module, "Check", None)
+    if not isinstance(meta, PluginMeta) or not (isinstance(check_cls, type) and issubclass(check_cls, Plugin)):
+        logger.warning("Plugin %s must expose META: PluginMeta and Check(Plugin) — skipped", full_name)
+        return None
+    return check_cls(meta)
 
-    in_degree: dict[str, int] = {pid: 0 for pid in by_id}
 
-    for pid, plugin in by_id.items():
-        meta = getattr(plugin, "meta", None) or getattr(plugin, "META", None)
-        if not meta:
-            continue
-        # Both hard and soft dependencies affect ordering
-        all_deps = list(meta.depends_on or []) + list(getattr(meta, "soft_depends_on", None) or [])
-        for dep in all_deps:
-            if dep in in_degree:
-                in_degree[pid] += 1
+def _topological_order(plugins: Mapping[str, Plugin]) -> list[str]:
+    """Kahn's algorithm. Dependencies on unknown plugins are ignored; plugins
+    caught in a cycle are appended at the end, in registration order."""
+    dependencies = {
+        plugin_id: plugin.meta.ordering_dependencies & plugins.keys()
+        for plugin_id, plugin in plugins.items()
+    }
+    dependents: dict[str, list[str]] = {plugin_id: [] for plugin_id in plugins}
+    for plugin_id, deps in dependencies.items():
+        for dependency in deps:
+            dependents[dependency].append(plugin_id)
 
-    queue = [pid for pid, deg in in_degree.items() if deg == 0]
-    sorted_ids: list[str] = []
+    remaining = {plugin_id: len(deps) for plugin_id, deps in dependencies.items()}
+    ready = deque(plugin_id for plugin_id, count in remaining.items() if count == 0)
+    order: list[str] = []
+    while ready:
+        plugin_id = ready.popleft()
+        order.append(plugin_id)
+        for dependent in dependents[plugin_id]:
+            remaining[dependent] -= 1
+            if remaining[dependent] == 0:
+                ready.append(dependent)
 
-    while queue:
-        pid = queue.pop(0)
-        sorted_ids.append(pid)
-        for other_pid, plugin in by_id.items():
-            meta = getattr(plugin, "meta", None) or getattr(plugin, "META", None)
-            if not meta:
-                continue
-            all_deps = list(meta.depends_on or []) + list(getattr(meta, "soft_depends_on", None) or [])
-            if pid in all_deps:
-                in_degree[other_pid] -= 1
-                if in_degree[other_pid] == 0:
-                    queue.append(other_pid)
+    unresolved = [plugin_id for plugin_id in plugins if plugin_id not in order]
+    if unresolved:
+        logger.warning("Plugin dependency cycle for: %s", unresolved)
+    return order + unresolved
 
-    # Any plugins not reached (cycles or missing deps) — append at end
-    remaining = [pid for pid in by_id if pid not in sorted_ids]
-    if remaining:
-        logger.warning("Plugin dependency cycle or missing dep for: %s", remaining)
-    sorted_ids.extend(remaining)
 
-    return sorted_ids
+@functools.lru_cache(maxsize=1)
+def builtin_registry() -> PluginRegistry:
+    """Registry of the built-in plugins, discovered once per process."""
+    return PluginRegistry.discover()
