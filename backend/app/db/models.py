@@ -300,8 +300,10 @@ class InventoryConnection(Base):
     sync_frequency: Mapped[str] = mapped_column(String(16), default="daily")  # manual | daily | weekly
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    # Set when a sync is queued, so the scheduler does not queue it twice.
+    last_sync_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_sync_status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # ok | error
+    last_sync_status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # queued | ok | error
     last_sync_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

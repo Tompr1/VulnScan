@@ -642,6 +642,21 @@ Actions tab.
 
 ---
 
+### Device inventory (Microsoft Intune)
+
+`/inventory` collects managed devices (Windows, macOS, iOS/iPadOS, Android,
+Linux) and their installed applications from Intune through Microsoft Graph,
+read-only. Configure a connection with an Entra ID application granted the
+**application** permission `DeviceManagementManagedDevices.Read.All` (admin
+consent required): tenant ID, client ID, client secret (stored encrypted,
+never returned), and a daily / weekly / manual sync. Each sync runs as an
+`inventory` scan job, stores the inventory and journals what changed (OS and
+application updates, installs, removals); `GET /inventory/devices/{id}` is the
+device page. Code: `backend/app/inventory/` (GLPI or Fleet plug in as new
+`InventorySource` implementations).
+
+---
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete history.

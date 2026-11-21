@@ -24,6 +24,7 @@ from app.cve.sql_catalog import SqlCveCatalog, SqlSyncStateStore
 from app.cve.enricher import CveSeverityEnricher
 from app.db import models
 from app.db.session import SessionLocal
+from app.inventory.collector import InventoryCollector
 from app.risk.risk_engine import parse_criticality
 from app.scan_jobs.ai_trigger import SqlAutoAnalysisTrigger
 from app.scan_jobs.executors import default_executors
@@ -96,7 +97,7 @@ def build_scan_job_runner() -> ScanJobRunner:
     repository = SqlScanJobRepository(SessionLocal)
     return ScanJobRunner(
         repository=repository,
-        executors=default_executors(default_engine),
+        executors=default_executors(default_engine, lambda: InventoryCollector(SessionLocal)),
         processor_factory=partial(_build_finding_processor, repository, _open_cvss_enricher()),
         notifier=ScanNotifier(SqlIntegrationSource(SessionLocal)),
         graph_factory=open_finding_graph,

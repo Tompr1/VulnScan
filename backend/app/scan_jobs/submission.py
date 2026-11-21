@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -16,6 +17,9 @@ from app.core.job_queue import QueueUnavailableError, ScanJobQueue
 from app.db import models
 
 logger = logging.getLogger(__name__)
+
+# Key of the job metadata naming the inventory connection to collect.
+INVENTORY_CONNECTION_KEY = "inventory_connection_id"
 
 QUEUE_DOWN_DETAIL = (
     "Could not submit the scan job to the task queue. The Redis worker may be "
@@ -70,6 +74,25 @@ class ScanJobSubmission:
             created_by_user_id=created_by_user_id,
         )
         return self._save_and_enqueue(job)
+
+    def submit_inventory(
+        self,
+        connection: models.InventoryConnection,
+        created_by_user_id: int | None,
+        requested_at: datetime,
+    ) -> models.ScanJob:
+        """Queue the collection of a fleet manager connection's inventory."""
+        connection.last_sync_requested_at = requested_at
+        connection.last_sync_status = "queued"
+        return self._save_and_enqueue(models.ScanJob(
+            workspace_id=connection.workspace_id,
+            target=f"{connection.provider}:{connection.name}"[:512],
+            profile_id=None,
+            status="queued",
+            scan_type="inventory",
+            meta_json=json.dumps({INVENTORY_CONNECTION_KEY: connection.id}),
+            created_by_user_id=created_by_user_id,
+        ))
 
     def rescan(self, workspace_id: int, job_id: int) -> models.ScanJob:
         """Queue a new job with the target, profile and type of an existing one."""

@@ -89,6 +89,7 @@ def test_un_jeton_refuse_par_graph_est_renouvele_une_fois():
     })
 
     assert graph.client().get("/deviceManagement/managedDevices")["value"] == [{"id": "d1"}]
+    assert [r.headers["Authorization"] for r in graph.graph_calls()] == ["Bearer old", "Bearer new"]
 
 
 def test_une_permission_manquante_indique_laquelle_accorder():
