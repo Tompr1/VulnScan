@@ -1,0 +1,37 @@
+name: Deploy
+
+# Every push runs the backend tests. When they pass and the branch is the one
+# selected by the DEPLOY_BRANCH repository variable (default: main), the
+# self-hosted runner installed on the lab VM deploys it with scripts/deploy.sh.
+#
+# Settings → Secrets and variables → Actions → Variables:
+#   DEPLOY_BRANCH  branch to deploy                 (default: main)
+#   PUBLIC_HOST    VM address used in the URLs     (default: 192.168.2.11)
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    uses: ./.github/workflows/backend-tests.yml
+
+  deploy:
+    needs: tests
+    if: github.ref_name == (vars.DEPLOY_BRANCH || 'main')
+    runs-on: [self-hosted, vulnscan-vm]
+    # One deployment at a time; a newer push waits instead of being cancelled.
+    concurrency:
+      group: deploy-lab-vm
+      cancel-in-progress: false
+    environment:
+      name: lab-vm
+      url: http://${{ vars.PUBLIC_HOST || '192.168.2.11' }}:5173
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to ~/vulnscan
+        run: bash scripts/deploy.sh "$GITHUB_WORKSPACE"
+        env:
+          PUBLIC_HOST: ${{ vars.PUBLIC_HOST || '192.168.2.11' }}

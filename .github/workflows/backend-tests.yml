@@ -1,9 +1,10 @@
 name: Backend tests
 
+# Runs on pull requests, and is called by deploy.yml on every push
+# (so the tests gate each deployment).
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_call:
 
 jobs:
   pytest:

@@ -619,6 +619,21 @@ app/worker_tasks.py  composition root of the RQ worker (wires the production ada
 
 ---
 
+### Automated deployment (lab VM)
+
+`.github/workflows/deploy.yml` runs the tests on every push, then deploys the
+branch named by the `DEPLOY_BRANCH` repository variable (default `main`) on a
+VM through a **self-hosted runner** (label `vulnscan-vm`). The runner pulls its
+jobs from GitHub, so the VM needs no inbound port.
+
+The job calls `scripts/deploy.sh`, which syncs the commit to `~/vulnscan`,
+creates `.env` with random secrets on the first run, rebuilds the containers,
+waits for `/healthz` and runs `bootstrap.sh` once. `.env` and `data/` are never
+overwritten. To roll back, re-run the deploy job of an older commit in the
+Actions tab.
+
+---
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete history.
