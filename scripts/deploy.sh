@@ -68,6 +68,7 @@ sync_code() {
 create_env_file() {
   local env_file="$DEPLOY_DIR/.env"
   [[ -f "$env_file" ]] && return 0
+  refuse_stale_volumes
 
   log "First deploy: creating .env with random secrets"
   local db_password neo4j_password admin_password
@@ -86,6 +87,22 @@ create_env_file() {
   chmod 600 "$env_file"
   # The password is never printed: CI logs are visible on GitHub.
   echo "Admin account: $(env_value DEFAULT_ADMIN_EMAIL) — password: DEFAULT_ADMIN_PASSWORD in $env_file"
+}
+
+# Postgres and Neo4j only read their password when their volume is first
+# initialised. Volumes left by a previous install keep the old passwords, so
+# the random ones of a new .env would be rejected ("password authentication
+# failed"). Stop before creating .env and say how to proceed.
+refuse_stale_volumes() {
+  local project stale
+  project=$(awk '/^name:/ {print $2; exit}' "$DEPLOY_DIR/docker-compose.yml")
+  stale=$(docker volume ls -q | grep -E "^${project}_(db|neo4j)_data$" || true)
+  [[ -z "$stale" ]] && return 0
+  die "volumes from a previous installation exist: $(echo "$stale" | xargs)
+They keep their own database passwords, so a freshly generated .env cannot connect. Either:
+  - start from scratch (DELETES their data):  docker volume rm $(echo "$stale" | xargs)
+  - or keep the data: create $env_file yourself from .env.example with the previous passwords
+Then re-run the deployment."
 }
 
 env_value() {
