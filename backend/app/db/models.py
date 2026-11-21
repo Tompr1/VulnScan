@@ -67,7 +67,9 @@ class ScanJob(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
     target: Mapped[str] = mapped_column(String(512))
-    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id"))
+    # Nullable in the database since the startup migration: API, IaC and
+    # inventory jobs have no scan profile.
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("profiles.id"), nullable=True)
     asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(50), default="queued")  # queued|running|done|failed|cancelled
     scan_type: Mapped[str] = mapped_column(String(20), default="internal")  # internal|external
