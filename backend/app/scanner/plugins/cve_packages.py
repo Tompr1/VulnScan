@@ -13,6 +13,7 @@ from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
 from app.db.session import SessionLocal
 from app.db import models
 from app.cve.dataset_loader import load_json
+from app.cve.catalogs import workspace_cve_catalog
 from app.cve.cpe import Cpe
 from app.cve.matcher import InMemoryCveCatalog, ProductCandidate, find_vulnerabilities
 from app.cve.version_cmp import match_expr, is_likely_patched
@@ -379,7 +380,8 @@ def match_nvd(pkgs, nvd_data):
         for c in pkg_to_cpe(p["name"], p["version"])
         if (cpe := Cpe.parse(c["cpe23"]))
     ]
-    catalog = nvd_data if isinstance(nvd_data, InMemoryCveCatalog) else InMemoryCveCatalog.from_flattened(nvd_data or [])
+    # nvd_data: a CveCatalog, or the flattened NVD dataset (list of dicts).
+    catalog = nvd_data if hasattr(nvd_data, "records_for") else InMemoryCveCatalog.from_flattened(nvd_data or [])
 
     hits, seen = [], set()
     for hit in find_vulnerabilities(catalog, candidates):
@@ -432,21 +434,11 @@ class Check(Plugin):
             for ds in osv_dsets:
                 all_hits += match_osv(pkgs, load_json(ds.path))
 
-            # Mode 2: Match against NVD datasets (CPE-based)
-            nvd_dsets = (
-                db.query(models.CveDataset)
-                .filter(
-                    models.CveDataset.workspace_id == ws_id,
-                    models.CveDataset.kind == "nvd_cpe_cve",
-                    models.CveDataset.enabled == True,
-                )
-                .all()
-            )
-            for ds in nvd_dsets:
-                all_hits += match_nvd(pkgs, load_json(ds.path))
-
         finally:
             db.close()
+
+        # Mode 2: Match against the NVD catalog (CPE-based)
+        all_hits += match_nvd(pkgs, workspace_cve_catalog(ws_id, SessionLocal))
 
         # Determine OS identifier for distro-patch checks
         os_id = (os_info.get("os_id") or os_info.get("id") or os_info.get("distro") or "").lower()

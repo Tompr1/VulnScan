@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Text, Boolean, DateTime, ForeignKey, Float
+from sqlalchemy import String, Integer, Text, Boolean, DateTime, ForeignKey, Float, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
@@ -237,3 +237,45 @@ class AiAnalysis(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+
+# ── CVE catalog (global: the same NVD data serves every workspace) ──────────
+# Imported page by page from the NVD API (app/cve/nvd_sync.py) and queried by
+# product, so the whole history never has to be held in memory.
+
+class CveEntry(Base):
+    __tablename__ = "cve_catalog"
+    cve_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    severity: Mapped[str] = mapped_column(String(16), default="medium")
+    cvss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    references_json: Mapped[str] = mapped_column(Text, default="[]")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CveCpeMatch(Base):
+    __tablename__ = "cve_cpe_matches"
+    __table_args__ = (Index("ix_cve_cpe_matches_product", "vendor", "product"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cve_id: Mapped[str] = mapped_column(ForeignKey("cve_catalog.cve_id", ondelete="CASCADE"), index=True)
+    part: Mapped[str] = mapped_column(String(1))
+    vendor: Mapped[str] = mapped_column(String(128))  # canonical vendor (aliases resolved)
+    product: Mapped[str] = mapped_column(String(255))
+    version: Mapped[str] = mapped_column(Text, default="*")
+    start_including: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_excluding: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_including: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_excluding: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CveSyncState(Base):
+    """Progress of a catalog import, so an interrupted run resumes."""
+
+    __tablename__ = "cve_sync_state"
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)  # "nvd"
+    full_import_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    full_import_next_index: Mapped[int] = mapped_column(Integer, default=0)
+    full_import_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    full_import_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Changes up to this instant are in the catalog; the next incremental run starts here.
+    synced_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

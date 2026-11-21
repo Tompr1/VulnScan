@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_role
 from app.core.config import settings
+from app.core.job_queue import get_job_queue
 from app.db import models
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
@@ -318,6 +319,9 @@ def refresh_datasets(
 
     q = Queue("datasets", connection=r)
     q.enqueue(run_dataset_refresh, ws, kinds, job_timeout=7200)
+    if not kinds or "nvd_cpe_cve" in kinds:
+        # The full NVD history lives in the database catalog (app/cve/nvd_sync.py).
+        get_job_queue().enqueue_cve_catalog_sync()
     return {"status": "queued", "kinds": kinds or list(_VALID_KINDS)}
 
 

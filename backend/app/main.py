@@ -640,6 +640,7 @@ def _schedule_loop():
                 from app.api.routes_settings import DEFAULT_DATASET_REFRESH
                 from app.core.workspace_settings import get_workspace_setting
                 ws_rows = db.query(models.Workspace).all()
+                catalog_sync_queued = False
                 for ws_row in ws_rows:
                     cfg = get_workspace_setting(db, ws_row.id, "dataset_refresh", DEFAULT_DATASET_REFRESH)
                     if not cfg.get("enabled"):
@@ -657,6 +658,11 @@ def _schedule_loop():
                         "Scheduled dataset refresh queued for workspace %d (every %sh)",
                         ws_row.id, cfg.get("interval_hours", 24),
                     )
+                    if not catalog_sync_queued:
+                        # The NVD catalog is global: one sync for all workspaces.
+                        from app.core.job_queue import get_job_queue
+                        get_job_queue().enqueue_cve_catalog_sync()
+                        catalog_sync_queued = True
             except Exception as e_feat5:
                 logger.warning("Scheduled dataset refresh error: %s", e_feat5)
 

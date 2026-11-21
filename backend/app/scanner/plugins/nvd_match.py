@@ -1,9 +1,8 @@
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
 from app.db.session import SessionLocal
-from app.db import models
-from app.cve.dataset_loader import load_json
+from app.cve.catalogs import workspace_cve_catalog
 from app.cve.cpe import Cpe
-from app.cve.matcher import CveCatalog, CveHit, InMemoryCveCatalog, ProductCandidate, find_vulnerabilities
+from app.cve.matcher import CveCatalog, CveHit, ProductCandidate, find_vulnerabilities
 from app.cve.version_cmp import is_likely_patched
 from app.scanner.context import stable_fingerprint
 
@@ -111,19 +110,7 @@ class Check(Plugin):
         os_info = ctx.get("inventory.os", {}) or {}
         os_id = (os_info.get("os_id") or os_info.get("id") or os_info.get("distro") or "").lower()
 
-        db = SessionLocal()
-        try:
-            paths = [
-                d.path
-                for d in db.query(models.CveDataset).filter(
-                    models.CveDataset.workspace_id == ws_id,
-                    models.CveDataset.kind == "nvd_cpe_cve",
-                    models.CveDataset.enabled == True,  # noqa: E712 (SQL expression)
-                )
-            ]
-        finally:
-            db.close()
-        catalog = InMemoryCveCatalog.from_flattened(item for path in paths for item in (load_json(path) or []))
+        catalog = workspace_cve_catalog(ws_id, SessionLocal)
         hits = find_nvd_hits(cands, catalog)
 
         findings=[]

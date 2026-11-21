@@ -12,11 +12,15 @@ import logging
 from datetime import datetime, timezone
 from functools import partial
 
+from redis import Redis
+
 from sqlalchemy.orm import Session
 
 from app.compliance.mapper import map_compliance_by_cve_or_category
 from app.core.config import settings
-from app.core.job_queue import get_job_queue
+from app.core.job_queue import CVE_CATALOG_SYNC_TIMEOUT, get_job_queue
+from app.cve.nvd_sync import HttpNvdFeed, NvdCatalogSync
+from app.cve.sql_catalog import SqlCveCatalog, SqlSyncStateStore
 from app.cve.enricher import CveSeverityEnricher
 from app.db import models
 from app.db.session import SessionLocal
@@ -38,11 +42,54 @@ if not logging.getLogger().handlers:
 logger = logging.getLogger("vulnscan.worker")
 
 _CVE_DATA_DIR = os.environ.get("CVE_DATA_DIR", "/app/data/cve")
+_CVE_SYNC_LOCK = "cve_catalog_sync_lock"
 
 
 def run_scan_job(job_id: int) -> None:
     """RQ task — runs one scan job end to end."""
     build_scan_job_runner().run(job_id)
+
+
+def run_cve_catalog_sync() -> None:
+    """RQ task — imports, then keeps up to date, the NVD catalog in Postgres.
+
+    A run stops by itself when its time budget is used and saves its
+    progress; it then re-queues itself, so the multi-hour first import goes
+    through without anyone pressing a button. A failure (NVD down…) raises,
+    and is retried at the next scheduled dataset refresh.
+    """
+    redis = Redis.from_url(settings.REDIS_URL)
+    if not redis.set(_CVE_SYNC_LOCK, "1", nx=True, ex=CVE_CATALOG_SYNC_TIMEOUT):
+        logger.info("NVD catalog sync already running — skipped")
+        return
+    try:
+        report = build_cve_catalog_sync().run()
+    finally:
+        redis.delete(_CVE_SYNC_LOCK)
+    logger.info(
+        "NVD catalog sync (%s): %s — %d pages, %d CVEs, %d skipped. %s",
+        report.mode, "complete" if report.complete else "partial",
+        report.pages, report.cves, report.skipped, report.message,
+    )
+    if not report.complete:
+        get_job_queue().enqueue_cve_catalog_sync()
+
+
+def build_cve_catalog_sync() -> NvdCatalogSync:
+    api_key = os.environ.get("NVD_API_KEY", "")
+    catalog = SqlCveCatalog(SessionLocal)
+    return NvdCatalogSync(
+        feed=HttpNvdFeed(
+            lambda url, headers: _ds_fetch_url_retry(url, dict(headers), _NVD_PAGE_TIMEOUT, label="NVD catalog"),
+            api_key or None,
+        ),
+        store=catalog,
+        states=SqlSyncStateStore(SessionLocal),
+        page_size=_NVD_PAGE_SIZE,
+        budget_seconds=CVE_CATALOG_SYNC_TIMEOUT - 600,
+        # NVD rate limits: 50 requests / 30 s with a key, 5 / 30 s without.
+        pause=lambda: time.sleep(0.6 if api_key else 6.0),
+    )
 
 
 def build_scan_job_runner() -> ScanJobRunner:

@@ -356,6 +356,14 @@ Raw browsing of all 7 threat intel datasets at **Configuration → Datasets**.
 
 One-click refresh from the UI, or via CLI scripts under `scripts/`. Supports offline dataset upload for air-gapped environments.
 
+**Full NVD history.** The NVD dataset above only covers CVEs published in the last
+120 days (an NVD API limit per query). The complete history (300k+ CVEs) is
+imported into Postgres by `run_cve_catalog_sync` (`backend/app/cve/nvd_sync.py`):
+a resumable full import that re-queues itself until done, then incremental
+updates of modified CVEs at every dataset refresh. Scans query it by product, so
+the history never has to fit in memory. An `NVD_API_KEY` makes the import ~10×
+faster.
+
 ---
 
 ## Authenticated Web Scanning
