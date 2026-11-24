@@ -1514,3 +1514,43 @@ input[type="time"].form-input::-webkit-calendar-picker-indicator {
   .client-switch { max-width: 160px; }
   .client-menu { width: min(300px, calc(100vw - 32px)); }
 }
+
+/* ── Access administration ─────────────────────────────────────────── */
+.access-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.access-chips .tag { height: 20px; font-size: 11px; }
+.access-role { height: 28px; padding: 0 8px; font-size: 12.5px; width: 120px; }
+.access-note {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 12px; border-radius: 8px;
+  font-size: 12.5px; line-height: 1.5; color: var(--text-2);
+  background: var(--surface-1); border: 1px solid var(--line);
+}
+.access-note svg { flex-shrink: 0; margin-top: 2px; color: var(--text-3); }
+.access-note.brand { background: var(--brand-soft); border-color: var(--brand-line); color: var(--brand-text); }
+.access-note.brand svg { color: var(--brand-text); }
+.access-client { border: 1px solid var(--line); border-radius: 10px; background: var(--surface-1); padding: 10px 12px; }
+.access-client-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.access-client-head .name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--text-0); }
+.access-source {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 4px 5px 36px;
+  font-size: 12.5px; color: var(--text-3);
+}
+.access-source .role { font-family: var(--font-mono); font-size: 11.5px; min-width: 52px; }
+.access-source.effective { color: var(--text-1); }
+.access-source.effective svg { color: var(--ok); }
+.access-dot { width: 12px; display: inline-grid; place-items: center; }
+.access-dot::before { content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--text-4); }
+.access-pick {
+  max-height: 260px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1);
+  padding: 4px;
+}
+.access-pick-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px; border-radius: 6px;
+  font-size: 13px; color: var(--text-1); cursor: pointer;
+}
+.access-pick-row:hover { background: var(--surface-2); }
+.modal .tabs { flex-shrink: 0; }
+.modal .tab { white-space: nowrap; }

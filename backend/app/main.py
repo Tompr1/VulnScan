@@ -30,6 +30,7 @@ from app.api.routes_reports import router as reports_router
 from app.api.routes_events import router as events_router
 from app.api.routes_analytics import router as analytics_router
 from app.api.routes_inventory import router as inventory_router
+from app.api.routes_access import router as access_router
 from app.api.validation import install_validation_error_handler
 
 logging.basicConfig(level=logging.INFO)
@@ -247,6 +248,14 @@ def _run_migrations(db: Session) -> None:
             logger.warning("Migration skipped (%s): %.120s", type(exc).__name__, sql.strip())
 
 
+def _ensure_first_client(db: Session) -> None:
+    """A first client so that a fresh platform can be used at once. Clients
+    are then managed from Access: one renamed or deleted is not re-created."""
+    if db.query(models.Workspace).first() is None:
+        db.add(models.Workspace(name=settings.DEFAULT_WORKSPACE))
+        db.commit()
+
+
 @app.on_event("startup")
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
@@ -335,16 +344,7 @@ def startup() -> None:
         except Exception:
             db.rollback()
 
-        ws = (
-            db.query(models.Workspace)
-            .filter(models.Workspace.name == settings.DEFAULT_WORKSPACE)
-            .first()
-        )
-        if not ws:
-            ws = models.Workspace(name=settings.DEFAULT_WORKSPACE)
-            db.add(ws)
-            db.commit()
-            db.refresh(ws)
+        _ensure_first_client(db)
 
         admin = (
             db.query(models.User)
@@ -935,4 +935,5 @@ app.include_router(reports_router)
 app.include_router(events_router)
 app.include_router(analytics_router)
 app.include_router(inventory_router)
+app.include_router(access_router)
 

@@ -83,6 +83,12 @@ test("sans route, on arrive sur le tableau de bord du client ouvert", () => {
   assert.deepEqual(resolveRoute(parseRoute(""), TECH), { action: "redirect", hash: "#/c/2/dashboard" });
 });
 
+test("la page Accès n'est ouverte qu'à l'admin global", () => {
+  assert.equal(canOpenPage("access", TECH), false);
+  assert.equal(canOpenPage("access", ADMIN_GLOBAL), true);
+  assert.deepEqual(resolveRoute(parseRoute("#/c/2/access"), TECH), { action: "redirect", hash: "#/c/2/dashboard" });
+});
+
 test("la page Datasets n'est ouverte qu'à l'admin global", () => {
   assert.equal(canOpenPage("datasets", TECH), false);
   assert.equal(canOpenPage("datasets", ADMIN_GLOBAL), true);

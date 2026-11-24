@@ -1393,7 +1393,7 @@ function UsersPanel() {
   return (
     <>
       <div className="card-head" style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-        <div><div className="card-title">Users & RBAC</div><div className="card-sub" style={{marginTop: 0}}>Workspace members and their permissions.</div></div>
+        <div><div className="card-title">Users & RBAC</div><div className="card-sub" style={{marginTop: 0}}>Accounts that open this client, and their role here.{isGlobalAdmin() ? " Every client's access is managed from Access." : ""}</div></div>
         <div style={{display: "flex", gap: 8}}>
           <button className="btn btn-sm" onClick={() => setShowChangePw(true)}><Icons.Lock size={11}/> Change my password</button>
           <button className="btn btn-primary btn-sm" onClick={() => setShowInvite(true)}><Icons.Plus size={11}/> Add user</button>
@@ -1418,18 +1418,26 @@ function UsersPanel() {
                         <div className="mono" style={{fontSize: 11, color: "var(--text-3)"}}>{u.email}</div>
                       </div>
                     </div></td>
-                    <td><span className="tag">{u.role}</span></td>
+                    <td style={{whiteSpace: "nowrap"}}>
+                      <span className="tag">{u.role}</span>
+                      {u.is_global_admin && <span className="tag brand" style={{marginLeft: 6}}>global admin</span>}
+                    </td>
                     <td className="muted" style={{fontSize: 12}}>{fmtDate(u.last_login_at)}</td>
                     <td className="muted" style={{fontSize: 12}} title={u.last_login_ip || ""}>{u.last_login_location || u.last_login_ip || "—"}</td>
                     <td className="muted" style={{fontSize: 12}}>{fmtDate(u.updated_at)}</td>
                     <td className="muted" style={{fontSize: 12}}>{fmtDate(u.created_at)}</td>
                     <td>
+                      {u.manageable ? (
                       <div style={{display: "flex", gap: 4}}>
                         <button className="btn btn-icon btn-ghost btn-sm" title="Reset password" style={{color: "var(--text-3)"}}
                                 onClick={() => setResetTarget(u)}><Icons.Lock size={13}/></button>
                         <button className="btn btn-icon btn-ghost btn-sm" title="Remove" style={{color: "var(--text-3)"}}
                                 onClick={() => onDelete(u.id, u.email)}><Icons.Trash size={13}/></button>
                       </div>
+                      ) : (
+                        // Opens other clients too, or is a global admin: managed from Access.
+                        <span className="muted" style={{fontSize: 11.5, whiteSpace: "nowrap"}} title="This account opens other clients: a global admin manages it from Access">Managed by the MSP</span>
+                      )}
                     </td>
                   </tr>
                 );

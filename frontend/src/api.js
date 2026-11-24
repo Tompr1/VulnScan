@@ -38,6 +38,8 @@ export function isGlobalAdmin() {
 // chosen) — then the client picker is shown again.
 export const SESSION_ENDED_EVENT = "vs:session-ended";
 export const CLIENT_LOST_EVENT = "vs:client-lost";
+// The session's client list or role changed (a client was created, renamed…).
+export const SESSION_UPDATED_EVENT = "vs:session-updated";
 const CLIENT_LOST_DETAILS = ["No client selected", "No access to this client"];
 
 export async function api(path, opts = {}) {
@@ -127,6 +129,49 @@ export async function selectClient(clientId) {
   saveSession(getUser()?.email, r);
   return r;
 }
+
+/** Reload the open client's session (client list, role) after an access change. */
+export async function refreshSession() {
+  const clientId = getUser()?.workspace_id;
+  if (clientId == null) return;
+  try {
+    await selectClient(clientId);
+  } catch {
+    // The open client was deleted or is out of reach: choose another one.
+    window.dispatchEvent(new CustomEvent(CLIENT_LOST_EVENT, { detail: "No access to this client" }));
+    return;
+  }
+  window.dispatchEvent(new CustomEvent(SESSION_UPDATED_EVENT));
+}
+
+// ── Access administration (global admins) ───────────────────────────
+export const accessApi = {
+  clients:           ()         => api("/access/clients"),
+  createClient:      (body)     => api("/access/clients", { method: "POST", body }),
+  updateClient:      (id, body) => api(`/access/clients/${id}`, { method: "PATCH", body }),
+  deleteClient:      (id)       => api(`/access/clients/${id}`, { method: "DELETE" }),
+
+  clientGroups:      ()         => api("/access/client-groups"),
+  createClientGroup: (body)     => api("/access/client-groups", { method: "POST", body }),
+  updateClientGroup: (id, body) => api(`/access/client-groups/${id}`, { method: "PATCH", body }),
+  deleteClientGroup: (id)       => api(`/access/client-groups/${id}`, { method: "DELETE" }),
+
+  users:             ()         => api("/access/users"),
+  createUser:        (body)     => api("/access/users", { method: "POST", body }),
+  updateUser:        (id, body) => api(`/access/users/${id}`, { method: "PATCH", body }),
+  deleteUser:        (id)       => api(`/access/users/${id}`, { method: "DELETE" }),
+  effectiveAccess:   (id)       => api(`/access/users/${id}/access`),
+
+  userGroups:        ()         => api("/access/user-groups"),
+  createUserGroup:   (body)     => api("/access/user-groups", { method: "POST", body }),
+  updateUserGroup:   (id, body) => api(`/access/user-groups/${id}`, { method: "PATCH", body }),
+  deleteUserGroup:   (id)       => api(`/access/user-groups/${id}`, { method: "DELETE" }),
+
+  grants:            ()         => api("/access/grants"),
+  createGrant:       (body)     => api("/access/grants", { method: "POST", body }),
+  updateGrant:       (id, body) => api(`/access/grants/${id}`, { method: "PATCH", body }),
+  deleteGrant:       (id)       => api(`/access/grants/${id}`, { method: "DELETE" }),
+};
 
 export const clientsApi = {
   // The clients this account may open, with a few counters for the picker.

@@ -37,6 +37,7 @@ export default defineConfig({
       "/threat-intel":  proxyOpts,
       "/analytics":     proxyOpts,
       "/inventory":     proxyOpts,
+      "/access":        proxyOpts,
     },
   },
   build: {

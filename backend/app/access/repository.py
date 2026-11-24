@@ -22,6 +22,18 @@ class SqlAccessRepository:
         grants = self._grants_of([user.id])
         return self._resolver().resolve(user.id, grants[user.id], user.is_global_admin)
 
+    def explain(self, user: models.User) -> dict[int, list[Grant]]:
+        """The grants reaching each client this user reaches through grants,
+        the one that sets the role first (see AccessResolver.explain)."""
+        return self._resolver().explain(self._grants_of([user.id])[user.id])
+
+    def all_access(self) -> dict[int, UserAccess]:
+        """Every user's access, by user id."""
+        users = self._db.query(models.User).all()
+        grants = self._grants_of([user.id for user in users])
+        resolver = self._resolver()
+        return {user.id: resolver.resolve(user.id, grants[user.id], user.is_global_admin) for user in users}
+
     def users_with_access_to(self, client_id: int) -> list[tuple[models.User, UserAccess]]:
         """Every user reaching this client, global admins included, by email."""
         users = self._db.query(models.User).order_by(models.User.email).all()
@@ -51,8 +63,13 @@ class SqlAccessRepository:
             or_(models.AccessGrant.user_id.in_(user_ids), models.AccessGrant.user_group_id.in_(list(members_of)))
         )
         for row in rows:
-            grant = Grant(Role(row.role), client_id=row.workspace_id, client_group_id=row.client_group_id)
+            grant = Grant(
+                Role(row.role), client_id=row.workspace_id, client_group_id=row.client_group_id,
+                grant_id=row.id, user_group_id=row.user_group_id,
+            )
             holders = [row.user_id] if row.user_id is not None else members_of[row.user_group_id]
             for user_id in holders:
                 grants[user_id].append(grant)
+        for found in grants.values():
+            found.sort(key=lambda grant: grant.grant_id or 0)  # oldest first: a stable explanation
         return grants

@@ -16,7 +16,7 @@ from app.access.domain import Role
 from app.access.repository import SqlAccessRepository
 from app.api.deps import get_db, require_global_admin, require_role
 from app.core.config import settings
-from app.core.password import hash_password, verify_password
+from app.core.password import PASSWORD_MIN_LENGTH, hash_password, verify_password
 from app.core.platform_settings import (
     DATASET_REFRESH_KEY,
     DEFAULT_DATASET_REFRESH,
@@ -237,8 +237,8 @@ def change_own_password(
         raise HTTPException(404, "User not found")
     if not verify_password(body.current_password, target.password_hash):
         raise HTTPException(403, "Current password is incorrect")
-    if len(body.new_password) < 6:
-        raise HTTPException(400, "New password must be at least 6 characters")
+    if len(body.new_password) < PASSWORD_MIN_LENGTH:
+        raise HTTPException(400, f"New password must be at least {PASSWORD_MIN_LENGTH} characters")
     target.password_hash = hash_password(body.new_password)
     target.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -259,8 +259,8 @@ def admin_reset_password(
 ):
     """Allow admins to reset the password of a user of their client."""
     target = _manageable_user(db, user["ws"], user_id)
-    if len(body.new_password) < 6:
-        raise HTTPException(400, "New password must be at least 6 characters")
+    if len(body.new_password) < PASSWORD_MIN_LENGTH:
+        raise HTTPException(400, f"New password must be at least {PASSWORD_MIN_LENGTH} characters")
     target.password_hash = hash_password(body.new_password)
     target.updated_at = datetime.now(timezone.utc)
     db.commit()

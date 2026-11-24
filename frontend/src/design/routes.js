@@ -9,12 +9,12 @@
 
 export const PAGES = [
   "dashboard", "assets", "inventory", "jobs", "profiles", "reports",
-  "credentials", "datasets", "threat-intel", "attack-graph", "analytics", "settings",
+  "credentials", "datasets", "threat-intel", "attack-graph", "analytics", "settings", "access",
 ];
 export const DEFAULT_PAGE = "dashboard";
 
 // Pages only a global admin of the MSP may open (they act on every client).
-const GLOBAL_ADMIN_PAGES = new Set(["datasets"]);
+const GLOBAL_ADMIN_PAGES = new Set(["datasets", "access"]);
 
 /** "#/c/<client>/<page>[/devices/<id>]" */
 export function routeHash({ clientId, page = DEFAULT_PAGE, deviceId = null }) {
@@ -47,7 +47,7 @@ function pageRoute(clientId, parts, lenient) {
   return { clientId, page, deviceId: device };
 }
 
-/** Whether this session may open the page (Datasets: global admins only). */
+/** Whether this session may open the page (Datasets, Access: global admins only). */
 export function canOpenPage(page, user) {
   return !GLOBAL_ADMIN_PAGES.has(page) || !!user?.is_global_admin;
 }

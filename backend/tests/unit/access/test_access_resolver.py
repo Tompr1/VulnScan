@@ -94,3 +94,37 @@ def test_un_compte_n_est_cantonne_a_un_client_que_s_il_n_ouvre_rien_d_autre(acce
 
 def test_les_roles_sont_ordonnes_du_lecteur_a_l_admin():
     assert Role.VIEWER.rank < Role.ANALYST.rank < Role.ADMIN.rank
+
+
+# ── Pourquoi un utilisateur atteint un client ────────────────────────────────
+
+def test_l_explication_liste_les_droits_qui_atteignent_chaque_client_celui_qui_fixe_le_role_en_tete():
+    direct = Grant(Role.VIEWER, client_id=2, grant_id=1)
+    par_groupe = Grant(Role.ADMIN, client_group_id=20, grant_id=2, user_group_id=5)
+    autre_groupe = Grant(Role.ANALYST, client_group_id=10, grant_id=3)
+
+    explication = resolver().explain([direct, par_groupe, autre_groupe])
+
+    assert {client: [g.grant_id for g in droits] for client, droits in explication.items()} == {
+        1: [3],
+        2: [2, 3, 1],
+        3: [2],
+    }
+
+
+def test_entre_roles_egaux_l_explication_garde_l_ordre_des_droits():
+    premier, second = Grant(Role.ANALYST, client_id=1, grant_id=8), Grant(Role.ANALYST, client_group_id=10, grant_id=9)
+
+    assert [g.grant_id for g in resolver().explain([premier, second])[1]] == [8, 9]
+
+
+def test_l_explication_et_le_role_disent_la_meme_chose():
+    droits = [sur_client(2, Role.VIEWER), sur_groupe(20, Role.ADMIN), sur_groupe(10, Role.ANALYST), sur_client(9, Role.ADMIN)]
+
+    explication = resolver().explain(droits)
+
+    assert {client: d[0].role for client, d in explication.items()} == resolver().resolve(7, droits).roles
+
+
+def test_l_origine_d_un_droit_ne_change_pas_son_egalite():
+    assert Grant(Role.VIEWER, client_id=1, grant_id=1, user_group_id=4) == Grant(Role.VIEWER, client_id=1)

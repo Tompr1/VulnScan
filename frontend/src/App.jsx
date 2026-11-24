@@ -11,11 +11,12 @@ import { Analytics } from "./design/Analytics.jsx";
 import { LoginPage } from "./design/Login.jsx";
 import { Inventory } from "./design/Inventory.jsx";
 import { ClientPicker } from "./design/ClientPicker.jsx";
+import { Access } from "./design/Access.jsx";
 import { Icons } from "./design/icons.jsx";
 import { DEFAULT_PAGE, canOpenPage, parseRoute, resolveRoute, routeHash } from "./design/routes.js";
 import {
   getToken, getUser, logout as apiLogout, selectClient, isGlobalAdmin,
-  SESSION_ENDED_EVENT, CLIENT_LOST_EVENT,
+  SESSION_ENDED_EVENT, CLIENT_LOST_EVENT, SESSION_UPDATED_EVENT,
   scanApi, credentialsApi, datasetsApi, assetsApi, reportsApi, threatIntelApi,
 } from "./api.js";
 
@@ -61,6 +62,7 @@ export default function App() {
   // removed meanwhile): back to sign-in, or to the client picker.
   useEffect(() => {
     const ended = () => { setAuthed(false); setUser(null); setPicking(false); };
+    const updated = () => setUser(getUser());
     const lost = (e) => {
       setNotice(String(e.detail || "").startsWith("No access")
         ? "Your access to this client has changed. Choose a client to continue."
@@ -69,9 +71,11 @@ export default function App() {
     };
     window.addEventListener(SESSION_ENDED_EVENT, ended);
     window.addEventListener(CLIENT_LOST_EVENT, lost);
+    window.addEventListener(SESSION_UPDATED_EVENT, updated);
     return () => {
       window.removeEventListener(SESSION_ENDED_EVENT, ended);
       window.removeEventListener(CLIENT_LOST_EVENT, lost);
+      window.removeEventListener(SESSION_UPDATED_EVENT, updated);
     };
   }, []);
 
@@ -225,6 +229,7 @@ function Workspace({ user, route, navigate, onAllClients, onSignOut, version }) 
     if (p === "attack-graph") return ["Attack Graph"];
     if (p === "analytics")    return ["Analytics"];
     if (p === "settings")     return ["Settings"];
+    if (p === "access")       return ["Access"];
     return [];
   })(page);
 
@@ -250,6 +255,7 @@ function Workspace({ user, route, navigate, onAllClients, onSignOut, version }) 
           {page === "attack-graph"&& <AttackGraph/>}
           {page === "analytics"  && <Analytics/>}
           {page === "settings"    && <Settings initialTab={settingsTab}/>}
+          {page === "access"      && <Access/>}
         </div>
       </div>
       {drawerFinding && <FindingDrawer finding={drawerFinding} close={() => setDrawerFinding(null)}

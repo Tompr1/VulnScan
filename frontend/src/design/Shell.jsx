@@ -27,6 +27,7 @@ export function Nav({ page, setPage, onSignOut, counts = {}, version = "" }) {
     { section: "Configuration", items: [
       { id: "credentials", label: "Credentials", icon: Icons.Key, count: counts.credentials },
       { id: "datasets", label: "Datasets", icon: Icons.Database, count: counts.datasets },
+      { id: "access", label: "Access", icon: Icons.Users },
       { id: "settings", label: "Settings", icon: Icons.Settings },
     ]},
   ].map(g => ({ ...g, items: g.items.filter(i => canOpenPage(i.id, getUser())) }));

@@ -28,11 +28,17 @@ _RANKS = {Role.VIEWER: 0, Role.ANALYST: 1, Role.ADMIN: 2}
 
 @dataclass(frozen=True)
 class Grant:
-    """A role on one client, or on every client of a client group."""
+    """A role on one client, or on every client of a client group.
+
+    ``grant_id`` and ``user_group_id`` (the group it was given to, None when
+    given to the user itself) only say where the grant comes from.
+    """
 
     role: Role
     client_id: int | None = None
     client_group_id: int | None = None
+    grant_id: int | None = field(default=None, compare=False)
+    user_group_id: int | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if (self.client_id is None) == (self.client_group_id is None):
@@ -75,13 +81,20 @@ class AccessResolver:
         if is_global_admin:
             roles = {client_id: Role.ADMIN for client_id in self._client_ids}
             return UserAccess(user_id, True, dict(sorted(roles.items())))
-        roles: dict[int, Role] = {}
+        roles = {client_id: reaching[0].role for client_id, reaching in self.explain(grants).items()}
+        return UserAccess(user_id, False, dict(sorted(roles.items())))
+
+    def explain(self, grants: Iterable[Grant]) -> dict[int, list[Grant]]:
+        """The grants reaching each client, the one that sets the role first
+        (highest role; between equals, the order given)."""
+        reaching: dict[int, list[Grant]] = {}
         for grant in grants:
             for client_id in self._clients_of(grant):
-                current = roles.get(client_id)
-                if current is None or grant.role.rank > current.rank:
-                    roles[client_id] = grant.role
-        return UserAccess(user_id, False, dict(sorted(roles.items())))
+                reaching.setdefault(client_id, []).append(grant)
+        return {
+            client_id: sorted(found, key=lambda grant: -grant.role.rank)
+            for client_id, found in sorted(reaching.items())
+        }
 
     def _clients_of(self, grant: Grant) -> set[int]:
         """Existing clients a grant reaches; deleted ones are ignored."""

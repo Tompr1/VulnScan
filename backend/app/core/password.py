@@ -15,6 +15,9 @@ import bcrypt
 
 _BCRYPT_PREFIX = "$2"
 
+# Shortest password accepted for an account.
+PASSWORD_MIN_LENGTH = 6
+
 
 def hash_password(plain: str) -> str:
     """Hash a plaintext password with bcrypt."""
