@@ -1,6 +1,6 @@
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
 from app.db.session import SessionLocal
-from app.db import models
+from app.cve.reference_datasets import enabled_dataset_paths
 from app.cve.dataset_loader import load_json
 from app.scanner.context import stable_fingerprint
 
@@ -17,7 +17,6 @@ META = PluginMeta(
 
 class Check(Plugin):
     async def run(self, target, ctx):
-        ws_id = ctx.get("workspace_id")
         detected = {h.get("cve","").upper() for h in (ctx.get("cve.nvd_hits", []) or []) if (h.get("cve") or "").upper().startswith("CVE-")}
         if not detected:
             return PluginResult(artifacts={"priority.kev_hits": []})
@@ -25,13 +24,8 @@ class Check(Plugin):
         db = SessionLocal()
         kev=set(); rows=[]
         try:
-            dsets = db.query(models.CveDataset).filter(
-                models.CveDataset.workspace_id==ws_id,
-                models.CveDataset.kind=="cisa_kev",
-                models.CveDataset.enabled==True
-            ).all()
-            for ds in dsets:
-                data = load_json(ds.path)
+            for path in enabled_dataset_paths(db, "cisa_kev"):
+                data = load_json(path)
                 for r in data or []:
                     c = (r.get("cve") or "").upper()
                     if c.startswith("CVE-"):

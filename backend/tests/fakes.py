@@ -268,7 +268,7 @@ class InMemoryScanJobRepository:
     def suppressed_fingerprints(self, workspace_id: int) -> set[str]:
         return self.suppressed.get(workspace_id, set())
 
-    def compliance_rows(self, workspace_id: int) -> list[dict]:
+    def compliance_rows(self) -> list[dict]:
         return []
 
     def save_findings(self, job: ScanJobSnapshot, findings: list[ProcessedFinding]) -> None:

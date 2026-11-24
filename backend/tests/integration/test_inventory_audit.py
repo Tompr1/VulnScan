@@ -22,7 +22,7 @@ from app.cve.sql_catalog import SqlCveCatalog, SqlSyncStateStore
 from app.db import models
 from app.inventory.alerts import DeviceLinks, InventoryAlerter
 from app.inventory.audit.auditor import DeviceAuditor
-from app.inventory.audit.reference import NO_KEV_DATASET, NVD_IMPORT_RUNNING, workspace_reference_data
+from app.inventory.audit.reference import NO_KEV_DATASET, NVD_IMPORT_RUNNING, load_reference_data
 from app.inventory.audit.rules import default_rules
 from app.inventory.audit.service import InventoryAudit
 from app.inventory.domain import Device, InstalledApp, InventorySnapshot, Platform
@@ -99,7 +99,7 @@ def run_inventory_job(session_factory, job_id, catalog=None):
     audit = InventoryAudit(
         SqlInventoryRepository(session_factory),
         DeviceAuditor(default_rules(), today=lambda: date(2026, 11, 21)),
-        lambda workspace_id: reference_data(catalog),
+        lambda: reference_data(catalog),
     )
     ScanJobRunner(
         repository=SqlScanJobRepository(session_factory),
@@ -220,15 +220,15 @@ def store_cves(session_factory, *entries, import_done=True):
 def load_kev(db, tmp_path, *rows):
     path = tmp_path / "kev.json"
     path.write_text(json.dumps(list(rows)))
-    db.add(models.CveDataset(workspace_id=1, name="CISA KEV", kind="cisa_kev", path=str(path), enabled=True))
+    db.add(models.CveDataset(name="CISA KEV", kind="cisa_kev", path=str(path), enabled=True))
     db.commit()
 
 
-def run_with_workspace_reference(session_factory, job_id):
+def run_with_shared_reference(session_factory, job_id):
     audit = InventoryAudit(
         SqlInventoryRepository(session_factory),
         DeviceAuditor(default_rules(), today=lambda: date(2026, 11, 21)),
-        lambda workspace_id: workspace_reference_data(workspace_id, session_factory, lifecycle=StaticSupportCatalog),
+        lambda: load_reference_data(session_factory, lifecycle=StaticSupportCatalog),
     )
     ScanJobRunner(
         repository=SqlScanJobRepository(session_factory),
@@ -257,7 +257,7 @@ def test_une_cve_exploitee_sur_un_appareil_devient_un_constat_critique_lie_a_l_a
                             "knownRansomwareCampaignUse": "Unknown"})
     add_inventory_job(db, connection["id"], job_id=100)
 
-    run_with_workspace_reference(session_factory, 100)
+    run_with_shared_reference(session_factory, 100)
 
     db.expire_all()
     finding = db.query(models.Finding).filter_by(job_id=100, plugin_id="inventory.os_vulnerable").one()
@@ -275,7 +275,7 @@ def test_les_lacunes_des_donnees_cve_sont_signalees_avec_l_audit(client, session
     store_cves(session_factory, WINDOWS_CVE, import_done=False)
     add_inventory_job(db, connection["id"], job_id=100)
 
-    run_with_workspace_reference(session_factory, 100)
+    run_with_shared_reference(session_factory, 100)
 
     db.expire_all()
     warnings = db.query(models.InventoryAuditRun).one().warnings.splitlines()
@@ -293,7 +293,7 @@ def run_and_alert(session_factory, job_id, notifier, catalog=None):
     audit = InventoryAudit(
         SqlInventoryRepository(session_factory),
         DeviceAuditor(default_rules(), today=lambda: date(2026, 11, 21)),
-        lambda workspace_id: reference_data(catalog),
+        lambda: reference_data(catalog),
     )
     ScanJobRunner(
         repository=SqlScanJobRepository(session_factory),

@@ -14,9 +14,15 @@ from sqlalchemy.orm import Session
 
 from app.access.domain import Role
 from app.access.repository import SqlAccessRepository
-from app.api.deps import get_db, require_role
+from app.api.deps import get_db, require_global_admin, require_role
 from app.core.config import settings
 from app.core.password import hash_password, verify_password
+from app.core.platform_settings import (
+    DATASET_REFRESH_KEY,
+    DEFAULT_DATASET_REFRESH,
+    get_platform_setting,
+    set_platform_setting,
+)
 from app.core.workspace_settings import (
     DEFAULT_NOTIFICATION_PREFS,
     get_workspace_setting,
@@ -109,7 +115,7 @@ def get_workspace_stats(
     jobs_failed = db.query(models.ScanJob).filter(models.ScanJob.workspace_id == ws, models.ScanJob.status == "failed").count()
     findings = db.query(models.Finding).filter(models.Finding.workspace_id == ws).count()
     profiles = db.query(models.Profile).filter(models.Profile.workspace_id == ws).count()
-    datasets = db.query(models.CveDataset).filter(models.CveDataset.workspace_id == ws).count()
+    datasets = db.query(models.CveDataset).count()  # shared by every client
     credentials = db.query(models.Credential).filter(models.Credential.workspace_id == ws).count()
     suppressed = db.query(models.SuppressedFinding).filter(models.SuppressedFinding.workspace_id == ws).count()
     return {
@@ -683,10 +689,6 @@ def put_sla_alert(
 
 # ── Auto Report Generation ─────────────────────────────────────────────────
 
-DEFAULT_DATASET_REFRESH = {
-    "enabled": False,
-    "interval_hours": 24,
-}
 
 
 @router.get("/dataset-refresh")
@@ -695,7 +697,7 @@ def get_dataset_refresh(
     db: Session = Depends(get_db),
 ):
     """Return scheduled dataset refresh configuration."""
-    return get_workspace_setting(db, user["ws"], "dataset_refresh", DEFAULT_DATASET_REFRESH)
+    return get_platform_setting(db, DATASET_REFRESH_KEY, DEFAULT_DATASET_REFRESH)
 
 
 class DatasetRefreshUpdate(BaseModel):
@@ -706,18 +708,18 @@ class DatasetRefreshUpdate(BaseModel):
 @router.put("/dataset-refresh")
 def put_dataset_refresh(
     body: DatasetRefreshUpdate,
-    user=Depends(require_role("admin", "analyst")),
+    user=Depends(require_global_admin),
     db: Session = Depends(get_db),
 ):
-    """Update scheduled dataset refresh configuration."""
-    current = get_workspace_setting(db, user["ws"], "dataset_refresh", DEFAULT_DATASET_REFRESH)
-    incoming = body.dict(exclude_unset=True)
+    """Update the scheduled refresh of the reference datasets (whole platform)."""
+    current = get_platform_setting(db, DATASET_REFRESH_KEY, DEFAULT_DATASET_REFRESH)
+    incoming = body.model_dump(exclude_unset=True)
     if "interval_hours" in incoming:
         iv = incoming["interval_hours"]
         if not isinstance(iv, int) or not (1 <= iv <= 168):
             raise HTTPException(400, "interval_hours must be between 1 and 168")
     current.update(incoming)
-    set_workspace_setting(db, user["ws"], "dataset_refresh", current)
+    set_platform_setting(db, DATASET_REFRESH_KEY, current)
     logger.info("Dataset refresh schedule updated by %s: %s", user.get("sub", "?"), current)
     return current
 

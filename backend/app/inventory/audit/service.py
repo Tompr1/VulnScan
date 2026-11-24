@@ -51,7 +51,7 @@ class InventoryAudit:
         self,
         store: AuditStore,
         auditor: DeviceAuditor,
-        reference: Callable[[int], ReferenceData],  # by workspace
+        reference: Callable[[], ReferenceData],  # read again for every audit
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
         self._store = store
@@ -61,7 +61,7 @@ class InventoryAudit:
 
     def run(self, connection_id: int, workspace_id: int, job_id: int) -> list[Finding]:
         audited = self._store.devices_to_audit(connection_id)
-        outcome = self._auditor.audit([entry.device for entry in audited], self._reference(workspace_id))
+        outcome = self._auditor.audit([entry.device for entry in audited], self._reference())
         findings = [
             device_finding(issue, entry)
             for entry in audited

@@ -186,6 +186,36 @@ def _run_migrations(db: Session) -> None:
         """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email ON users (email);
         """,
+        # Reference datasets are shared by every client. The refresh wrote one
+        # record per workspace for the same file: keep one per file (an
+        # enabled one if any), then drop the workspace.
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cve_datasets' AND column_name = 'workspace_id'
+            ) THEN
+                DELETE FROM cve_datasets older USING cve_datasets newer
+                    WHERE older.path = newer.path AND older.kind = newer.kind AND older.id < newer.id
+                      AND (newer.enabled OR NOT older.enabled);
+                ALTER TABLE cve_datasets DROP COLUMN workspace_id;
+            END IF;
+        END $$;
+        """,
+        # The dataset refresh schedule becomes a platform setting: keep an
+        # enabled workspace schedule if there is one.
+        """
+        INSERT INTO platform_settings (key, value_json, updated_at)
+            SELECT key, value_json, NOW() FROM workspace_settings
+            WHERE key = 'dataset_refresh'
+            ORDER BY (value_json LIKE '%"enabled": true%') DESC, id
+            LIMIT 1
+        ON CONFLICT (key) DO NOTHING;
+        """,
+        """
+        DELETE FROM workspace_settings WHERE key = 'dataset_refresh';
+        """,
     ]
     for sql in migrations:
         try:
@@ -680,33 +710,23 @@ def _schedule_loop():
             # Without this, CVE data is only as fresh as the last time someone
             # remembered to press the button — which is how a 4-day-old,
             # silently incomplete NVD dataset ended up in production.
+            # The datasets are shared by every client: one schedule, one refresh.
             try:
-                from app.api.routes_settings import DEFAULT_DATASET_REFRESH
-                from app.core.workspace_settings import get_workspace_setting
-                ws_rows = db.query(models.Workspace).all()
-                catalog_sync_queued = False
-                for ws_row in ws_rows:
-                    cfg = get_workspace_setting(db, ws_row.id, "dataset_refresh", DEFAULT_DATASET_REFRESH)
-                    if not cfg.get("enabled"):
-                        continue
-                    interval_ticks = max(1, int(cfg.get("interval_hours", 24)) * 60)
-                    if _dataset_counter % interval_ticks != 0:
-                        continue
+                from app.core.platform_settings import (
+                    DATASET_REFRESH_KEY, DEFAULT_DATASET_REFRESH, get_platform_setting,
+                )
+                cfg = get_platform_setting(db, DATASET_REFRESH_KEY, DEFAULT_DATASET_REFRESH)
+                interval_ticks = max(1, int(cfg.get("interval_hours", 24)) * 60)
+                if cfg.get("enabled") and _dataset_counter % interval_ticks == 0:
                     # run_dataset_refresh holds a Redis lock, so a trigger that
                     # lands while one is still running is a no-op, not a clash.
                     from app.worker_tasks import run_dataset_refresh
                     Queue("datasets", connection=Redis.from_url(settings.REDIS_URL)).enqueue(
-                        run_dataset_refresh, ws_row.id, None, job_timeout=7200,
+                        run_dataset_refresh, None, job_timeout=7200,
                     )
-                    logger.info(
-                        "Scheduled dataset refresh queued for workspace %d (every %sh)",
-                        ws_row.id, cfg.get("interval_hours", 24),
-                    )
-                    if not catalog_sync_queued:
-                        # The NVD catalog is global: one sync for all workspaces.
-                        from app.core.job_queue import get_job_queue
-                        get_job_queue().enqueue_cve_catalog_sync()
-                        catalog_sync_queued = True
+                    logger.info("Scheduled dataset refresh queued (every %sh)", cfg.get("interval_hours", 24))
+                    from app.core.job_queue import get_job_queue
+                    get_job_queue().enqueue_cve_catalog_sync()
             except Exception as e_feat5:
                 logger.warning("Scheduled dataset refresh error: %s", e_feat5)
 

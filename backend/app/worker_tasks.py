@@ -26,7 +26,7 @@ from app.db import models
 from app.db.session import SessionLocal
 from app.inventory.alerts import DeviceLinks, InventoryAlerter
 from app.inventory.audit.auditor import DeviceAuditor
-from app.inventory.audit.reference import workspace_reference_data
+from app.inventory.audit.reference import load_reference_data
 from app.inventory.audit.rules import default_rules
 from app.inventory.audit.service import InventoryAudit
 from app.inventory.collector import InventoryCollector
@@ -120,7 +120,7 @@ def build_inventory_audit() -> InventoryAudit:
     return InventoryAudit(
         SqlInventoryRepository(SessionLocal),
         DeviceAuditor(default_rules()),
-        lambda workspace_id: workspace_reference_data(workspace_id, SessionLocal),
+        lambda: load_reference_data(SessionLocal),
     )
 
 
@@ -132,7 +132,7 @@ def _build_finding_processor(
 ) -> FindingProcessor:
     asset_options = profile.options.get("asset")
     criticality = asset_options.get("criticality") if isinstance(asset_options, dict) else None
-    compliance_rows = repository.compliance_rows(job.workspace_id)
+    compliance_rows = repository.compliance_rows()
     return FindingProcessor(
         filter_policy=FindingFilterPolicy.from_profile_options(profile.options),
         compliance_mapper=lambda cve, plugin_id: map_compliance_by_cve_or_category(cve, plugin_id, compliance_rows),
@@ -646,19 +646,22 @@ def _ds_refresh_vendor_advisories():
     return True, out_path, None
 
 
-def run_dataset_refresh(workspace_id: int, kinds: list[str] | None = None) -> None:
-    """Background task: fetch/convert/swap datasets from external sources."""
+def run_dataset_refresh(kinds: list[str] | None = None) -> None:
+    """Background task: fetch/convert/swap the reference datasets shared by
+    every client from external sources."""
     import redis as _redis
+
+    from app.cve.reference_datasets import REFRESH_LOCK_KEY, REFRESH_STATUS_KEY
 
     redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
     r = _redis.Redis.from_url(redis_url)
-    lock_key = f"dataset_refresh_lock:{workspace_id}"
-    status_key = f"dataset_refresh:{workspace_id}"
+    lock_key = REFRESH_LOCK_KEY
+    status_key = REFRESH_STATUS_KEY
 
     # TTL must cover the slowest full refresh, or the lock expires mid-run and a
     # scheduled trigger starts a second one. Matches the 7200s job_timeout.
     if not r.set(lock_key, "1", nx=True, ex=7200):
-        logger.warning("Dataset refresh already running for workspace %d", workspace_id)
+        logger.warning("Dataset refresh already running")
         return
 
     requested = kinds or list(_DS_KINDS_ORDER)
@@ -742,7 +745,7 @@ def run_dataset_refresh(workspace_id: int, kinds: list[str] | None = None) -> No
                     shutil.copy2(out, canonical)
                     logger.info("  %s: copied %s -> %s", kind, out, canonical)
                 # DB record points to canonical path (stable, won't break if timestamped backup is deleted)
-                _swap_dataset(workspace_id, kind, canonical or out, db)
+                _swap_dataset(kind, canonical or out, db)
                 results[kind] = canonical or out
                 state["kinds"][kind] = {"status": "done", "message": ""}
                 logger.info("  %s: done -> %s", kind, canonical or out)
@@ -831,7 +834,7 @@ def _cleanup_old_dataset_files() -> None:
         logger.info("Dataset cleanup: removed %d old timestamped file(s)", removed)
 
 
-def _swap_dataset(ws_id: int, kind: str, new_file_path: str, db: Session) -> None:
+def _swap_dataset(kind: str, new_file_path: str, db: Session) -> None:
     """Atomically swap: create new dataset, disable old ones of same kind."""
     try:
         # Verify the new file exists and is non-empty before disabling the old one
@@ -841,14 +844,12 @@ def _swap_dataset(ws_id: int, kind: str, new_file_path: str, db: Session) -> Non
             raise ValueError(f"New dataset file is empty or too small: {new_file_path}")
 
         db.query(models.CveDataset).filter(
-            models.CveDataset.workspace_id == ws_id,
             models.CveDataset.kind == kind,
             models.CveDataset.enabled == True,
         ).update({"enabled": False})
 
         name = _DS_KIND_NAMES.get(kind, kind)
         new_ds = models.CveDataset(
-            workspace_id=ws_id,
             name=name,
             kind=kind,
             path=new_file_path,
@@ -858,12 +859,12 @@ def _swap_dataset(ws_id: int, kind: str, new_file_path: str, db: Session) -> Non
         db.commit()
         logger.info("Swapped dataset %s: new ID=%d", kind, new_ds.id)
 
-        # Invalidate the Threat Intel cache for this workspace if a feeder
-        # dataset was just rotated. Best-effort — never block the swap on it.
+        # Invalidate the Threat Intel cache if a feeder dataset was just
+        # rotated. Best-effort — never block the swap on it.
         if kind in ("nvd_cpe_cve", "cisa_kev", "epss", "vendor_advisories"):
             try:
                 from app.threat_intel import aggregator as _ti
-                _ti.invalidate(ws_id)
+                _ti.invalidate()
             except Exception as _ti_err:
                 logger.debug("Threat Intel cache invalidation skipped: %s", _ti_err)
     except Exception as e:

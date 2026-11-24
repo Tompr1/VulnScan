@@ -16,7 +16,7 @@ from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
 from app.scanner.context import stable_fingerprint
 from app.cve.version_cmp import parse as parse_version
 from app.db.session import SessionLocal
-from app.db import models
+from app.cve.reference_datasets import enabled_dataset_paths
 from app.cve.dataset_loader import load_json
 
 logger = logging.getLogger("vulnscan.cveorg_match")
@@ -111,7 +111,6 @@ def _version_in_range(installed_ver: str, affected: dict) -> bool:
 
 class Check(Plugin):
     async def run(self, target, ctx):
-        ws_id = ctx.get("workspace_id")
         cands = ctx.get("cpe.candidates", []) or []
         if not cands:
             return PluginResult()
@@ -124,13 +123,8 @@ class Check(Plugin):
         db = SessionLocal()
         cveorg_data = {}
         try:
-            ds = db.query(models.CveDataset).filter(
-                models.CveDataset.workspace_id == ws_id,
-                models.CveDataset.kind == "cvedetails_cvss",
-                models.CveDataset.enabled == True,
-            ).all()
-            for d in ds:
-                data = load_json(d.path)
+            for path in enabled_dataset_paths(db, "cvedetails_cvss"):
+                data = load_json(path)
                 if isinstance(data, dict):
                     cveorg_data = data
                     break
@@ -144,13 +138,8 @@ class Check(Plugin):
         nvd_by_cve = {}
         try:
             db2 = SessionLocal()
-            ds2 = db2.query(models.CveDataset).filter(
-                models.CveDataset.workspace_id == ws_id,
-                models.CveDataset.kind == "nvd_cpe_cve",
-                models.CveDataset.enabled == True,
-            ).all()
-            for d in ds2:
-                for item in load_json(d.path) or []:
+            for path in enabled_dataset_paths(db2, "nvd_cpe_cve"):
+                for item in load_json(path) or []:
                     cve_id = item.get("cve")
                     if cve_id:
                         nvd_by_cve[cve_id] = item

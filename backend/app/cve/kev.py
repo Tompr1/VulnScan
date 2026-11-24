@@ -17,7 +17,7 @@ from typing import Any, Protocol
 from sqlalchemy.orm import Session
 
 from app.cve.dataset_loader import load_json
-from app.db import models
+from app.cve.reference_datasets import enabled_dataset_paths
 
 logger = logging.getLogger(__name__)
 
@@ -65,21 +65,13 @@ class InMemoryKevCatalog:
         return self._entries.get(cve_id.upper())
 
 
-def workspace_kev_catalog(
-    workspace_id: int,
+def kev_catalog(
     session_factory: Callable[[], Session],
     load_dataset: Callable[[str], Any] = load_json,
 ) -> InMemoryKevCatalog:
-    """The enabled KEV datasets of the workspace (empty when none is loaded)."""
+    """The enabled KEV datasets, shared by every client (empty when none is loaded)."""
     with session_factory() as db:
-        paths = [
-            row.path
-            for row in db.query(models.CveDataset.path).filter(
-                models.CveDataset.workspace_id == workspace_id,
-                models.CveDataset.kind == KEV_DATASET_KIND,
-                models.CveDataset.enabled.is_(True),
-            )
-        ]
+        paths = enabled_dataset_paths(db, KEV_DATASET_KIND)
     rows: list[Any] = []
     for path in paths:
         data = load_dataset(path)

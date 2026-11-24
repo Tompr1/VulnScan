@@ -38,15 +38,7 @@ def pc(device_id: int, build: str, *apps: InstalledApp, name: str = "PC-COMPTA-0
 
 def audit(store, catalog=None, **reference) -> InventoryAudit:
     auditor = DeviceAuditor(default_rules(), today=lambda: date(2026, 11, 21))
-    workspaces = []
-
-    def reference_of(workspace_id):
-        workspaces.append(workspace_id)
-        return reference_data(catalog, **reference)
-
-    service = InventoryAudit(store, auditor, reference_of, clock=lambda: NOW)
-    service.workspaces = workspaces  # spy: the workspaces whose reference data was read
-    return service
+    return InventoryAudit(store, auditor, lambda: reference_data(catalog, **reference), clock=lambda: NOW)
 
 
 def test_chaque_probleme_devient_un_constat_rattache_a_son_appareil():

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.cve.catalogs import CompositeCveCatalog, workspace_cve_catalog
+from app.cve.catalogs import CompositeCveCatalog, cve_catalog
 from app.cve.cpe import Cpe
 from app.cve.matcher import InMemoryCveCatalog, ProductCandidate, find_vulnerabilities
 from app.cve.nvd import parse_vulnerability
@@ -74,12 +74,12 @@ def test_un_catalogue_composite_donne_priorite_au_premier_pour_une_meme_cve():
 def test_pendant_l_import_complet_le_scan_utilise_aussi_les_jeux_json(session_factory, db, workspace, catalog):
     # Arrange
     catalog.upsert([nvd("CVE-2000-1", cpe_match("acme", "tool"))])
-    db.add(models.CveDataset(workspace_id=1, name="nvd", kind="nvd_cpe_cve", path="/data/cve/nvd.json", enabled=True))
+    db.add(models.CveDataset(name="nvd", kind="nvd_cpe_cve", path="/data/cve/nvd.json", enabled=True))
     db.commit()
     json_items = [{"cve": "CVE-2026-1", "matches": [{"cpe23": "cpe:2.3:a:acme:tool:*:*:*:*:*:*:*:*"}]}]
 
     # Act
-    records = workspace_cve_catalog(1, session_factory, load_dataset=lambda path: json_items).records_for({("acme", "tool")})
+    records = cve_catalog(session_factory, load_dataset=lambda path: json_items).records_for({("acme", "tool")})
 
     # Assert
     assert {r.cve_id for r in records} == {"CVE-2000-1", "CVE-2026-1"}
@@ -91,4 +91,4 @@ def test_une_fois_l_import_complet_termine_les_jeux_json_ne_sont_plus_charges(se
     def must_not_load(path):
         raise AssertionError("JSON datasets must not be loaded")
 
-    assert isinstance(workspace_cve_catalog(1, session_factory, load_dataset=must_not_load), SqlCveCatalog)
+    assert isinstance(cve_catalog(session_factory, load_dataset=must_not_load), SqlCveCatalog)

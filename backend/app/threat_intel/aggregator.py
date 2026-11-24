@@ -1,15 +1,14 @@
 """
 Threat Intel aggregator.
 
-Merges per-CVE data from the workspace's enabled NVD, EPSS, and CISA KEV
-datasets into a single dict keyed by CVE-ID. Cached per workspace with a
-5-minute TTL; the cache is also invalidated explicitly when dataset
-refresh completes.
+Merges per-CVE data from the enabled NVD, EPSS, and CISA KEV datasets into a
+single dict keyed by CVE-ID. The datasets are shared by every client, so one
+cache serves them all, with a 5-minute TTL; it is also invalidated explicitly
+when a dataset refresh completes.
 
 Memory note: NVD ships ~200K CVEs at roughly 1 KB per record after our
-flatten step, so the cache is ~200 MB resident per workspace. Single-
-workspace installs (the common case) are fine. Multi-tenant deployments
-should keep an eye on this and prefer the SQLite index in the v2 plan.
+flatten step, so the cache is ~200 MB resident — once, whatever the number
+of clients.
 """
 from __future__ import annotations
 
@@ -23,14 +22,14 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.db import models
+from app.cve.reference_datasets import latest_dataset_path
 
 logger = logging.getLogger("vulnscan.threat_intel")
 
 _CACHE_TTL_SECONDS = 300.0
 
 
-# ─── Per-workspace in-memory cache ──────────────────────────────────────────
+# ─── In-memory cache, shared by every client ───────────────────────────────
 
 class _CacheEntry:
     __slots__ = ("ts", "merged", "stats", "datasets_loaded")
@@ -42,17 +41,15 @@ class _CacheEntry:
         self.datasets_loaded: list[str] = []
 
 
-_cache: dict[int, _CacheEntry] = {}
+_cache: _CacheEntry | None = None
 _lock = threading.Lock()
 
 
-def invalidate(workspace_id: int | None = None) -> None:
-    """Drop the cache for one workspace, or all of them when called with None."""
+def invalidate() -> None:
+    """Drop the cache: the next request rebuilds it from the datasets."""
+    global _cache
     with _lock:
-        if workspace_id is None:
-            _cache.clear()
-        else:
-            _cache.pop(workspace_id, None)
+        _cache = None
 
 
 # ─── Loaders for each dataset kind ──────────────────────────────────────────
@@ -66,20 +63,6 @@ def _load_dataset_file(path: str) -> Any:
     except Exception as e:
         logger.warning("Threat Intel: could not load %s: %s", path, e)
         return None
-
-
-def _enabled_path(db: Session, ws_id: int, kind: str) -> str | None:
-    ds = (
-        db.query(models.CveDataset)
-        .filter(
-            models.CveDataset.workspace_id == ws_id,
-            models.CveDataset.kind == kind,
-            models.CveDataset.enabled == True,  # noqa: E712
-        )
-        .order_by(models.CveDataset.id.desc())
-        .first()
-    )
-    return ds.path if ds else None
 
 
 def _normalise_nvd(raw: Any) -> list[dict]:
@@ -148,12 +131,12 @@ def _compute_threat_score(rec: dict) -> float:
     return round(min(max(score, 0.0), 100.0), 1)
 
 
-def _build_merged(db: Session, ws_id: int) -> _CacheEntry:
+def _build_merged(db: Session) -> _CacheEntry:
     entry = _CacheEntry()
 
-    nvd_path = _enabled_path(db, ws_id, "nvd_cpe_cve")
-    kev_path = _enabled_path(db, ws_id, "cisa_kev")
-    epss_path = _enabled_path(db, ws_id, "epss")
+    nvd_path = latest_dataset_path(db, "nvd_cpe_cve")
+    kev_path = latest_dataset_path(db, "cisa_kev")
+    epss_path = latest_dataset_path(db, "epss")
 
     nvd_raw = _load_dataset_file(nvd_path) if nvd_path else None
     kev_raw = _load_dataset_file(kev_path) if kev_path else None
@@ -246,7 +229,7 @@ def _build_merged(db: Session, ws_id: int) -> _CacheEntry:
                 pass
 
     # Vendor advisories (external dataset) — overlays additional vendor references
-    va_path = _enabled_path(db, ws_id, "vendor_advisories")
+    va_path = latest_dataset_path(db, "vendor_advisories")
     va_raw = _load_dataset_file(va_path) if va_path else None
 
     if va_raw and isinstance(va_raw, dict):
@@ -327,23 +310,24 @@ def _build_merged(db: Session, ws_id: int) -> _CacheEntry:
     entry.ts = time.time()
 
     logger.info(
-        "Threat Intel: ws=%d built — %d CVEs (NVD=%s, KEV=%s, EPSS=%s, kev_count=%d, ransom=%d)",
-        ws_id, len(merged), nvd_path is not None, kev_path is not None,
+        "Threat Intel: built — %d CVEs (NVD=%s, KEV=%s, EPSS=%s, kev_count=%d, ransom=%d)",
+        len(merged), nvd_path is not None, kev_path is not None,
         epss_path is not None, kev_count, ransom_count,
     )
     return entry
 
 
-def _get_or_build(db: Session, ws_id: int) -> _CacheEntry:
+def _get_or_build(db: Session) -> _CacheEntry:
+    global _cache
     with _lock:
-        entry = _cache.get(ws_id)
+        entry = _cache
         if entry and (time.time() - entry.ts) < _CACHE_TTL_SECONDS:
             return entry
 
     # Build outside the lock — first request takes 5–10 s on a full NVD dump
-    built = _build_merged(db, ws_id)
+    built = _build_merged(db)
     with _lock:
-        _cache[ws_id] = built
+        _cache = built
     return built
 
 
@@ -354,7 +338,6 @@ _VALID_SORTS = {"threat_score", "cvss", "epss", "kev_due", "kev_added", "publish
 
 def query(
     db: Session,
-    ws_id: int,
     *,
     q: str = "",
     severity: list[str] | None = None,
@@ -367,7 +350,7 @@ def query(
     page: int = 1,
     per_page: int = 50,
 ) -> dict[str, Any]:
-    entry = _get_or_build(db, ws_id)
+    entry = _get_or_build(db)
     rows = list(entry.merged.values())
 
     # Filters
@@ -430,8 +413,8 @@ def query(
     }
 
 
-def detail(db: Session, ws_id: int, cve_id: str) -> dict[str, Any] | None:
-    entry = _get_or_build(db, ws_id)
+def detail(db: Session, cve_id: str) -> dict[str, Any] | None:
+    entry = _get_or_build(db)
     rec = entry.merged.get((cve_id or "").strip().upper())
     if not rec:
         return None
@@ -440,8 +423,8 @@ def detail(db: Session, ws_id: int, cve_id: str) -> dict[str, Any] | None:
     return out
 
 
-def stats(db: Session, ws_id: int) -> dict[str, Any]:
-    entry = _get_or_build(db, ws_id)
+def stats(db: Session) -> dict[str, Any]:
+    entry = _get_or_build(db)
     return dict(entry.stats)
 
 

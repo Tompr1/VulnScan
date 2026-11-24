@@ -2,8 +2,10 @@
 Shared FastAPI dependencies for route handlers.
 """
 from fastapi import Depends, HTTPException
+from sqlalchemy.orm import Session
 
 from app.core.auth import require_auth
+from app.db import models
 from app.db.session import SessionLocal, get_db  # noqa: F401 - re-exported
 
 
@@ -26,3 +28,13 @@ def require_role(*roles: str):
             )
         return claims
     return _check
+
+
+def require_global_admin(claims: dict = Depends(require_auth), db: Session = Depends(get_db)) -> dict:
+    """Requires a global admin of the MSP, checked in the database (the token
+    only names the user): for what every client shares, such as the
+    reference datasets."""
+    user = db.get(models.User, claims["uid"]) if claims.get("uid") else None
+    if user is None or not user.is_global_admin:
+        raise HTTPException(status_code=403, detail="Requires a global admin")
+    return claims

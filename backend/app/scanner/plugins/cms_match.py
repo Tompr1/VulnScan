@@ -1,6 +1,6 @@
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
 from app.db.session import SessionLocal
-from app.db import models
+from app.cve.reference_datasets import enabled_dataset_paths
 from app.cve.dataset_loader import load_json
 from app.scanner.context import stable_fingerprint
 
@@ -27,7 +27,6 @@ CMS_REMEDIATION = {
 
 class Check(Plugin):
     async def run(self, target, ctx):
-        ws_id = ctx.get("workspace_id")
         tech = ctx.get("fingerprint.webtech", []) or []
         cms = {t["name"] for t in tech if t.get("type")=="cms"}
         if not cms:
@@ -36,13 +35,8 @@ class Check(Plugin):
         db = SessionLocal()
         findings=[]
         try:
-            dsets = db.query(models.CveDataset).filter(
-                models.CveDataset.workspace_id==ws_id,
-                models.CveDataset.kind=="cms_cve_map",
-                models.CveDataset.enabled==True
-            ).all()
-            for ds in dsets:
-                data = load_json(ds.path)
+            for path in enabled_dataset_paths(db, "cms_cve_map"):
+                data = load_json(path)
                 for row in data or []:
                     if row.get("cms") in cms:
                         cve = row.get("cve","CVE")

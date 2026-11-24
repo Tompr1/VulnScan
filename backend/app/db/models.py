@@ -106,9 +106,10 @@ class Credential(Base):
 
 
 class CveDataset(Base):
+    """A reference dataset file (NVD, KEV, EPSS…), shared by every client."""
+
     __tablename__ = "cve_datasets"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
     name: Mapped[str] = mapped_column(String(255))
     kind: Mapped[str] = mapped_column(String(50))
     path: Mapped[str] = mapped_column(Text)
@@ -168,6 +169,16 @@ class WorkspaceSetting(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
     key: Mapped[str] = mapped_column(String(100), index=True)
+    value_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PlatformSetting(Base):
+    """A setting of the whole platform, shared by every client (app.core.platform_settings)."""
+
+    __tablename__ = "platform_settings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(100), unique=True)
     value_json: Mapped[str] = mapped_column(Text, default="{}")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 

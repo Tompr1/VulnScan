@@ -85,7 +85,7 @@ V = Ids()
 VALEURS_DE_CHEMIN = {
     "cred_id": V.credential,
     "ds_id": V.dataset,
-    "kind": "kev",
+    "kind": "cisa_kev",
     "profile_id": V.profil,
     "job_id": V.job,
     "sched_id": V.planification,
@@ -215,14 +215,15 @@ def donnees(db, workspace, tmp_path):
     """Un objet de chaque type chez le voisin, et le strict nécessaire chez le client."""
     maintenant = datetime(2026, 11, 1, tzinfo=timezone.utc)
     kev = tmp_path / "kev.json"
-    kev.write_text(json.dumps({"vulnerabilities": [{"cveID": "CVE-2099-0001", "vendorProject": "voisin-corp"}]}))
+    kev.write_text(json.dumps([{"cve": "CVE-2099-0001", "vendor": "acme"}]))
     db.add_all([
         models.User(id=V.utilisateur, email="admin@voisin.example", password_hash="x"),
         models.ClientGroup(id=1, name="region-b"),
         models.UserGroup(id=1, name="equipe-b"),
         models.Credential(id=V.credential, workspace_id=VOISIN, name="ssh-voisin", username="root-voisin",
                           secret_enc=encrypt_str("secret-voisin")),
-        models.CveDataset(id=V.dataset, workspace_id=VOISIN, name="kev-voisin", kind="kev", path=str(kev)),
+        # Référentiel commun à tous les clients : rien du voisin dedans.
+        models.CveDataset(id=V.dataset, name="CISA KEV", kind="cisa_kev", path=str(kev)),
         models.Asset(id=V.asset, workspace_id=VOISIN, name="parc-voisin", owner="dsi@voisin.example"),
         models.Asset(id=V.asset_client, workspace_id=CLIENT, name="parc-client"),
         models.Credential(id=V.credential_client, workspace_id=CLIENT, name="ssh-client", username="root",

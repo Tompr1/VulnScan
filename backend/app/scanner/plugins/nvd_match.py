@@ -1,6 +1,6 @@
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
 from app.db.session import SessionLocal
-from app.cve.catalogs import workspace_cve_catalog
+from app.cve.catalogs import cve_catalog
 from app.cve.cpe import Cpe
 from app.cve.matcher import CveCatalog, CveHit, ProductCandidate, find_vulnerabilities
 from app.cve.version_cmp import is_likely_patched
@@ -101,7 +101,6 @@ def _build_remediation(cve: str, h: dict) -> str:
 
 class Check(Plugin):
     async def run(self, target, ctx):
-        ws_id = ctx.get("workspace_id")
         cands = ctx.get("cpe.candidates", []) or []
         if not cands:
             return PluginResult()
@@ -110,7 +109,7 @@ class Check(Plugin):
         os_info = ctx.get("inventory.os", {}) or {}
         os_id = (os_info.get("os_id") or os_info.get("id") or os_info.get("distro") or "").lower()
 
-        catalog = workspace_cve_catalog(ws_id, SessionLocal)
+        catalog = cve_catalog(SessionLocal)
         hits = find_nvd_hits(cands, catalog)
 
         findings=[]

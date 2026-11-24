@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.workspace_settings import notification_preferences
 from app.cve.dataset_loader import load_json
+from app.cve.reference_datasets import enabled_dataset_paths
 from app.db import models
 from app.scan_jobs.notifications import Integration
 from app.scan_jobs.processing import ProcessedFinding
@@ -112,7 +113,7 @@ class ScanJobRepository(Protocol):
 
     def suppressed_fingerprints(self, workspace_id: int) -> set[str]: ...
 
-    def compliance_rows(self, workspace_id: int) -> list[dict[str, Any]]: ...
+    def compliance_rows(self) -> list[dict[str, Any]]: ...
 
     def save_findings(self, job: ScanJobSnapshot, findings: list[ProcessedFinding]) -> None: ...
 
@@ -175,16 +176,10 @@ class SqlScanJobRepository:
             )
             return {row.fingerprint for row in rows}
 
-    def compliance_rows(self, workspace_id: int) -> list[dict[str, Any]]:
+    def compliance_rows(self) -> list[dict[str, Any]]:
+        """Compliance mappings of the shared reference datasets."""
         with self._session_factory() as db:
-            paths = [
-                row.path
-                for row in db.query(models.CveDataset.path).filter(
-                    models.CveDataset.workspace_id == workspace_id,
-                    models.CveDataset.kind == "compliance_map",
-                    models.CveDataset.enabled.is_(True),
-                )
-            ]
+            paths = enabled_dataset_paths(db, "compliance_map")
         # load_json logs unreadable files and returns an empty list for them.
         return [row for path in paths for row in load_json(path)]
 

@@ -8,11 +8,14 @@ from pydantic import BaseModel
 from rq import Queue
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_role
+from app.api.deps import get_db, require_global_admin, require_role
 from app.core.config import settings
 from app.core.job_queue import get_job_queue
+from app.cve.reference_datasets import REFRESH_LOCK_KEY, REFRESH_STATUS_KEY, latest_dataset_path
 from app.db import models
 
+# The reference datasets are shared by every client: everyone reads them,
+# only a global admin changes or refreshes them.
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 # Dataset kinds that feed the Threat Intel aggregator cache.
@@ -31,11 +34,15 @@ _CANONICAL_PATHS = {
 }
 
 
-def _invalidate_ti_cache(ws_id: int) -> None:
+# Fields a global admin may change on a dataset record.
+_EDITABLE_FIELDS = {"name", "kind", "path", "enabled"}
+
+
+def _invalidate_ti_cache() -> None:
     """Best-effort invalidation of the Threat Intel in-memory cache."""
     try:
         from app.threat_intel import aggregator as _ti
-        _ti.invalidate(ws_id)
+        _ti.invalidate()
     except Exception:
         pass
 
@@ -52,24 +59,14 @@ def browse_dataset(
     db: Session = Depends(get_db),
 ):
     """Return paginated contents of a dataset file."""
-    ws = user["ws"]
-    ds = (
-        db.query(models.CveDataset)
-        .filter(
-            models.CveDataset.workspace_id == ws,
-            models.CveDataset.kind == kind,
-            models.CveDataset.enabled == True,
-        )
-        .order_by(models.CveDataset.id.desc())
-        .first()
-    )
-    if not ds:
+    path = latest_dataset_path(db, kind)
+    if path is None:
         raise HTTPException(404, f"No enabled dataset of kind '{kind}'")
-    if not ds.path or not os.path.isfile(ds.path):
-        raise HTTPException(404, f"Dataset file not found: {ds.path}")
+    if not os.path.isfile(path):
+        raise HTTPException(404, f"Dataset file not found: {path}")
 
     try:
-        with open(ds.path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
     except Exception as e:
         raise HTTPException(500, f"Failed to read dataset: {e}")
@@ -125,8 +122,7 @@ class DatasetCreate(BaseModel):
 
 @router.get("")
 def list_datasets(user=Depends(require_role("admin", "analyst", "viewer")), db: Session = Depends(get_db)):
-    ws = user["ws"]
-    ds = db.query(models.CveDataset).filter(models.CveDataset.workspace_id == ws).all()
+    ds = db.query(models.CveDataset).order_by(models.CveDataset.id).all()
     return [
         {
             "id": d.id,
@@ -142,12 +138,10 @@ def list_datasets(user=Depends(require_role("admin", "analyst", "viewer")), db: 
 @router.post("")
 def create_dataset(
     body: DatasetCreate,
-    user=Depends(require_role("admin", "analyst")),
+    user=Depends(require_global_admin),
     db: Session = Depends(get_db),
 ):
-    ws = user["ws"]
     d = models.CveDataset(
-        workspace_id=ws,
         name=body.name,
         kind=body.kind,
         path=body.path,
@@ -164,10 +158,9 @@ async def upload_dataset(
     file: UploadFile = File(...),
     kind: str = Query(...),
     name: str = Query(""),
-    user: dict = Depends(require_role("admin", "analyst")),
+    user: dict = Depends(require_global_admin),
     db: Session = Depends(get_db),
 ):
-    ws = user["ws"]
     if not name:
         name = kind
 
@@ -186,7 +179,6 @@ async def upload_dataset(
         f.write(content)
 
     d = models.CveDataset(
-        workspace_id=ws,
         name=name,
         kind=kind,
         path=filepath,
@@ -202,59 +194,44 @@ async def upload_dataset(
 def update_dataset(
     ds_id: int,
     body: dict,
-    user=Depends(require_role("admin", "analyst")),
+    user=Depends(require_global_admin),
     db: Session = Depends(get_db),
 ):
-    ws = user["ws"]
-    d = (
-        db.query(models.CveDataset)
-        .filter(models.CveDataset.id == ds_id, models.CveDataset.workspace_id == ws)
-        .first()
-    )
+    d = db.get(models.CveDataset, ds_id)
     if not d:
         raise HTTPException(status_code=404, detail="Not found")
     for k, v in body.items():
-        if hasattr(d, k):
+        if k in _EDITABLE_FIELDS:
             setattr(d, k, v)
     db.commit()
     if d.kind in _TI_FEEDER_KINDS and "enabled" in body:
-        _invalidate_ti_cache(ws)
+        _invalidate_ti_cache()
     return {"ok": True}
 
 
 @router.patch("/{ds_id}/toggle")
 def toggle_dataset(
     ds_id: int,
-    user=Depends(require_role("admin", "analyst")),
+    user=Depends(require_global_admin),
     db: Session = Depends(get_db),
 ):
-    ws = user["ws"]
-    d = (
-        db.query(models.CveDataset)
-        .filter(models.CveDataset.id == ds_id, models.CveDataset.workspace_id == ws)
-        .first()
-    )
+    d = db.get(models.CveDataset, ds_id)
     if not d:
         raise HTTPException(status_code=404, detail="Not found")
     d.enabled = not d.enabled
     db.commit()
     if d.kind in _TI_FEEDER_KINDS:
-        _invalidate_ti_cache(ws)
+        _invalidate_ti_cache()
     return {"ok": True, "enabled": d.enabled}
 
 
 @router.delete("/{ds_id}")
 def delete_dataset(
     ds_id: int,
-    user=Depends(require_role("admin", "analyst")),
+    user=Depends(require_global_admin),
     db: Session = Depends(get_db),
 ):
-    ws = user["ws"]
-    d = (
-        db.query(models.CveDataset)
-        .filter(models.CveDataset.id == ds_id, models.CveDataset.workspace_id == ws)
-        .first()
-    )
+    d = db.get(models.CveDataset, ds_id)
     if not d:
         raise HTTPException(status_code=404, detail="Not found")
 
@@ -281,7 +258,7 @@ def delete_dataset(
     db.delete(d)
     db.commit()
     if kind in _TI_FEEDER_KINDS:
-        _invalidate_ti_cache(ws)
+        _invalidate_ti_cache()
     return {"ok": True}
 
 
@@ -297,11 +274,10 @@ def _redis_conn():
 @router.post("/refresh")
 def refresh_datasets(
     body: dict = {},
-    user: dict = Depends(require_role("admin")),
+    user: dict = Depends(require_global_admin),
 ):
     from app.worker_tasks import run_dataset_refresh
 
-    ws = user["ws"]
     kinds = None
     if "kind" in body:
         kinds = [body["kind"]]
@@ -314,11 +290,11 @@ def refresh_datasets(
             raise HTTPException(400, f"Invalid kinds: {invalid}")
 
     r = _redis_conn()
-    if r.exists(f"dataset_refresh_lock:{ws}"):
+    if r.exists(REFRESH_LOCK_KEY):
         raise HTTPException(409, "A dataset refresh is already running")
 
     q = Queue("datasets", connection=r)
-    q.enqueue(run_dataset_refresh, ws, kinds, job_timeout=7200)
+    q.enqueue(run_dataset_refresh, kinds, job_timeout=7200)
     if not kinds or "nvd_cpe_cve" in kinds:
         # The full NVD history lives in the database catalog (app/cve/nvd_sync.py).
         get_job_queue().enqueue_cve_catalog_sync()
@@ -329,9 +305,8 @@ def refresh_datasets(
 def refresh_status(
     user: dict = Depends(require_role("admin", "analyst", "viewer")),
 ):
-    ws = user["ws"]
     r = _redis_conn()
-    data = r.get(f"dataset_refresh:{ws}")
+    data = r.get(REFRESH_STATUS_KEY)
     if not data:
         return {"status": "idle"}
     return json.loads(data)
@@ -339,14 +314,13 @@ def refresh_status(
 
 @router.post("/refresh/cancel")
 def cancel_refresh(
-    user: dict = Depends(require_role("admin")),
+    user: dict = Depends(require_global_admin),
 ):
-    ws = user["ws"]
     r = _redis_conn()
-    r.delete(f"dataset_refresh_lock:{ws}")
-    data = r.get(f"dataset_refresh:{ws}")
+    r.delete(REFRESH_LOCK_KEY)
+    data = r.get(REFRESH_STATUS_KEY)
     if data:
         state = json.loads(data)
         state["status"] = "cancelled"
-        r.setex(f"dataset_refresh:{ws}", 3600, json.dumps(state))
+        r.setex(REFRESH_STATUS_KEY, 3600, json.dumps(state))
     return {"ok": True}

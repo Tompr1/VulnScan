@@ -26,7 +26,7 @@ def stats(
     db: Session = Depends(get_db),
 ):
     """Summary counters for the Threat Intel page header / dashboard tiles."""
-    return aggregator.stats(db, user["ws"])
+    return aggregator.stats(db)
 
 
 @router.get("/cves")
@@ -46,7 +46,7 @@ def list_cves(
 ):
     sev_list = [s.strip() for s in (severity or "").split(",") if s.strip()] or None
     return aggregator.query(
-        db, user["ws"],
+        db,
         q=q, severity=sev_list,
         kev_only=kev_only, ransomware_only=ransomware_only,
         min_epss=min_epss, min_cvss=min_cvss,
@@ -61,7 +61,7 @@ def get_cve(
     user=Depends(require_role("admin", "analyst", "viewer")),
     db: Session = Depends(get_db),
 ):
-    rec = aggregator.detail(db, user["ws"], cve_id)
+    rec = aggregator.detail(db, cve_id)
     if not rec:
         raise HTTPException(404, f"CVE not found in Threat Intel cache: {cve_id}")
     return rec
@@ -71,7 +71,7 @@ def get_cve(
 def refresh_cache(
     user=Depends(require_role("admin", "analyst")),
 ):
-    """Manually invalidate the Threat Intel cache for the workspace."""
-    aggregator.invalidate(user["ws"])
-    logger.info("Threat Intel cache invalidated: ws=%s actor=%s", user["ws"], user.get("sub", "?"))
-    return {"ok": True, "invalidated": user["ws"]}
+    """Manually invalidate the Threat Intel cache (shared by every client)."""
+    aggregator.invalidate()
+    logger.info("Threat Intel cache invalidated by %s", user.get("sub", "?"))
+    return {"ok": True}
