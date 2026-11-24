@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.access.domain import Role
+from app.access.repository import SqlAccessRepository
 from app.api.deps import get_db, require_role
 from app.core.config import settings
 from app.core.password import hash_password, verify_password
@@ -124,26 +126,47 @@ def get_workspace_stats(
 
 # ─── Users (admin only) ───────────────────────────────────────────────────────
 
+# Users are accounts of the MSP, reached through access grants (app.access).
+# Here an admin of the current client sees who can open it, and manages only
+# the accounts confined to it: an account that also opens other clients, or a
+# global admin, is managed by a global admin.
+
 @router.get("/users")
 def list_users(
     user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     ws = user["ws"]
-    users = db.query(models.User).filter(models.User.workspace_id == ws).all()
     return [
         {
             "id": u.id,
             "email": u.email,
-            "role": u.role,
+            "role": access.role_on(ws).value,
+            "is_global_admin": u.is_global_admin,
+            "other_clients": len(access.roles) - 1,
+            "manageable": access.is_confined_to(ws),
             "created_at": u.created_at.isoformat() if u.created_at else None,
             "updated_at": u.updated_at.isoformat() if u.updated_at else None,
             "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
             "last_login_ip": u.last_login_ip,
             "last_login_location": u.last_login_location,
         }
-        for u in users
+        for u, access in SqlAccessRepository(db).users_with_access_to(ws)
     ]
+
+
+def _manageable_user(db: Session, ws: int, user_id: int) -> models.User:
+    """A user of this client that its admin may change: 404 when the user does
+    not reach this client, 403 when it also reaches others."""
+    target = db.get(models.User, user_id)
+    if target is None:
+        raise HTTPException(404, "User not found")
+    access = SqlAccessRepository(db).access_of(target)
+    if access.role_on(ws) is None:
+        raise HTTPException(404, "User not found")
+    if not access.is_confined_to(ws):
+        raise HTTPException(403, "This account opens other clients: only a global admin can change it")
+    return target
 
 
 class UserCreate(BaseModel):
@@ -164,25 +187,21 @@ def create_user(
     if body.role not in ("admin", "analyst", "viewer"):
         raise HTTPException(400, "Role must be admin, analyst, or viewer")
 
-    existing = db.query(models.User).filter(
-        models.User.workspace_id == ws,
-        models.User.email == body.email,
-    ).first()
+    # Emails are unique across the MSP: an existing account is given access
+    # by a global admin, never taken over from here.
+    existing = db.query(models.User).filter(models.User.email == body.email).first()
     if existing:
         raise HTTPException(409, f"User '{body.email}' already exists")
 
     pw_hash = hash_password(body.password)
-    new_user = models.User(
-        workspace_id=ws,
-        email=body.email,
-        password_hash=pw_hash,
-        role=body.role,
-    )
+    new_user = models.User(email=body.email, password_hash=pw_hash)
     db.add(new_user)
+    db.flush()
+    SqlAccessRepository(db).grant_client(new_user.id, ws, Role(body.role))
     db.commit()
     db.refresh(new_user)
-    logger.info("User created: %s (role=%s) by %s", body.email, body.role, user.get("sub", "?"))
-    return {"id": new_user.id, "email": new_user.email, "role": new_user.role}
+    logger.info("User created: %s (role=%s, client=%d) by %s", body.email, body.role, ws, user.get("sub", "?"))
+    return {"id": new_user.id, "email": new_user.email, "role": body.role}
 
 
 class PasswordChange(BaseModel):
@@ -197,10 +216,7 @@ def change_own_password(
     db: Session = Depends(get_db),
 ):
     """Allow any authenticated user to change their own password."""
-    target = db.query(models.User).filter(
-        models.User.workspace_id == user["ws"],
-        models.User.email == user["sub"],
-    ).first()
+    target = db.query(models.User).filter(models.User.email == user["sub"]).first()
     if not target:
         raise HTTPException(404, "User not found")
     if not verify_password(body.current_password, target.password_hash):
@@ -225,13 +241,8 @@ def admin_reset_password(
     user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    """Allow admins to reset any user's password."""
-    target = db.query(models.User).filter(
-        models.User.id == user_id,
-        models.User.workspace_id == user["ws"],
-    ).first()
-    if not target:
-        raise HTTPException(404, "User not found")
+    """Allow admins to reset the password of a user of their client."""
+    target = _manageable_user(db, user["ws"], user_id)
     if len(body.new_password) < 6:
         raise HTTPException(400, "New password must be at least 6 characters")
     target.password_hash = hash_password(body.new_password)
@@ -247,13 +258,7 @@ def delete_user(
     user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    ws = user["ws"]
-    target = db.query(models.User).filter(
-        models.User.id == user_id,
-        models.User.workspace_id == ws,
-    ).first()
-    if not target:
-        raise HTTPException(404, "User not found")
+    target = _manageable_user(db, user["ws"], user_id)
     if target.email == user.get("sub"):
         raise HTTPException(400, "Cannot delete your own account")
     db.delete(target)

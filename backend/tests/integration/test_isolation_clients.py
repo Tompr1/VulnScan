@@ -217,7 +217,9 @@ def donnees(db, workspace, tmp_path):
     kev = tmp_path / "kev.json"
     kev.write_text(json.dumps({"vulnerabilities": [{"cveID": "CVE-2099-0001", "vendorProject": "voisin-corp"}]}))
     db.add_all([
-        models.User(id=V.utilisateur, workspace_id=VOISIN, email="admin@voisin.example", password_hash="x", role="admin"),
+        models.User(id=V.utilisateur, email="admin@voisin.example", password_hash="x"),
+        models.ClientGroup(id=1, name="region-b"),
+        models.UserGroup(id=1, name="equipe-b"),
         models.Credential(id=V.credential, workspace_id=VOISIN, name="ssh-voisin", username="root-voisin",
                           secret_enc=encrypt_str("secret-voisin")),
         models.CveDataset(id=V.dataset, workspace_id=VOISIN, name="kev-voisin", kind="kev", path=str(kev)),
@@ -228,6 +230,9 @@ def donnees(db, workspace, tmp_path):
     ])
     db.flush()
     db.add_all([
+        models.AccessGrant(user_id=V.utilisateur, workspace_id=VOISIN, role="admin"),
+        models.ClientGroupMember(client_group_id=1, workspace_id=VOISIN),
+        models.UserGroupMember(user_group_id=1, user_id=V.utilisateur),
         models.ScanJob(id=V.job, workspace_id=VOISIN, target="srv.voisin.example", profile_id=V.profil,
                        asset_id=V.asset, status="done", created_at=maintenant, finished_at=maintenant,
                        meta_json=json.dumps({"note": "voisin"})),
@@ -328,6 +333,9 @@ def _identifiants_du_voisin(session) -> dict[str, set]:
 def _filtre_du_voisin(table, ids):
     if table.name == "workspaces":
         return table.c.id == VOISIN
+    if table.name == "users":  # comptes du MSP : ceux qui ouvrent le voisin
+        droits = models.AccessGrant.__table__
+        return table.c.id.in_(select(droits.c.user_id).where(droits.c.workspace_id == VOISIN))
     if "workspace_id" in table.c:
         return table.c.workspace_id == VOISIN
     liens = [cle.parent.in_(ids[cle.column.table.name]) for cle in table.foreign_keys if cle.column.table.name in ids]

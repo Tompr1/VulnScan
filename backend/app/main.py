@@ -160,6 +160,32 @@ def _run_migrations(db: Session) -> None:
         """
         CREATE INDEX IF NOT EXISTS ix_findings_device_id ON findings (device_id);
         """,
+        # MSP access model: users belong to no client any more; their client
+        # and role become an access grant (tables created by create_all above).
+        """
+        ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS is_global_admin BOOLEAN NOT NULL DEFAULT FALSE;
+        """,
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'workspace_id'
+            ) THEN
+                INSERT INTO access_grants (user_id, workspace_id, role, created_at)
+                    SELECT id, workspace_id,
+                           CASE WHEN role IN ('admin', 'analyst', 'viewer') THEN role ELSE 'viewer' END,
+                           NOW()
+                    FROM users WHERE workspace_id IS NOT NULL;
+                ALTER TABLE users DROP COLUMN workspace_id;
+                ALTER TABLE users DROP COLUMN IF EXISTS role;
+            END IF;
+        END $$;
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email ON users (email);
+        """,
     ]
     for sql in migrations:
         try:
@@ -282,14 +308,18 @@ def startup() -> None:
         )
         if not admin:
             admin = models.User(
-                workspace_id=ws.id,
                 email=settings.DEFAULT_ADMIN_EMAIL,
                 password_hash=_hash(settings.DEFAULT_ADMIN_PASSWORD),
-                role="admin",
+                is_global_admin=True,
             )
             db.add(admin)
             db.commit()
             logger.info("Created default admin: %s", settings.DEFAULT_ADMIN_EMAIL)
+        elif not admin.is_global_admin:
+            # The default admin is the MSP's first global admin.
+            admin.is_global_admin = True
+            db.commit()
+            logger.info("Default admin %s is now a global admin", settings.DEFAULT_ADMIN_EMAIL)
     finally:
         db.close()
 

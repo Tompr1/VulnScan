@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Text, Boolean, DateTime, ForeignKey, Float, Index, UniqueConstraint
+from sqlalchemy import String, Integer, Text, Boolean, DateTime, ForeignKey, Float, Index, UniqueConstraint, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
@@ -15,17 +15,81 @@ class Workspace(Base):
 
 
 class User(Base):
+    """An account of the MSP. It belongs to no client: the clients it may open,
+    and its role on each, come from its access grants (app.access)."""
+
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
-    email: Mapped[str] = mapped_column(String(255), index=True)
+    email: Mapped[str] = mapped_column(String(255), index=True, unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
-    role: Mapped[str] = mapped_column(String(50), default="admin")  # admin|analyst|viewer
+    # Admin of every client, present and future, without any grant.
+    is_global_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_login_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     last_login_location: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+
+# ── Access control: who may open which client (workspace) ──────────────────
+
+class ClientGroup(Base):
+    """A set of clients granted together (e.g. a region, a sector)."""
+
+    __tablename__ = "client_groups"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ClientGroupMember(Base):
+    __tablename__ = "client_group_members"
+    __table_args__ = (UniqueConstraint("client_group_id", "workspace_id", name="uq_client_group_member"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_group_id: Mapped[int] = mapped_column(ForeignKey("client_groups.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+
+
+class UserGroup(Base):
+    """A team of users granted together (e.g. level-1 technicians)."""
+
+    __tablename__ = "user_groups"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class UserGroupMember(Base):
+    __tablename__ = "user_group_members"
+    __table_args__ = (UniqueConstraint("user_group_id", "user_id", name="uq_user_group_member"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_group_id: Mapped[int] = mapped_column(ForeignKey("user_groups.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+
+class AccessGrant(Base):
+    """A role given to a user or a user group, on a client or a client group.
+    Exactly one principal and one scope are set; deleting either deletes the grant."""
+
+    __tablename__ = "access_grants"
+    __table_args__ = (
+        CheckConstraint("(user_id IS NULL) <> (user_group_id IS NULL)", name="ck_access_grant_one_principal"),
+        CheckConstraint("(workspace_id IS NULL) <> (client_group_id IS NULL)", name="ck_access_grant_one_scope"),
+        CheckConstraint("role IN ('admin', 'analyst', 'viewer')", name="ck_access_grant_role"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    user_group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    workspace_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    client_group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("client_groups.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    role: Mapped[str] = mapped_column(String(50))  # admin|analyst|viewer
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class Credential(Base):
