@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Icons, Status } from "./icons.jsx";
-import { scanApi, credentialsApi, datasetsApi, settingsApi, integrationsApi, aiApi, slaApi, threatIntelApi, notificationPrefsApi, autoAiApi, slaAlertApi, autoReportApi, inventoryApi, canEdit, isAdmin } from "../api.js";
+import { scanApi, credentialsApi, datasetsApi, settingsApi, integrationsApi, aiApi, slaApi, threatIntelApi, notificationPrefsApi, autoAiApi, slaAlertApi, autoReportApi, inventoryApi, canEdit, isAdmin, isGlobalAdmin } from "../api.js";
 
 function countPluginSelection(json) {
   try {
@@ -631,7 +631,7 @@ export function Settings({ initialTab }) {
   return (
     <>
       <div className="ph">
-        <div><h1>Settings</h1><div className="sub">Workspace configuration, integrations, and AI providers.</div></div>
+        <div><h1>Settings</h1><div className="sub">Configuration of this client: integrations, AI providers, users and alerts.</div></div>
       </div>
       <div style={{display: "grid", gridTemplateColumns: "200px 1fr", gap: 24}}>
         <nav style={{display: "flex", flexDirection: "column", gap: 2}}>
@@ -1017,9 +1017,11 @@ function SystemPanel() {
                     <a className="btn" href={`https://github.com/${updateInfo.repo}/releases/tag/${updateInfo.tag}`} target="_blank" rel="noopener noreferrer">
                       <Icons.External size={12}/> View release
                     </a>
+                    {isGlobalAdmin() && (
                     <button className="btn btn-brand" onClick={triggerUpdate} disabled={triggering}>
                       {triggering ? <><Icons.Refresh size={12} className="spin"/> Updating…</> : <><Icons.Download size={12}/> Update now</>}
                     </button>
+                    )}
                   </div>
                 )}
               </div>

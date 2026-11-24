@@ -1,22 +1,7 @@
 // Device inventory — pure helpers shared by the inventory pages (no React,
 // no fetch), so they run under `node --test` (frontend/tests/).
 
-// ── Deep links ───────────────────────────────────────────────────────────
-// Alerts link to "<PUBLIC_URL>/#/inventory/devices/<id>" (backend:
-// app/inventory/alerts.py DeviceLinks). Hash routes need no server rewrite.
-export const INVENTORY_HASH = "#/inventory";
-
-export function deviceHash(id) {
-  return `${INVENTORY_HASH}/devices/${id}`;
-}
-
-/** {page: "inventory", deviceId: number|null} for an inventory hash, else null. */
-export function parseInventoryHash(hash) {
-  const path = (hash || "").replace(/^#/, "").replace(/\/+$/, "");
-  if (path === "/inventory") return { page: "inventory", deviceId: null };
-  const match = path.match(/^\/inventory\/devices\/(\d+)$/);
-  return match ? { page: "inventory", deviceId: Number(match[1]) } : null;
-}
+// Deep links to device pages: see routes.js (they name the client).
 
 // ── Severities ───────────────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"];

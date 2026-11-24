@@ -28,6 +28,17 @@ export function isAdmin() {
   const u = getUser();
   return u && u.role === "admin";
 }
+/** Global admin of the MSP: every client, and what they all share (datasets, platform). */
+export function isGlobalAdmin() {
+  return !!getUser()?.is_global_admin;
+}
+
+// The app listens to these: the session ended (401 on an authenticated
+// call), or the open client is no longer reachable (grant removed, no client
+// chosen) — then the client picker is shown again.
+export const SESSION_ENDED_EVENT = "vs:session-ended";
+export const CLIENT_LOST_EVENT = "vs:client-lost";
+const CLIENT_LOST_DETAILS = ["No client selected", "No access to this client"];
 
 export async function api(path, opts = {}) {
   const token = getToken();
@@ -45,8 +56,10 @@ export async function api(path, opts = {}) {
     body: isForm ? opts.body : opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
 
-  if (res.status === 401) {
+  // Without a token (sign-in), a 401 is a refused password, reported below.
+  if (res.status === 401 && token) {
     clearToken();
+    window.dispatchEvent(new CustomEvent(SESSION_ENDED_EVENT));
     throw new Error("Session expired — please sign in again");
   }
 
@@ -78,6 +91,9 @@ export async function api(path, opts = {}) {
         } catch { msg = txt; }
       }
     } catch {}
+    if (res.status === 403 && CLIENT_LOST_DETAILS.some(d => String(msg).startsWith(d))) {
+      window.dispatchEvent(new CustomEvent(CLIENT_LOST_EVENT, { detail: msg }));
+    }
     throw new Error(msg);
   }
 
@@ -86,12 +102,36 @@ export async function api(path, opts = {}) {
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────
+// A session opens one client at a time: the token names it, and the role
+// stored here is the user's role on that client.
+function saveSession(email, r) {
+  setToken(r.token);
+  setUser({
+    email,
+    role: r.role,
+    workspace_id: r.workspace_id,
+    is_global_admin: !!r.is_global_admin,
+    clients: r.clients || [],
+  });
+}
+
 export async function login(email, password) {
   const r = await api("/auth/login", { method: "POST", body: { email, password } });
-  setToken(r.token);
-  setUser({ email, role: r.role, workspace_id: r.workspace_id });
+  saveSession(email, r);
   return r;
 }
+
+/** Open another client: a new token, with the role held there. */
+export async function selectClient(clientId) {
+  const r = await api(`/auth/select-client/${clientId}`, { method: "POST" });
+  saveSession(getUser()?.email, r);
+  return r;
+}
+
+export const clientsApi = {
+  // The clients this account may open, with a few counters for the picker.
+  overview: () => api("/auth/clients"),
+};
 
 export async function me() { return api("/auth/me"); }
 

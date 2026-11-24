@@ -1,6 +1,11 @@
 import React, { useState, useEffect, Fragment } from "react";
 import { Icons } from "./icons.jsx";
-import { eventsApi, getUser } from "../api.js";
+import { eventsApi, getUser, isGlobalAdmin } from "../api.js";
+import { ClientBadge } from "./ClientPicker.jsx";
+import { canOpenPage, filterClients } from "./routes.js";
+
+// Above this many clients, the switcher offers a search field.
+const SWITCHER_SEARCH_FROM = 8;
 
 export function Nav({ page, setPage, onSignOut, counts = {}, version = "" }) {
   const NAV_ITEMS = [
@@ -24,7 +29,7 @@ export function Nav({ page, setPage, onSignOut, counts = {}, version = "" }) {
       { id: "datasets", label: "Datasets", icon: Icons.Database, count: counts.datasets },
       { id: "settings", label: "Settings", icon: Icons.Settings },
     ]},
-  ];
+  ].map(g => ({ ...g, items: g.items.filter(i => canOpenPage(i.id, getUser())) }));
 
   return (
     <aside className="nav">
@@ -84,7 +89,7 @@ function NavUser({ onSignOut, setPage }) {
         <div className="nav-avatar">{initials}</div>
         <div className="nav-user-meta">
           <div className="nav-user-name">{email.split("@")[0]}</div>
-          <div className="nav-user-org">{u.role || "user"}</div>
+          <div className="nav-user-org">{isGlobalAdmin() ? "global admin" : (u.role || "user")}</div>
         </div>
       </div>
       {open && (
@@ -115,12 +120,65 @@ const THEMES = [
   { id: "dim",   label: "Dim",    sub: "Slate — easier on long shifts", icon: Icons.Monitor },
 ];
 
-export function Topbar({ crumbs, setPage }) {
+/**
+ * The open client, and the menu to switch to another one. Switching keeps
+ * the current page (Scan jobs of client A → Scan jobs of client B).
+ */
+function ClientSwitcher({ client, clients, onSwitch, onAllClients, open, setOpen }) {
+  const [query, setQuery] = useState("");
+  useEffect(() => { if (!open) setQuery(""); }, [open]);
+  if (!client) return null;
+  const shown = filterClients(clients, query);
+
+  return (
+    <div style={{position: "relative"}} onClick={e => e.stopPropagation()}>
+      <button className="client-switch" onClick={() => setOpen(!open)} title="Switch client">
+        <ClientBadge client={client} size={24}/>
+        <span className="name">{client.name}</span>
+        <Icons.ChevronDown size={13}/>
+      </button>
+      {open && (
+        <div className="client-menu">
+          <div className="client-menu-title">Clients</div>
+          {clients.length >= SWITCHER_SEARCH_FROM && (
+            <div className="client-menu-search">
+              <Icons.Search size={13}/>
+              <input autoFocus placeholder="Search clients…" value={query} onChange={e => setQuery(e.target.value)}/>
+            </div>
+          )}
+          <div className="client-menu-list">
+            {shown.length === 0 && <div className="client-menu-empty">No client matches “{query}”.</div>}
+            {shown.map(c => {
+              const sel = c.id === client.id;
+              return (
+                <button key={c.id} className={`client-menu-item ${sel ? "sel" : ""}`}
+                        onClick={() => { setOpen(false); if (!sel) onSwitch(c.id); }}>
+                  <ClientBadge client={c} size={22}/>
+                  <span className="name">{c.name}</span>
+                  <span className="role">{c.role}</span>
+                  {sel && <Icons.Check size={13}/>}
+                </button>
+              );
+            })}
+          </div>
+          <div className="nav-user-menu-sep"/>
+          <button className="client-menu-item" onClick={() => { setOpen(false); onAllClients(); }}>
+            <Icons.Layers size={14}/>
+            <span className="name">All clients and their status…</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Topbar({ crumbs, setPage, client = null, clients = [], onSwitchClient, onAllClients }) {
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem("vs-theme") || "dark"; } catch { return "dark"; }
   });
   const [openTheme, setOpenTheme] = useState(false);
   const [openBell, setOpenBell] = useState(false);
+  const [openClient, setOpenClient] = useState(false);
   const [events, setEvents] = useState([]);
   const [unread, setUnread] = useState(0);
 
@@ -130,11 +188,11 @@ export function Topbar({ crumbs, setPage }) {
   }, [theme]);
 
   useEffect(() => {
-    if (!openTheme && !openBell) return;
-    const close = () => { setOpenTheme(false); setOpenBell(false); };
+    if (!openTheme && !openBell && !openClient) return;
+    const close = () => { setOpenTheme(false); setOpenBell(false); setOpenClient(false); };
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
-  }, [openTheme, openBell]);
+  }, [openTheme, openBell, openClient]);
 
   // Poll events every 15s; track unread = events newer than last-seen-at
   useEffect(() => {
@@ -166,10 +224,12 @@ export function Topbar({ crumbs, setPage }) {
 
   return (
     <div className="topbar">
+      <ClientSwitcher client={client} clients={clients} onSwitch={onSwitchClient} onAllClients={onAllClients}
+                      open={openClient} setOpen={(o) => { setOpenClient(o); setOpenTheme(false); setOpenBell(false); }}/>
       <div className="crumbs">
         {crumbs.map((c, i) => (
           <Fragment key={i}>
-            {i > 0 && <span className="sep">/</span>}
+            {(i > 0 || client) && <span className="sep">/</span>}
             <span className={i === crumbs.length - 1 ? "leaf" : ""}>{c}</span>
           </Fragment>
         ))}
@@ -177,7 +237,7 @@ export function Topbar({ crumbs, setPage }) {
       <div className="right">
         {/* Theme switcher */}
         <div style={{position: "relative"}} onClick={e => e.stopPropagation()}>
-          <button className="topbar-btn" onClick={() => { setOpenTheme(o => !o); setOpenBell(false); }} title={`Theme: ${active.label}`}>
+          <button className="topbar-btn" onClick={() => { setOpenTheme(o => !o); setOpenBell(false); setOpenClient(false); }} title={`Theme: ${active.label}`}>
             <ActiveIcon size={16}/>
           </button>
           {openTheme && (
@@ -218,7 +278,7 @@ export function Topbar({ crumbs, setPage }) {
         {/* Notification bell */}
         <div style={{position: "relative"}} onClick={e => e.stopPropagation()}>
           <button className="topbar-btn"
-                  onClick={() => { setOpenBell(o => !o); setOpenTheme(false); if (!openBell) markSeen(); }}
+                  onClick={() => { setOpenBell(o => !o); setOpenTheme(false); setOpenClient(false); if (!openBell) markSeen(); }}
                   title="Recent activity">
             <Icons.Bell size={16}/>
             {unread > 0 && <span className="dot"/>}

@@ -7,26 +7,12 @@ import {
   compareDevices,
   compareIssues,
   describeChange,
-  deviceHash,
   evidencePairs,
   filterBySeverity,
-  parseInventoryHash,
   platformLabel,
   ruleLabel,
   summarizeFleet,
 } from "../src/design/inventoryModel.js";
-
-test("le lien d'une alerte ouvre la fiche de l'appareil", () => {
-  assert.deepEqual(parseInventoryHash(deviceHash(42)), { page: "inventory", deviceId: 42 });
-  assert.deepEqual(parseInventoryHash("#/inventory/devices/7/"), { page: "inventory", deviceId: 7 });
-  assert.deepEqual(parseInventoryHash("#/inventory"), { page: "inventory", deviceId: null });
-});
-
-test("un lien étranger à l'inventaire est ignoré", () => {
-  for (const hash of ["", "#", "#/jobs", "#/inventory/devices/abc", "#/inventory/devices/", null]) {
-    assert.equal(parseInventoryHash(hash), null, String(hash));
-  }
-});
 
 const devices = [
   { name: "PC-B", highest_severity: "high", issue_count: 1 },
