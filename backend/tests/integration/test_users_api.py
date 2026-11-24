@@ -34,12 +34,14 @@ def comptes(db):
         models.User(id=3, email="tech@msp.example", password_hash=secret),
         models.User(id=4, email="tech@client1.example", password_hash=secret),
         models.User(id=5, email="sans-acces@msp.example", password_hash=secret),
+        models.User(id=9, email="admin-client2@client2.example", password_hash=secret),
     ])
     db.add_all([
         models.AccessGrant(user_id=2, workspace_id=2, role="viewer"),
         models.AccessGrant(user_id=3, workspace_id=2, role="analyst"),
         models.AccessGrant(user_id=3, workspace_id=3, role="admin"),
         models.AccessGrant(user_id=4, workspace_id=1, role="admin"),
+        models.AccessGrant(user_id=9, workspace_id=2, role="admin"),
     ])
     db.commit()
 
@@ -107,6 +109,7 @@ def test_la_liste_montre_les_comptes_qui_ouvrent_ce_client_et_lesquels_son_admin
 
     assert reponse.status_code == 200
     assert [(u["email"], u["role"], u["is_global_admin"], u["other_clients"], u["manageable"]) for u in reponse.json()] == [
+        ("admin-client2@client2.example", "admin", False, 0, True),
         ("admin@msp.example", "admin", True, 2, False),
         ("tech@client2.example", "viewer", False, 0, True),
         ("tech@msp.example", "analyst", False, 1, False),

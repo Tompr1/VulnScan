@@ -19,11 +19,12 @@ from app.threat_intel import aggregator
 
 pytestmark = pytest.mark.integration
 
-ADMIN_GLOBAL, ADMIN_CLIENT = 1, 2
+ADMIN_GLOBAL, ADMIN_CLIENT, LECTEUR = 1, 2, 3
 
 
-def session(uid, ws, role="admin"):
-    return {"uid": uid, "ws": ws, "sub": f"user{uid}@msp.example", "role": role}
+def session(uid, ws):
+    """Claims d'un jeton ; le rôle est relu en base à chaque requête."""
+    return {"uid": uid, "ws": ws, "sub": f"user{uid}@msp.example"}
 
 
 @pytest.fixture
@@ -32,6 +33,13 @@ def referentiel(db, tmp_path):
     db.add_all([
         models.User(id=ADMIN_GLOBAL, email="admin@msp.example", password_hash="x", is_global_admin=True),
         models.User(id=ADMIN_CLIENT, email="admin@client1.example", password_hash="x"),
+        models.User(id=LECTEUR, email="lecteur@msp.example", password_hash="x"),
+    ])
+    db.flush()
+    db.add_all([
+        models.AccessGrant(user_id=ADMIN_CLIENT, workspace_id=1, role="admin"),
+        models.AccessGrant(user_id=LECTEUR, workspace_id=1, role="viewer"),
+        models.AccessGrant(user_id=LECTEUR, workspace_id=2, role="viewer"),
     ])
     kev = tmp_path / "cisa_kev.json"
     kev.write_text(json.dumps([{"cveID": "CVE-2024-0001", "vendorProject": "Acme", "product": "Tool"}]))
@@ -65,9 +73,9 @@ def connecte(client, claims):
 
 @pytest.mark.parametrize("chemin", ["/datasets", "/datasets/browse/cisa_kev", "/threat-intel/stats", "/threat-intel/cves"])
 def test_chaque_client_lit_le_meme_referentiel(client, chemin):
-    connecte(client, session(ADMIN_CLIENT, 1, role="viewer"))
+    connecte(client, session(LECTEUR, 1))
     vu_par_le_client_1 = client.get(chemin)
-    connecte(client, session(ADMIN_CLIENT, 2, role="viewer"))
+    connecte(client, session(LECTEUR, 2))
     vu_par_le_client_2 = client.get(chemin)
 
     assert vu_par_le_client_1.status_code == 200, vu_par_le_client_1.text
@@ -89,8 +97,9 @@ def test_le_cache_threat_intel_est_unique_pour_tous_les_clients_jusqu_a_son_inva
     client.get("/threat-intel/stats")
     _ecrire_kev(tmp_path, "CVE-2024-0001", "CVE-2024-0002")
 
-    connecte(client, session(ADMIN_CLIENT, 2, role="analyst"))
+    connecte(client, session(LECTEUR, 2))
     encore_en_cache = client.get("/threat-intel/stats").json()["total_cves"]
+    connecte(client, session(ADMIN_CLIENT, 1))
     client.post("/threat-intel/refresh")
     apres_invalidation = client.get("/threat-intel/stats").json()["total_cves"]
 
@@ -121,16 +130,16 @@ ECRITURES = [
 
 @pytest.mark.parametrize(("methode", "chemin", "options"), ECRITURES, ids=[f"{m} {c}" for m, c, _ in ECRITURES])
 @pytest.mark.parametrize(
-    "claims",
-    [session(ADMIN_CLIENT, 1), {"ws": 1, "sub": "ancien-jeton@msp.example", "role": "admin"}],
+    ("claims", "statut"),
+    [(session(ADMIN_CLIENT, 1), 403), ({"ws": 1, "sub": "ancien-jeton@msp.example", "role": "admin"}, 401)],
     ids=["admin d'un client", "jeton sans uid"],
 )
-def test_seul_un_admin_global_modifie_le_referentiel(client, db, methode, chemin, options, claims):
+def test_seul_un_admin_global_modifie_le_referentiel(client, db, methode, chemin, options, claims, statut):
     connecte(client, claims)
 
     reponse = client.request(methode, chemin, **options)
 
-    assert reponse.status_code == 403
+    assert reponse.status_code == statut
     db.expire_all()
     assert [(d.id, d.enabled) for d in db.query(models.CveDataset)] == [(10, True)]
     assert db.query(models.PlatformSetting).count() == 0
@@ -160,7 +169,7 @@ def test_un_dataset_cree_par_l_admin_global_est_visible_de_tous_les_clients(clie
     connecte(client, session(ADMIN_GLOBAL, 1))
     client.post("/datasets", json={"name": "EPSS", "kind": "epss", "path": "/data/cve/epss.json"})
 
-    connecte(client, session(ADMIN_CLIENT, 2, role="viewer"))
+    connecte(client, session(LECTEUR, 2))
     noms = [d["name"] for d in client.get("/datasets").json()]
 
     assert noms == ["CISA KEV", "EPSS"]
@@ -170,7 +179,7 @@ def test_le_rafraichissement_automatique_est_un_reglage_de_la_plateforme(client,
     connecte(client, session(ADMIN_GLOBAL, 1))
     client.put("/settings/dataset-refresh", json={"enabled": True, "interval_hours": 12})
 
-    connecte(client, session(ADMIN_CLIENT, 2, role="viewer"))
+    connecte(client, session(LECTEUR, 2))
     vu_par_un_autre_client = client.get("/settings/dataset-refresh").json()
 
     assert vu_par_un_autre_client == {"enabled": True, "interval_hours": 12}

@@ -30,8 +30,8 @@ def cancellation():
 
 
 @pytest.fixture
-def claims():
-    return {"ws": 1, "uid": None, "sub": "analyst@corp.local", "role": "analyst"}
+def claims(workspace, session_de):
+    return session_de(1, "analyst")
 
 
 @pytest.fixture
@@ -116,8 +116,8 @@ def test_l_authentification_web_ephemere_est_transmise_au_worker(client, db):
     }
 
 
-def test_un_lecteur_ne_peut_pas_lancer_de_scan(client, claims):
-    claims["role"] = "viewer"
+def test_un_lecteur_ne_peut_pas_lancer_de_scan(client, claims, session_de):
+    claims.update(session_de(1, "viewer"))
 
     response = client.post("/scan/jobs", json={"target": "10.0.0.5", "profile_id": 5})
 

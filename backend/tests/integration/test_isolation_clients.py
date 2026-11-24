@@ -97,6 +97,7 @@ VALEURS_DE_CHEMIN = {
     "tpl_id": V.modele_rapport,
     "connection_id": V.connexion,
     "device_id": V.appareil,
+    "client_id": VOISIN,
     "target": CIBLE_DU_VOISIN,
 }
 
@@ -293,7 +294,8 @@ def temoins():
 
 
 @pytest.fixture
-def client(session_factory, donnees, temoins, monkeypatch):
+def client(session_factory, donnees, temoins, session_de, monkeypatch):
+    claims = session_de(CLIENT, "admin", email="admin@client.example")
     # Aucun service externe : Redis refuse la connexion, Neo4j est absent.
     monkeypatch.setattr(settings, "REDIS_URL", "redis://127.0.0.1:1/0")
     monkeypatch.setattr(neo4j_client.Neo4jClient, "__init__", lambda self: setattr(self, "_driver", None))
@@ -310,7 +312,7 @@ def client(session_factory, donnees, temoins, monkeypatch):
 
     app.dependency_overrides.update({
         get_db: test_db,
-        require_auth: lambda: {"ws": CLIENT, "uid": None, "sub": "admin@client.example", "role": "admin"},
+        require_auth: lambda: claims,
         get_job_queue: lambda: temoins.queue,
         routes_scan.get_cancellation_signal: NeverCancelled,
         routes_inventory.get_inventory_read_model: lambda: SqlInventoryReadModel(session_factory),

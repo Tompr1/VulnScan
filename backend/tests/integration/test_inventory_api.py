@@ -61,8 +61,8 @@ def source():
 
 
 @pytest.fixture
-def claims():
-    return {"ws": 1, "uid": None, "sub": "admin@corp.local", "role": "admin"}
+def claims(workspace, session_de):
+    return session_de(1, "admin")
 
 
 @pytest.fixture
@@ -111,8 +111,8 @@ def test_une_connexion_invalide_est_refusee_avec_toutes_ses_erreurs_sans_reveler
     assert "court" not in response.text
 
 
-def test_un_analyste_ne_peut_pas_configurer_de_connexion(client, claims):
-    claims["role"] = "analyst"
+def test_un_analyste_ne_peut_pas_configurer_de_connexion(client, claims, session_de):
+    claims.update(session_de(1, "analyst"))
 
     assert client.post("/inventory/connections", json=NEW_CONNECTION).status_code == 403
 
@@ -167,9 +167,9 @@ def test_une_synchro_impossible_a_mettre_en_file_renvoie_503(client, queue):
     assert client.post(f"/inventory/connections/{created['id']}/sync").status_code == 503
 
 
-def test_la_connexion_d_un_autre_workspace_est_introuvable(client, claims):
+def test_la_connexion_d_un_autre_workspace_est_introuvable(client, claims, session_de):
     created = create(client)
-    claims["ws"] = 2
+    claims.update(session_de(2, "admin"))
 
     assert client.post(f"/inventory/connections/{created['id']}/sync").status_code == 404
 

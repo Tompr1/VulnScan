@@ -44,7 +44,8 @@ SYNCED_AT = datetime(2026, 11, 21, 5, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture
-def client(session_factory, workspace):
+def client(session_factory, workspace, session_de):
+    claims = session_de(1, "admin")
     app = FastAPI()
     app.include_router(router)
 
@@ -54,7 +55,7 @@ def client(session_factory, workspace):
 
     app.dependency_overrides.update({
         get_db: test_db,
-        require_auth: lambda: {"ws": 1, "uid": None, "sub": "admin@corp.local", "role": "admin"},
+        require_auth: lambda: claims,
         get_job_queue: SpyJobQueue,
         get_inventory_read_model: lambda: SqlInventoryReadModel(session_factory),
     })
