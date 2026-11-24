@@ -1,17 +1,43 @@
+import os
+
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import models
 from app.db.session import Base
 
+# Set to a throwaway PostgreSQL database to run the integration tests on the
+# production engine (foreign keys and constraints enforced), e.g.
+#   VULNSCAN_TEST_DATABASE_URL=postgresql+psycopg2://app:app@127.0.0.1:55432/tests
+# Every table of that database is dropped before each test.
+POSTGRES_URL = os.environ.get("VULNSCAN_TEST_DATABASE_URL")
+# Ids the database generates start above the fixed ids tests insert.
+_FIRST_GENERATED_ID = 100_000
+
 
 @pytest.fixture
 def session_factory():
-    """Fresh in-memory SQLite database per test (isolated, repeatable)."""
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(engine)
+    """Fresh database per test (isolated, repeatable): in-memory SQLite, or
+    PostgreSQL when VULNSCAN_TEST_DATABASE_URL is set."""
+    if POSTGRES_URL:
+        engine = create_engine(POSTGRES_URL)
+        Base.metadata.drop_all(engine)
+        Base.metadata.create_all(engine)
+        with engine.begin() as connection:
+            for (sequence,) in connection.execute(text("SELECT sequencename FROM pg_sequences WHERE schemaname = 'public'")):
+                connection.execute(text(f'ALTER SEQUENCE "{sequence}" RESTART WITH {_FIRST_GENERATED_ID}'))
+            # Fixtures add parents and children in one commit, in any order:
+            # foreign keys are checked at commit, still enforced.
+            foreign_keys = connection.execute(text(
+                "SELECT conrelid::regclass::text, conname FROM pg_constraint WHERE contype = 'f'"
+            )).all()
+            for table, constraint in foreign_keys:
+                connection.execute(text(f'ALTER TABLE {table} ALTER CONSTRAINT "{constraint}" DEFERRABLE INITIALLY DEFERRED'))
+    else:
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
     yield sessionmaker(bind=engine, autoflush=False)
     engine.dispose()
 

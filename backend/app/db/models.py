@@ -138,7 +138,10 @@ class ScanJob(Base):
     asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(50), default="queued")  # queued|running|done|failed|cancelled
     scan_type: Mapped[str] = mapped_column(String(20), default="internal")  # internal|external
-    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    # The job outlives its author: deleting the account keeps the job.
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     # Stamped when a worker picks the job up. The stale-job watchdog measures
     # from here: a job still waiting behind a busy queue has not started

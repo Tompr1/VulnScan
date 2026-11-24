@@ -15,6 +15,7 @@ from app.api.validation import install_validation_error_handler
 from app.core.auth import require_auth
 from app.core.password import verify_password
 from app.db import models
+from tests.integration.conftest import POSTGRES_URL
 
 pytestmark = pytest.mark.integration
 
@@ -426,3 +427,16 @@ def test_une_plateforme_neuve_recoit_un_premier_client_et_un_client_renomme_n_es
         _ensure_first_client(db)
 
         assert [w.name for w in db.query(models.Workspace)] == ["Acme"]
+
+
+def test_supprimer_un_compte_garde_les_scans_qu_il_a_lances(client, db):
+    db.add(models.ScanJob(id=40, workspace_id=ACME, target="10.0.0.1", status="done", created_by_user_id=TECH))
+    db.commit()
+
+    reponse = client.delete(f"/access/users/{TECH}")
+
+    assert reponse.status_code == 200
+    db.expire_all()
+    assert db.get(models.ScanJob, 40) is not None
+    if POSTGRES_URL:  # SQLite n'applique pas ON DELETE sans PRAGMA foreign_keys
+        assert db.get(models.ScanJob, 40).created_by_user_id is None

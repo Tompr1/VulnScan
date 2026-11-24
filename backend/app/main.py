@@ -185,8 +185,42 @@ def _run_migrations(db: Session) -> None:
             END IF;
         END $$;
         """,
+        # One account per email: an email that had an account in several
+        # workspaces keeps its oldest account, which receives the grants of
+        # the others (scans they launched now name it too).
+        """
+        DO $$
+        BEGIN
+            CREATE TEMP TABLE user_merges ON COMMIT DROP AS
+                SELECT u.id AS duplicate_id, keeper.id AS keeper_id
+                FROM users u
+                JOIN LATERAL (
+                    SELECT MIN(k.id) AS id FROM users k WHERE k.email = u.email
+                ) keeper ON keeper.id <> u.id;
+            UPDATE access_grants g SET user_id = m.keeper_id
+                FROM user_merges m WHERE g.user_id = m.duplicate_id;
+            UPDATE scan_jobs j SET created_by_user_id = m.keeper_id
+                FROM user_merges m WHERE j.created_by_user_id = m.duplicate_id;
+            DELETE FROM user_group_members gm USING user_merges m WHERE gm.user_id = m.duplicate_id;
+            DELETE FROM users u USING user_merges m WHERE u.id = m.duplicate_id;
+        END $$;
+        """,
         """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email ON users (email);
+        """,
+        # Deleting an account keeps the scans it launched (created_by → NULL).
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'scan_jobs_created_by_user_id_fkey' AND confdeltype <> 'n'
+            ) THEN
+                ALTER TABLE scan_jobs DROP CONSTRAINT scan_jobs_created_by_user_id_fkey;
+                ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_created_by_user_id_fkey
+                    FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL;
+            END IF;
+        END $$;
         """,
         # Reference datasets are shared by every client. The refresh wrote one
         # record per workspace for the same file: keep one per file (an
@@ -198,9 +232,12 @@ def _run_migrations(db: Session) -> None:
                 SELECT 1 FROM information_schema.columns
                 WHERE table_name = 'cve_datasets' AND column_name = 'workspace_id'
             ) THEN
-                DELETE FROM cve_datasets older USING cve_datasets newer
-                    WHERE older.path = newer.path AND older.kind = newer.kind AND older.id < newer.id
-                      AND (newer.enabled OR NOT older.enabled);
+                DELETE FROM cve_datasets d USING (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY path, kind ORDER BY enabled DESC, id DESC
+                    ) AS rank FROM cve_datasets
+                ) ranked
+                WHERE d.id = ranked.id AND ranked.rank > 1;
                 ALTER TABLE cve_datasets DROP COLUMN workspace_id;
             END IF;
         END $$;
