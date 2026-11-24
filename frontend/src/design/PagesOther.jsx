@@ -916,7 +916,8 @@ function SystemPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const [i, s] = await Promise.all([settingsApi.info(), settingsApi.stats()]);
+      // Platform infrastructure is shown to global admins only (403 otherwise).
+      const [i, s] = await Promise.all([settingsApi.info().catch(() => null), settingsApi.stats()]);
       setInfo(i);
       setStats(s);
       setError("");

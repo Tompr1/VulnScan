@@ -186,16 +186,20 @@ class AlertPolicy:
 
 
 class DeviceLinks:
-    """Deep links into the web UI (hash routes: no server rewrite needed)."""
+    """Deep links into the web UI (hash routes: no server rewrite needed).
+
+    A link names its client (``#/c/<client id>/…``): an MSP technician who
+    has several clients open lands on the right one, whichever was open last.
+    """
 
     def __init__(self, base_url: str | None) -> None:
         self._base = (base_url or "").rstrip("/") or None
 
-    def device(self, device_id: int | None) -> str | None:
-        return f"{self._base}/#/inventory/devices/{device_id}" if self._base and device_id is not None else None
+    def device(self, client_id: int, device_id: int | None) -> str | None:
+        return f"{self._base}/#/c/{client_id}/inventory/devices/{device_id}" if self._base and device_id is not None else None
 
-    def devices(self) -> str | None:
-        return f"{self._base}/#/inventory" if self._base else None
+    def devices(self, client_id: int) -> str | None:
+        return f"{self._base}/#/c/{client_id}/inventory" if self._base else None
 
 
 class AlertHistory(Protocol):
@@ -233,13 +237,13 @@ class InventoryAlerter:
             job_id=job.id,
             target=job.target,
             items=tuple(
-                AlertItem(issue, names.get(issue.device_id, f"device #{issue.device_id}"), self.links.device(issue.device_id))
+                AlertItem(issue, names.get(issue.device_id, f"device #{issue.device_id}"), self.links.device(job.workspace_id, issue.device_id))
                 for issue in selected
             ),
             baseline=baseline,
             resolved=resolved,
             open_issues=sum(1 for issue in current if issue.device_id is not None),
-            devices_url=self.links.devices(),
+            devices_url=self.links.devices(job.workspace_id),
         )
         self.sender.device_alert(job.workspace_id, alert)
         return alert

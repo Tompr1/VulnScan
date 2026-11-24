@@ -265,10 +265,14 @@ class ScanSchedule(Base):
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    workspace_id: Mapped[int] = mapped_column(Integer, index=True)
+    # The client the session had open; None for actions outside any client
+    # (login, platform settings of a global admin without a client open).
+    workspace_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
     actor_email: Mapped[str] = mapped_column(String(255), default="")
     action: Mapped[str] = mapped_column(String(255))
     resource: Mapped[str] = mapped_column(String(255), default="")
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ip: Mapped[str] = mapped_column(String(64), default="")
     user_agent: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 
 from app.core.config import settings
-from app.scanner.allowlist import AllowlistPolicy
+from app.scanner.allowlist import AllowlistPolicy, AllowlistSource
 from app.scanner.budget import ScanBudget
 from app.scanner.cancellation import CancellationSignal, NeverCancelled, RedisCancellationSignal
 from app.scanner.context import ScanContext, ScanPolicy, stable_fingerprint
@@ -43,7 +43,7 @@ class ScanEngine:
     def __init__(
         self,
         registry: PluginRegistry,
-        allowlist: AllowlistPolicy,
+        allowlist: AllowlistSource,
         budget: ScanBudget,
         request_timeout_seconds: float,
         cancellation: CancellationSignal | None = None,
@@ -71,8 +71,9 @@ class ScanEngine:
         without a host.
         """
         scan_target = ScanTarget.parse(target)
-        if not self._allowlist.allows(scan_target, scan_type):
-            return [_allowlist_blocked_finding(scan_target, self._allowlist)]
+        allowlist = self._allowlist.policy_for(workspace_id)
+        if not allowlist.allows(scan_target, scan_type):
+            return [_allowlist_blocked_finding(scan_target, allowlist)]
 
         run = _ScanRun(
             registry=self._registry,
@@ -273,17 +274,17 @@ def _allowlist_blocked_finding(target: ScanTarget, allowlist: AllowlistPolicy) -
         plugin_id="policy.allowlist",
         title="Target blocked by allowlist policy",
         description=(
-            f"Target '{target.raw}' is not in the configured allowlist. "
-            "Add it to the ALLOWLIST environment variable to permit scanning. "
+            f"Target '{target.raw}' is not in this client's allowlist. "
+            "A client admin can add it in Settings → Allowlist to permit scanning. "
             "Alternatively, use 'External / Web' scan type for public targets."
         ),
         remediation=(
             "To scan this target, either:\n"
             "1. Switch to 'External / Web' scan type for public targets\n"
-            "2. Add the target to the ALLOWLIST in Settings or .env file\n"
-            "   Example: ALLOWLIST=10.0.0.0/8,.example.com,target.com"
+            "2. Add the target to this client's allowlist in Settings → Allowlist\n"
+            "   Example: 10.0.0.0/8,.example.com,target.com"
         ),
-        evidence=f"ALLOWLIST={allowlist}",
+        evidence=f"Allowlist: {allowlist}",
         affected=target.raw,
         fingerprint=stable_fingerprint(target.raw, "allowlist"),
     )
@@ -310,9 +311,12 @@ class _ProgressReporter:
 @functools.lru_cache(maxsize=1)
 def default_engine() -> ScanEngine:
     """Engine wired with the built-in plugins and the application settings."""
+    from app.db.session import SessionLocal
+    from app.scanner.client_allowlists import SqlClientAllowlists
+
     return ScanEngine(
         registry=builtin_registry(),
-        allowlist=AllowlistPolicy.from_setting(settings.ALLOWLIST),
+        allowlist=SqlClientAllowlists(SessionLocal, platform_default=settings.ALLOWLIST),
         budget=ScanBudget(total_seconds=float(settings.SCAN_BUDGET_SECONDS)),
         request_timeout_seconds=float(settings.SCAN_TIMEOUT_SECONDS),
         cancellation=RedisCancellationSignal.from_url(settings.REDIS_URL),

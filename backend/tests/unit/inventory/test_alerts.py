@@ -163,15 +163,15 @@ def test_l_objet_du_bilan_initial_le_dit():
 @pytest.mark.parametrize(
     ("base", "device", "devices"),
     [
-        ("https://vulnscan.example.com/", "https://vulnscan.example.com/#/inventory/devices/7", "https://vulnscan.example.com/#/inventory"),
+        ("https://vulnscan.example.com/", "https://vulnscan.example.com/#/c/3/inventory/devices/7", "https://vulnscan.example.com/#/c/3/inventory"),
         ("", None, None),
         (None, None, None),
     ],
 )
-def test_les_liens_menent_a_la_fiche_de_l_appareil(base, device, devices):
+def test_les_liens_menent_a_la_fiche_de_l_appareil_chez_son_client(base, device, devices):
     links = DeviceLinks(base)
 
-    assert (links.device(7), links.devices()) == (device, devices)
+    assert (links.device(3, 7), links.devices(3)) == (device, devices)
 
 
 # ── Alerter ───────────────────────────────────────────────────────────────────
@@ -204,19 +204,19 @@ def row(fingerprint, severity="high", device_id=7, is_kev=False):
     return Row(fingerprint, "inventory.app_vulnerable", severity, is_kev, device_id, f"Chrome — PC-0{device_id}")
 
 
-def test_l_alerteur_envoie_une_seule_alerte_avec_les_nouveaux_problemes_et_leurs_liens():
+def test_l_alerteur_envoie_une_seule_alerte_avec_les_nouveaux_problemes_et_leurs_liens_chez_le_client():
     history, sender = FakeHistory(previous=[issue("old", device_id=7)]), SpyNotifier()
     alerter = InventoryAlerter(history, sender, DeviceLinks("https://vulnscan.example.com"))
 
-    alert = alerter.announce(Job(), [row("old"), row("new", device_id=7), row("new-2", device_id=9), row("quiet", severity="low")])
+    alert = alerter.announce(Job(workspace_id=4), [row("old"), row("new", device_id=7), row("new-2", device_id=9), row("quiet", severity="low")])
 
     [(workspace, sent)] = sender.alerts
-    assert workspace == 1 and sent is alert
+    assert workspace == 4 and sent is alert
     assert [(i.issue.fingerprint, i.device_name, i.link) for i in sent.items] == [
-        ("new", "PC-COMPTA-04", "https://vulnscan.example.com/#/inventory/devices/7"),
-        ("new-2", "device #9", "https://vulnscan.example.com/#/inventory/devices/9"),  # name unknown: still alerted
+        ("new", "PC-COMPTA-04", "https://vulnscan.example.com/#/c/4/inventory/devices/7"),
+        ("new-2", "device #9", "https://vulnscan.example.com/#/c/4/inventory/devices/9"),  # name unknown: still alerted
     ]
-    assert (sent.baseline, sent.resolved, sent.open_issues, sent.devices_url) == (False, 0, 4, "https://vulnscan.example.com/#/inventory")
+    assert (sent.baseline, sent.resolved, sent.open_issues, sent.devices_url) == (False, 0, 4, "https://vulnscan.example.com/#/c/4/inventory")
     assert history.asked_names == {7, 9}
 
 

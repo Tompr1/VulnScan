@@ -334,7 +334,7 @@ def test_le_premier_audit_envoie_un_bilan_et_pas_de_message_de_fin_de_scan(alert
     assert (workspace, alert.baseline) == (1, True)
     # High and above only: the outdated Notepad++ (low) stays out.
     assert [(i.issue.rule, i.device_name, i.link) for i in alert.items] == [
-        ("os_unsupported", "PC-COMPTA-04", f"https://vs.example/#/inventory/devices/{device_id(db, 'PC-COMPTA-04')}"),
+        ("os_unsupported", "PC-COMPTA-04", f"https://vs.example/#/c/1/inventory/devices/{device_id(db, 'PC-COMPTA-04')}"),
     ]
     assert notifier.completed == []
 

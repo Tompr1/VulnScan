@@ -144,7 +144,34 @@ async def test_une_cible_interne_hors_allowlist_n_est_pas_scannee():
 
     assert not plugin.was_run
     assert [f.plugin_id for f in findings] == ["policy.allowlist"]
-    assert findings[0].evidence == "ALLOWLIST=10.0.0.0/8"
+    assert findings[0].evidence == "Allowlist: 10.0.0.0/8"
+
+
+class AllowlistParClient:
+    def __init__(self, **par_client):
+        self._par_client = {int(k.removeprefix("client_")): AllowlistPolicy.from_setting(v) for k, v in par_client.items()}
+
+    def policy_for(self, workspace_id):
+        return self._par_client[workspace_id]
+
+
+async def test_chaque_client_est_scanne_selon_sa_propre_allowlist():
+    plugin = FakePlugin(meta("p"))
+    engine = ScanEngine(
+        registry=PluginRegistry([plugin]),
+        allowlist=AllowlistParClient(client_1="10.0.0.0/8", client_2="192.168.0.0/16"),
+        budget=ScanBudget(total_seconds=900, kill_grace_seconds=0),
+        request_timeout_seconds=5,
+        monotonic=FakeClock().monotonic,
+    )
+
+    bloque = await engine.scan("192.168.1.1", ScanProfile(), workspace_id=1)
+    autorise = await engine.scan("192.168.1.1", ScanProfile(), workspace_id=2)
+
+    assert [f.plugin_id for f in bloque] == ["policy.allowlist"]
+    assert bloque[0].evidence == "Allowlist: 10.0.0.0/8"
+    assert "policy.allowlist" not in [f.plugin_id for f in autorise]
+    assert plugin.targets == ["192.168.1.1"]
 
 
 async def test_une_cible_externe_est_scannee_meme_hors_allowlist():

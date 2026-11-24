@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 NOTIFICATION_PREFERENCES_KEY = "notification_preferences"
 INVENTORY_ALERTS_KEY = "inventory_alerts"
 AUTO_AI_ANALYSIS_KEY = "auto_ai_analysis"
+# Internal ranges and domains this client's internal scans may reach.
+SCAN_ALLOWLIST_KEY = "scan_allowlist"
 
 DEFAULT_NOTIFICATION_PREFS: dict[str, dict[str, bool]] = {
     "critical_finding":     {"email": True,  "slack": True,  "webhook": True},
@@ -53,6 +55,26 @@ def notification_preferences(db: Session, workspace_id: int) -> dict[str, dict[s
     workspace saved its preferences starts with its default channels."""
     stored = get_workspace_setting(db, workspace_id, NOTIFICATION_PREFERENCES_KEY, {})
     return {**DEFAULT_NOTIFICATION_PREFS, **{k: v for k, v in stored.items() if isinstance(v, dict)}}
+
+
+def client_allowlist(db: Session, workspace_id: int) -> list[str] | None:
+    """The client's own allowlist entries, or None when it has none and the
+    platform default applies."""
+    entries = get_workspace_setting(db, workspace_id, SCAN_ALLOWLIST_KEY, {}).get("entries")
+    if not isinstance(entries, list):
+        return None
+    return [entry for entry in entries if isinstance(entry, str)]
+
+
+def set_client_allowlist(db: Session, workspace_id: int, entries: list[str] | None) -> None:
+    """Store the client's allowlist; None goes back to the platform default."""
+    if entries is None:
+        row = _find(db, workspace_id, SCAN_ALLOWLIST_KEY)
+        if row is not None:
+            db.delete(row)
+            db.commit()
+        return
+    set_workspace_setting(db, workspace_id, SCAN_ALLOWLIST_KEY, {"entries": entries})
 
 
 def set_workspace_setting(db: Session, workspace_id: int, key: str, value: dict[str, Any]) -> None:

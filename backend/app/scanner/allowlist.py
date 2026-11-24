@@ -1,17 +1,26 @@
 """
 Allowlist policy — decides whether an internal scan may reach a target.
+
+Each client has its own internal network: the engine asks an
+:class:`AllowlistSource` for the policy of the client being scanned.
 """
 from __future__ import annotations
 
 import ipaddress
 import logging
 from collections.abc import Iterable
+from typing import Protocol
 
 from app.scanner.target import ScanTarget, ScanType
 
 logger = logging.getLogger(__name__)
 
 _IpNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+
+class AllowlistSource(Protocol):
+    def policy_for(self, workspace_id: int) -> AllowlistPolicy:
+        """The policy that applies to the scans of this client."""
 
 
 class AllowlistPolicy:
@@ -38,6 +47,10 @@ class AllowlistPolicy:
         """Build from the comma-separated ``ALLOWLIST`` setting."""
         text = (raw or "").strip()
         return cls([] if text == "*" else text.split(","))
+
+    def policy_for(self, workspace_id: int) -> AllowlistPolicy:
+        """The same policy for every client (a source of one policy)."""
+        return self
 
     def allows(self, target: ScanTarget, scan_type: ScanType) -> bool:
         if scan_type is ScanType.EXTERNAL or self._allow_all:

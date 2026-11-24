@@ -9,6 +9,7 @@ from sqlalchemy import and_, or_, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.audit import audit_entry
 from app.core.net import client_ip
 from app.db import models
 from app.db.session import Base, SessionLocal, engine
@@ -215,6 +216,20 @@ def _run_migrations(db: Session) -> None:
         """,
         """
         DELETE FROM workspace_settings WHERE key = 'dataset_refresh';
+        """,
+        # Audit entries name the client of the session (none outside a
+        # client), the account and the outcome; 0 was "no client" before.
+        """
+        ALTER TABLE audit_logs
+            ALTER COLUMN workspace_id DROP NOT NULL,
+            ADD COLUMN IF NOT EXISTS user_id INTEGER,
+            ADD COLUMN IF NOT EXISTS status_code INTEGER;
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS ix_audit_logs_user_id ON audit_logs (user_id);
+        """,
+        """
+        UPDATE audit_logs SET workspace_id = NULL WHERE workspace_id = 0;
         """,
     ]
     for sql in migrations:
@@ -839,42 +854,9 @@ def _schedule_loop():
                             except Exception:
                                 pass
 
-                            msg = (
-                                f"VulnScan update available: v{current} → v{latest_ver}\n"
-                                f"Release: {release.get('name', latest_tag)}\n"
-                                f"Update from Settings → System or run: git pull && docker compose up -d --build"
-                            )
+                            # Only logged and shown in Settings → System: the integrations
+                            # belong to the clients, and a platform update is the MSP's business.
                             logger.info("Update available: v%s → v%s", current, latest_ver)
-
-                            # Notify via all enabled integrations (all workspaces)
-                            from app.scanner.notifier import (
-                                send_slack_notification,
-                                send_teams_notification,
-                                send_email_notification,
-                                send_webhook_notification,
-                            )
-                            all_integrations = (
-                                db.query(models.Integration)
-                                .filter(models.Integration.enabled == True)
-                                .all()
-                            )
-                            for integ in all_integrations:
-                                try:
-                                    cfg = _json.loads(integ.config_json or "{}")
-                                    if integ.provider == "slack":
-                                        send_slack_notification(cfg, msg)
-                                    elif integ.provider == "teams":
-                                        send_teams_notification(cfg, {"title": "VulnScan Update Available", "text": msg})
-                                    elif integ.provider == "email":
-                                        send_email_notification(cfg, "VulnScan Update Available", msg)
-                                    elif integ.provider == "webhook":
-                                        send_webhook_notification(cfg, {
-                                            "event": "update_available",
-                                            "current": current,
-                                            "latest": latest_ver,
-                                        })
-                                except Exception:
-                                    pass
                         else:
                             logger.debug("Update check: v%s is latest", current)
                     except Exception as e_gh:
@@ -900,20 +882,11 @@ def start_scheduler():
     t.start()
 
 
-def _write_audit(method: str, path: str, ip: str, ua: str) -> None:
+def _write_audit(entry: dict) -> None:
     """Blocking audit write — must run off the event loop."""
     db: Session = SessionLocal()
     try:
-        db.add(
-            models.AuditLog(
-                workspace_id=0,
-                actor_email="",
-                action=f"{method} {path}",
-                resource="",
-                ip=ip,
-                user_agent=ua,
-            )
-        )
+        db.add(models.AuditLog(**entry))
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -927,14 +900,18 @@ async def audit_mw(request: Request, call_next):
     response = await call_next(request)
     try:
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            entry = audit_entry(
+                request.method,
+                request.url.path,
+                request.headers.get("Authorization", ""),
+                response.status_code,
+                client_ip(request),
+                request.headers.get("User-Agent", ""),
+            )
             # Run in a worker thread: a synchronous commit here blocks the
             # whole event loop, and it also holds a pool connection on the
             # critical path of every mutating request.
-            ip = client_ip(request)
-            ua = request.headers.get("User-Agent", "")
-            await run_in_threadpool(
-                _write_audit, request.method, request.url.path, ip, ua,
-            )
+            await run_in_threadpool(_write_audit, entry)
     except Exception:
         pass
     return response

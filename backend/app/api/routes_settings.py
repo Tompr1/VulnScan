@@ -25,8 +25,10 @@ from app.core.platform_settings import (
 )
 from app.core.workspace_settings import (
     DEFAULT_NOTIFICATION_PREFS,
+    client_allowlist,
     get_workspace_setting,
     notification_preferences,
+    set_client_allowlist,
     set_workspace_setting,
 )
 from app.db import models
@@ -37,24 +39,29 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 
 # ─── Allowlist ─────────────────────────────────────────────────────────────────
+# Each client scans its own internal network: the allowlist is the client's,
+# read by the worker when a scan starts. A client without one gets the
+# platform default (ALLOWLIST environment variable).
 
 class AllowlistUpdate(BaseModel):
-    allowlist: str  # comma-separated
+    allowlist: str  # comma-separated; empty goes back to the platform default, "*" allows everything
 
 
 @router.get("/allowlist")
-def get_allowlist(user=Depends(require_role("admin", "analyst", "viewer"))):
-    """Return current ALLOWLIST as structured data."""
-    raw = settings.ALLOWLIST or ""
-    entries = [e.strip() for e in raw.split(",") if e.strip()]
-    cidrs = [e for e in entries if "/" in e or _is_ip(e)]
-    domains = [e for e in entries if e.startswith(".")]
+def get_allowlist(user=Depends(require_role("admin", "analyst", "viewer")), db: Session = Depends(get_db)):
+    """Return the client's allowlist as structured data."""
+    own = client_allowlist(db, user["ws"])
+    if own is None:
+        entries = _split_entries(settings.ALLOWLIST)
+    else:
+        entries = own
     return {
-        "raw": raw,
+        "raw": ",".join(entries),
         "entries": entries,
-        "cidrs": cidrs,
-        "domains": domains,
+        "cidrs": [e for e in entries if "/" in e or _is_ip(e)],
+        "domains": [e for e in entries if e.startswith(".")],
         "count": len(entries),
+        "platform_default": own is None,
     }
 
 
@@ -62,34 +69,37 @@ def get_allowlist(user=Depends(require_role("admin", "analyst", "viewer"))):
 def update_allowlist(
     body: AllowlistUpdate,
     user=Depends(require_role("admin")),
+    db: Session = Depends(get_db),
 ):
-    """
-    Update the ALLOWLIST in the running process.
-    NOTE: This only updates the in-memory value for the current session.
-    To persist, the .env file must also be updated (shown in UI).
-    """
-    new_val = body.allowlist.strip()
-    # Validate entries
-    entries = [e.strip() for e in new_val.split(",") if e.strip()]
+    """Set the client's allowlist; it applies from the next scan on."""
+    entries = _split_entries(body.allowlist)
     for entry in entries:
         if not _valid_allowlist_entry(entry):
             raise HTTPException(400, f"Invalid allowlist entry: '{entry}'. Use CIDR (10.0.0.0/8), IP, or domain suffix (.example.com)")
+    if "*" in entries and len(entries) > 1:
+        raise HTTPException(400, "'*' allows every target: use it alone")
 
-    settings.ALLOWLIST = new_val
-    logger.info("Allowlist updated by %s: %s", user.get("sub", "?"), new_val)
+    set_client_allowlist(db, user["ws"], entries or None)
+    logger.info("Allowlist of client #%s updated by %s: %s", user["ws"], user.get("sub", "?"), entries or "platform default")
     return {
         "ok": True,
-        "entries": entries,
-        "count": len(entries),
-        "note": "Updated for this session. Edit .env to persist across restarts.",
+        "entries": entries or _split_entries(settings.ALLOWLIST),
+        "count": len(entries or _split_entries(settings.ALLOWLIST)),
+        "platform_default": not entries,
+        "note": "Applies to this client's next scans.",
     }
+
+
+def _split_entries(raw: str | None) -> list[str]:
+    return [e.strip() for e in (raw or "").split(",") if e.strip()]
 
 
 # ─── Platform Info ─────────────────────────────────────────────────────────────
 
 @router.get("/info")
-def get_platform_info(user=Depends(require_role("admin", "analyst", "viewer"))):
-    """Return platform configuration (non-secret)."""
+def get_platform_info(user=Depends(require_global_admin)):
+    """Return platform configuration (non-secret): the MSP's infrastructure,
+    not shown to the users of a client."""
     return {
         "scan_timeout_seconds": settings.SCAN_TIMEOUT_SECONDS,
         "reports_dir": settings.REPORTS_DIR,
@@ -391,7 +401,7 @@ def check_for_update(user=Depends(require_role("admin", "analyst", "viewer"))):
 
 
 @router.post("/update/trigger")
-def trigger_update(user=Depends(require_role("admin"))):
+def trigger_update(user=Depends(require_global_admin)):
     """Trigger a platform update. Writes a trigger file that the host updater picks up."""
     trigger_path = "/data/update-trigger.json"
     result_path = "/data/update-result.json"
@@ -463,6 +473,8 @@ def _valid_allowlist_entry(entry: str) -> bool:
     """Check if an allowlist entry is valid."""
     if not entry:
         return False
+    if entry == "*":
+        return True
     # CIDR notation
     if "/" in entry:
         parts = entry.split("/")
