@@ -101,6 +101,25 @@ def _serialize(a: models.Asset, db: Session) -> dict:
     }
 
 
+_REFERENCES = {
+    "parent_id": (models.Asset, "Parent asset not found"),
+    "default_profile_id": (models.Profile, "Default profile not found"),
+    "default_credential_id": (models.Credential, "Default credential not found"),
+}
+
+
+def _require_references_in_workspace(db: Session, workspace_id: int, fields: dict) -> None:
+    """An asset may only point at objects of its own workspace: a credential
+    or profile of another one would be used by this workspace's scans."""
+    for name, (model, message) in _REFERENCES.items():
+        ref_id = fields.get(name)
+        if ref_id is None:
+            continue
+        found = db.query(model.id).filter(model.workspace_id == workspace_id, model.id == ref_id).first()
+        if not found:
+            raise HTTPException(400, message)
+
+
 @router.get("")
 def list_assets(
     user=Depends(require_role("admin", "analyst", "viewer")),
@@ -125,13 +144,7 @@ def create_asset(
     if not body.name or not body.name.strip():
         raise HTTPException(400, "Name is required")
 
-    if body.parent_id is not None:
-        parent = db.query(models.Asset).filter(
-            models.Asset.workspace_id == user["ws"],
-            models.Asset.id == body.parent_id,
-        ).first()
-        if not parent:
-            raise HTTPException(400, "Parent asset not found")
+    _require_references_in_workspace(db, user["ws"], body.model_dump())
 
     a = models.Asset(
         workspace_id=user["ws"],
@@ -165,7 +178,8 @@ def update_asset(
     if not a:
         raise HTTPException(404, "Asset not found")
 
-    data = body.dict(exclude_unset=True)
+    data = body.model_dump(exclude_unset=True)
+    _require_references_in_workspace(db, user["ws"], data)
     if "name" in data and data["name"]:
         a.name = data["name"].strip()
     if "description" in data:

@@ -593,6 +593,14 @@ def create_schedule(
     user=Depends(require_role("admin", "analyst")),
     db: Session = Depends(get_db),
 ):
+    profile = (
+        db.query(models.Profile.id)
+        .filter(models.Profile.workspace_id == user["ws"], models.Profile.id == body.profile_id)
+        .first()
+    )
+    if not profile:
+        raise HTTPException(404, "profile not found")
+
     if body.schedule_type == "custom":
         next_run = body.custom_datetime
     else:
