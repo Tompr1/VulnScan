@@ -906,25 +906,39 @@ function SLAAlertPanel() {
 }
 
 function SystemPanel() {
-  const [info, setInfo] = useState(null);
   const [stats, setStats] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    settingsApi.stats().then(setStats).catch(e => setError(e.message));
+  }, []);
+
+  return (
+    <>
+      <div className="card-head"><div><div className="card-title">System</div><div className="card-sub" style={{marginTop: 0}}>This client's figures. The platform (version, updates, environment) is managed in Root.</div></div></div>
+      <div className="card-body" style={{display: "flex", flexDirection: "column", gap: 18}}>
+        {error && <div style={{color: "var(--err)", fontSize: 13}}><Icons.AlertTriangle size={13}/> {error}</div>}
+
+        {stats && (
+          <div className="grid-stat" style={{gridTemplateColumns: "repeat(4, 1fr)"}}>
+            <div className="stat brand"><div className="accent-bar"/><div className="label">Total scans</div><div className="value">{stats.jobs_total}</div></div>
+            <div className="stat neutral"><div className="accent-bar"/><div className="label">Findings</div><div className="value">{stats.findings}</div></div>
+            <div className="stat neutral"><div className="accent-bar"/><div className="label">Profiles</div><div className="value">{stats.profiles}</div></div>
+            <div className="stat neutral"><div className="accent-bar"/><div className="label">Credentials</div><div className="value">{stats.credentials}</div></div>
+          </div>
+        )}
+
+      </div>
+    </>
+  );
+}
+
+/** Version of the platform and its updates (Root). Only a super admin installs one. */
+export function PlatformUpdates({ version = "" }) {
   const [updateInfo, setUpdateInfo] = useState(null);
   const [updateLoading, setUpdateLoading] = useState(false);
   const [updateStatus, setUpdateStatus] = useState(null);
   const [triggering, setTriggering] = useState(false);
-  const [error, setError] = useState("");
-
-  const refresh = useCallback(async () => {
-    try {
-      // Platform infrastructure is shown to global admins only (403 otherwise).
-      const [i, s] = await Promise.all([settingsApi.info().catch(() => null), settingsApi.stats()]);
-      setInfo(i);
-      setStats(s);
-      setError("");
-    } catch (e) { setError(e.message); }
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
 
   const checkUpdate = async () => {
     setUpdateLoading(true);
@@ -963,20 +977,7 @@ function SystemPanel() {
   }, [triggering]);
 
   return (
-    <>
-      <div className="card-head"><div><div className="card-title">System</div><div className="card-sub" style={{marginTop: 0}}>Workspace stats, environment, and software updates.</div></div></div>
-      <div className="card-body" style={{display: "flex", flexDirection: "column", gap: 18}}>
-        {error && <div style={{color: "var(--err)", fontSize: 13}}><Icons.AlertTriangle size={13}/> {error}</div>}
-
-        {stats && (
-          <div className="grid-stat" style={{gridTemplateColumns: "repeat(4, 1fr)"}}>
-            <div className="stat brand"><div className="accent-bar"/><div className="label">Total scans</div><div className="value">{stats.jobs_total}</div></div>
-            <div className="stat neutral"><div className="accent-bar"/><div className="label">Findings</div><div className="value">{stats.findings}</div></div>
-            <div className="stat neutral"><div className="accent-bar"/><div className="label">Profiles</div><div className="value">{stats.profiles}</div></div>
-            <div className="stat neutral"><div className="accent-bar"/><div className="label">Credentials</div><div className="value">{stats.credentials}</div></div>
-          </div>
-        )}
-
+    <div style={{display: "flex", flexDirection: "column", gap: 18}}>
         {updateStatus && updateStatus.status !== "idle" && (
           <div style={{
             padding: "12px 16px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, fontSize: 13,
@@ -1031,7 +1032,7 @@ function SystemPanel() {
 
         <div>
           <div style={{display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10}}>
-            <div className="eyebrow">Installed version</div>
+            <div className="eyebrow">Installed version{version && <span className="mono" style={{marginLeft: 10, color: "var(--text-0)", textTransform: "none", letterSpacing: 0, fontSize: 13}}>v{version}</span>}</div>
             <button className="btn btn-ghost btn-sm" onClick={checkUpdate} disabled={updateLoading}>
               {updateLoading ? <><Icons.Refresh size={11} className="spin"/> Checking…</> : <><Icons.Refresh size={11}/> Check for updates</>}
             </button>
@@ -1043,11 +1044,26 @@ function SystemPanel() {
           )}
         </div>
 
+    </div>
+  );
+}
+
+/** Where the platform runs: database, Redis, Neo4j… (Root, super admins). */
+export function PlatformEnvironment() {
+  const [info, setInfo] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    settingsApi.info().then(setInfo).catch(e => setError(e.message));
+  }, []);
+
+  if (error) return <div style={{color: "var(--err)", fontSize: 13}}><Icons.AlertTriangle size={13}/> {error}</div>;
+  return (
+    <>
         {info && (
           <div>
-            <div className="eyebrow" style={{marginBottom: 10}}>Environment</div>
             <dl className="dl">
-              <dt>Default workspace</dt><dd className="mono">{info.default_workspace}</dd>
+              <dt>First client</dt><dd className="mono">{info.default_workspace}</dd>
               <dt>Scan timeout</dt><dd className="mono">{info.scan_timeout_seconds}s</dd>
               <dt>Reports dir</dt><dd className="mono" style={{fontSize: 12}}>{info.reports_dir}</dd>
               <dt>Database</dt><dd className="mono" style={{fontSize: 12}}>{info.database_url}</dd>
@@ -1057,7 +1073,6 @@ function SystemPanel() {
             </dl>
           </div>
         )}
-      </div>
     </>
   );
 }
@@ -1393,7 +1408,7 @@ function UsersPanel() {
   return (
     <>
       <div className="card-head" style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-        <div><div className="card-title">Users & RBAC</div><div className="card-sub" style={{marginTop: 0}}>Accounts that open this client, and their role here.{isGlobalAdmin() ? " Every client's access is managed from Access." : ""}</div></div>
+        <div><div className="card-title">Users & RBAC</div><div className="card-sub" style={{marginTop: 0}}>Accounts that open this client, and their role here.{isGlobalAdmin() ? " Every client's access is managed in Root → Clients & access." : ""}</div></div>
         <div style={{display: "flex", gap: 8}}>
           <button className="btn btn-sm" onClick={() => setShowChangePw(true)}><Icons.Lock size={11}/> Change my password</button>
           <button className="btn btn-primary btn-sm" onClick={() => setShowInvite(true)}><Icons.Plus size={11}/> Add user</button>
@@ -1420,7 +1435,7 @@ function UsersPanel() {
                     </div></td>
                     <td style={{whiteSpace: "nowrap"}}>
                       <span className="tag">{u.role}</span>
-                      {u.is_global_admin && <span className="tag brand" style={{marginLeft: 6}}>global admin</span>}
+                      {u.is_global_admin && <span className="tag root" style={{marginLeft: 6}}>super admin</span>}
                     </td>
                     <td className="muted" style={{fontSize: 12}}>{fmtDate(u.last_login_at)}</td>
                     <td className="muted" style={{fontSize: 12}} title={u.last_login_ip || ""}>{u.last_login_location || u.last_login_ip || "—"}</td>
@@ -1435,8 +1450,8 @@ function UsersPanel() {
                                 onClick={() => onDelete(u.id, u.email)}><Icons.Trash size={13}/></button>
                       </div>
                       ) : (
-                        // Opens other clients too, or is a global admin: managed from Access.
-                        <span className="muted" style={{fontSize: 11.5, whiteSpace: "nowrap"}} title="This account opens other clients: a global admin manages it from Access">Managed by the MSP</span>
+                        // Opens other clients too, or is a super admin: managed in Root.
+                        <span className="muted" style={{fontSize: 11.5, whiteSpace: "nowrap"}} title="This account opens other clients: a super admin manages it in Root → Clients and access">Managed by the MSP</span>
                       )}
                     </td>
                   </tr>

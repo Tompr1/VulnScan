@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from rq import Queue
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_global_admin, require_role
+from app.api.deps import get_db, require_global_admin, require_shared_reader
 from app.core.config import settings
 from app.core.job_queue import get_job_queue
 from app.cve.reference_datasets import REFRESH_LOCK_KEY, REFRESH_STATUS_KEY, latest_dataset_path
@@ -55,7 +55,7 @@ def browse_dataset(
     q: str = Query("", description="Search filter"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-    user=Depends(require_role("admin", "analyst", "viewer")),
+    user=Depends(require_shared_reader("admin", "analyst", "viewer")),
     db: Session = Depends(get_db),
 ):
     """Return paginated contents of a dataset file."""
@@ -121,7 +121,7 @@ class DatasetCreate(BaseModel):
 
 
 @router.get("")
-def list_datasets(user=Depends(require_role("admin", "analyst", "viewer")), db: Session = Depends(get_db)):
+def list_datasets(user=Depends(require_shared_reader("admin", "analyst", "viewer")), db: Session = Depends(get_db)):
     ds = db.query(models.CveDataset).order_by(models.CveDataset.id).all()
     return [
         {
@@ -303,7 +303,7 @@ def refresh_datasets(
 
 @router.get("/refresh/status")
 def refresh_status(
-    user: dict = Depends(require_role("admin", "analyst", "viewer")),
+    user: dict = Depends(require_shared_reader("admin", "analyst", "viewer")),
 ):
     r = _redis_conn()
     data = r.get(REFRESH_STATUS_KEY)

@@ -1,36 +1,48 @@
 import React, { useState, useEffect, Fragment } from "react";
 import { Icons } from "./icons.jsx";
 import { eventsApi, getUser, isGlobalAdmin } from "../api.js";
-import { ClientBadge } from "./ClientPicker.jsx";
-import { canOpenPage, filterClients } from "./routes.js";
+import { ClientBadge, RootBadge } from "./ClientPicker.jsx";
 
-// Above this many clients, the switcher offers a search field.
-const SWITCHER_SEARCH_FROM = 8;
+// Pages of a client.
+const CLIENT_NAV = (counts) => [
+  { section: "Overview", items: [
+    { id: "dashboard", label: "Dashboard", icon: Icons.Dashboard },
+  ]},
+  { section: "Scanning", items: [
+    { id: "assets", label: "Assets", icon: Icons.Folder, count: counts.assets },
+    { id: "inventory", label: "Devices", icon: Icons.Monitor },
+    { id: "jobs", label: "Scan Jobs", icon: Icons.Scan, count: counts.jobs },
+    { id: "profiles", label: "Profiles", icon: Icons.Layers, count: counts.profiles },
+    { id: "reports", label: "Reports", icon: Icons.FileText, count: counts.reports },
+  ]},
+  { section: "Intelligence", items: [
+    { id: "threat-intel", label: "Threat Intel", icon: Icons.Target, count: counts.threat_kev },
+    { id: "attack-graph", label: "Attack Graph", icon: Icons.Graph },
+    { id: "analytics", label: "Analytics", icon: Icons.Activity },
+  ]},
+  { section: "Configuration", items: [
+    { id: "credentials", label: "Credentials", icon: Icons.Key, count: counts.credentials },
+    { id: "settings", label: "Settings", icon: Icons.Settings },
+  ]},
+];
 
-export function Nav({ page, setPage, onSignOut, counts = {}, version = "" }) {
-  const NAV_ITEMS = [
-    { section: "Overview", items: [
-      { id: "dashboard", label: "Dashboard", icon: Icons.Dashboard },
-    ]},
-    { section: "Scanning", items: [
-      { id: "assets", label: "Assets", icon: Icons.Folder, count: counts.assets },
-      { id: "inventory", label: "Devices", icon: Icons.Monitor },
-      { id: "jobs", label: "Scan Jobs", icon: Icons.Scan, count: counts.jobs },
-      { id: "profiles", label: "Profiles", icon: Icons.Layers, count: counts.profiles },
-      { id: "reports", label: "Reports", icon: Icons.FileText, count: counts.reports },
-    ]},
-    { section: "Intelligence", items: [
-      { id: "threat-intel", label: "Threat Intel", icon: Icons.Target, count: counts.threat_kev },
-      { id: "attack-graph", label: "Attack Graph", icon: Icons.Graph },
-      { id: "analytics", label: "Analytics", icon: Icons.Activity },
-    ]},
-    { section: "Configuration", items: [
-      { id: "credentials", label: "Credentials", icon: Icons.Key, count: counts.credentials },
-      { id: "datasets", label: "Datasets", icon: Icons.Database, count: counts.datasets },
-      { id: "access", label: "Access", icon: Icons.Users },
-      { id: "settings", label: "Settings", icon: Icons.Settings },
-    ]},
-  ].map(g => ({ ...g, items: g.items.filter(i => canOpenPage(i.id, getUser())) }));
+// Pages of Root: what every client shares, and the platform itself.
+const ROOT_NAV = (counts) => [
+  { section: "Platform", items: [
+    { id: "overview", label: "Overview", icon: Icons.Dashboard, count: counts.clients },
+    { id: "access", label: "Clients & access", icon: Icons.Users },
+  ]},
+  { section: "Shared databases", items: [
+    { id: "datasets", label: "Reference data", icon: Icons.Database, count: counts.datasets },
+    { id: "threat-intel", label: "Threat Intel", icon: Icons.Target, count: counts.threat_kev },
+  ]},
+  { section: "System", items: [
+    { id: "platform", label: "Updates & system", icon: Icons.Server },
+  ]},
+];
+
+export function Nav({ page, setPage, onSignOut, counts = {}, version = "", root = false }) {
+  const NAV_ITEMS = (root ? ROOT_NAV : CLIENT_NAV)(counts);
 
   return (
     <aside className="nav">
@@ -43,6 +55,7 @@ export function Nav({ page, setPage, onSignOut, counts = {}, version = "" }) {
         <input placeholder="Jump to…" />
         <span className="kbd">⌘K</span>
       </div>
+      {root && <div className="nav-context"><Icons.Shield size={12}/> Root — platform</div>}
       <div className="nav-scroll">
         {NAV_ITEMS.map(g => (
           <div key={g.section}>
@@ -62,7 +75,7 @@ export function Nav({ page, setPage, onSignOut, counts = {}, version = "" }) {
         ))}
       </div>
       <div className="nav-foot">
-        <NavUser onSignOut={onSignOut} setPage={setPage}/>
+        <NavUser onSignOut={onSignOut} setPage={root ? null : setPage}/>
         <div style={{padding: "10px 16px 14px", fontSize: 11, color: "var(--text-4)", textAlign: "center", lineHeight: 1.5}}>
           Powered by <span style={{fontWeight: 600, color: "var(--text-3)"}}>Gondrong</span>
         </div>
@@ -90,7 +103,7 @@ function NavUser({ onSignOut, setPage }) {
         <div className="nav-avatar">{initials}</div>
         <div className="nav-user-meta">
           <div className="nav-user-name">{email.split("@")[0]}</div>
-          <div className="nav-user-org">{isGlobalAdmin() ? "global admin" : (u.role || "user")}</div>
+          <div className="nav-user-org">{isGlobalAdmin() ? "super admin" : (u.role || "user")}</div>
         </div>
       </div>
       {open && (
@@ -99,13 +112,17 @@ function NavUser({ onSignOut, setPage }) {
             <div className="nav-user-name">{email.split("@")[0]}</div>
             <div style={{fontSize: 11.5, color: "var(--text-3)", marginTop: 2}}>{email}</div>
           </div>
-          <button className="nav-user-menu-item" onClick={() => { setOpen(false); setPage && setPage("settings", "users"); }}>
-            <Icons.User size={13}/> My profile
-          </button>
-          <button className="nav-user-menu-item" onClick={() => { setOpen(false); setPage && setPage("settings", "general"); }}>
-            <Icons.Settings size={13}/> Settings
-          </button>
-          <div className="nav-user-menu-sep"/>
+          {setPage && (
+            <>
+              <button className="nav-user-menu-item" onClick={() => { setOpen(false); setPage("settings", "users"); }}>
+                <Icons.User size={13}/> My profile
+              </button>
+              <button className="nav-user-menu-item" onClick={() => { setOpen(false); setPage("settings", "general"); }}>
+                <Icons.Settings size={13}/> Settings
+              </button>
+              <div className="nav-user-menu-sep"/>
+            </>
+          )}
           <button className="nav-user-menu-item danger" onClick={() => onSignOut && onSignOut()}>
             <Icons.LogOut size={13}/> Sign out
           </button>
@@ -121,65 +138,24 @@ const THEMES = [
   { id: "dim",   label: "Dim",    sub: "Slate — easier on long shifts", icon: Icons.Monitor },
 ];
 
-/**
- * The open client, and the menu to switch to another one. Switching keeps
- * the current page (Scan jobs of client A → Scan jobs of client B).
- */
-function ClientSwitcher({ client, clients, onSwitch, onAllClients, open, setOpen }) {
-  const [query, setQuery] = useState("");
-  useEffect(() => { if (!open) setQuery(""); }, [open]);
-  if (!client) return null;
-  const shown = filterClients(clients, query);
-
+/** Where the session works — a client or Root — and the button to change it. */
+function ContextButton({ context, onOpen }) {
+  if (!context) return null;
   return (
-    <div style={{position: "relative"}} onClick={e => e.stopPropagation()}>
-      <button className="client-switch" onClick={() => setOpen(!open)} title="Switch client">
-        <ClientBadge client={client} size={24}/>
-        <span className="name">{client.name}</span>
-        <Icons.ChevronDown size={13}/>
-      </button>
-      {open && (
-        <div className="client-menu">
-          <div className="client-menu-title">Clients</div>
-          {clients.length >= SWITCHER_SEARCH_FROM && (
-            <div className="client-menu-search">
-              <Icons.Search size={13}/>
-              <input autoFocus placeholder="Search clients…" value={query} onChange={e => setQuery(e.target.value)}/>
-            </div>
-          )}
-          <div className="client-menu-list">
-            {shown.length === 0 && <div className="client-menu-empty">No client matches “{query}”.</div>}
-            {shown.map(c => {
-              const sel = c.id === client.id;
-              return (
-                <button key={c.id} className={`client-menu-item ${sel ? "sel" : ""}`}
-                        onClick={() => { setOpen(false); if (!sel) onSwitch(c.id); }}>
-                  <ClientBadge client={c} size={22}/>
-                  <span className="name">{c.name}</span>
-                  <span className="role">{c.role}</span>
-                  {sel && <Icons.Check size={13}/>}
-                </button>
-              );
-            })}
-          </div>
-          <div className="nav-user-menu-sep"/>
-          <button className="client-menu-item" onClick={() => { setOpen(false); onAllClients(); }}>
-            <Icons.Layers size={14}/>
-            <span className="name">All clients and their status…</span>
-          </button>
-        </div>
-      )}
-    </div>
+    <button className="client-switch" onClick={onOpen} title="Select a client (or Root)">
+      {context.root ? <RootBadge size={24}/> : <ClientBadge client={context.client} size={24}/>}
+      <span className="name">{context.root ? "Root" : context.client.name}</span>
+      <Icons.ChevronDown size={13}/>
+    </button>
   );
 }
 
-export function Topbar({ crumbs, setPage, client = null, clients = [], onSwitchClient, onAllClients }) {
+export function Topbar({ crumbs, setPage, context = null, onOpenSelector }) {
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem("vs-theme") || "dark"; } catch { return "dark"; }
   });
   const [openTheme, setOpenTheme] = useState(false);
   const [openBell, setOpenBell] = useState(false);
-  const [openClient, setOpenClient] = useState(false);
   const [events, setEvents] = useState([]);
   const [unread, setUnread] = useState(0);
 
@@ -189,14 +165,18 @@ export function Topbar({ crumbs, setPage, client = null, clients = [], onSwitchC
   }, [theme]);
 
   useEffect(() => {
-    if (!openTheme && !openBell && !openClient) return;
-    const close = () => { setOpenTheme(false); setOpenBell(false); setOpenClient(false); };
+    if (!openTheme && !openBell) return;
+    const close = () => { setOpenTheme(false); setOpenBell(false); };
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
-  }, [openTheme, openBell, openClient]);
+  }, [openTheme, openBell]);
+
+  // Recent activity is a client's (scans, findings): none on Root.
+  const showActivity = !context?.root;
 
   // Poll events every 15s; track unread = events newer than last-seen-at
   useEffect(() => {
+    if (!showActivity) return;
     let cancelled = false;
     const tick = async () => {
       try {
@@ -213,7 +193,7 @@ export function Topbar({ crumbs, setPage, client = null, clients = [], onSwitchC
     tick();
     const t = setInterval(tick, 15000);
     return () => { cancelled = true; clearInterval(t); };
-  }, []);
+  }, [showActivity]);
 
   const markSeen = () => {
     if (events[0]?.at) localStorage.setItem("vs-bell-seen", String(new Date(events[0].at).getTime()));
@@ -225,12 +205,11 @@ export function Topbar({ crumbs, setPage, client = null, clients = [], onSwitchC
 
   return (
     <div className="topbar">
-      <ClientSwitcher client={client} clients={clients} onSwitch={onSwitchClient} onAllClients={onAllClients}
-                      open={openClient} setOpen={(o) => { setOpenClient(o); setOpenTheme(false); setOpenBell(false); }}/>
+      <ContextButton context={context} onOpen={onOpenSelector}/>
       <div className="crumbs">
         {crumbs.map((c, i) => (
           <Fragment key={i}>
-            {(i > 0 || client) && <span className="sep">/</span>}
+            {(i > 0 || context) && <span className="sep">/</span>}
             <span className={i === crumbs.length - 1 ? "leaf" : ""}>{c}</span>
           </Fragment>
         ))}
@@ -238,7 +217,7 @@ export function Topbar({ crumbs, setPage, client = null, clients = [], onSwitchC
       <div className="right">
         {/* Theme switcher */}
         <div style={{position: "relative"}} onClick={e => e.stopPropagation()}>
-          <button className="topbar-btn" onClick={() => { setOpenTheme(o => !o); setOpenBell(false); setOpenClient(false); }} title={`Theme: ${active.label}`}>
+          <button className="topbar-btn" onClick={() => { setOpenTheme(o => !o); setOpenBell(false); }} title={`Theme: ${active.label}`}>
             <ActiveIcon size={16}/>
           </button>
           {openTheme && (
@@ -277,9 +256,10 @@ export function Topbar({ crumbs, setPage, client = null, clients = [], onSwitchC
         </div>
 
         {/* Notification bell */}
+        {showActivity && (
         <div style={{position: "relative"}} onClick={e => e.stopPropagation()}>
           <button className="topbar-btn"
-                  onClick={() => { setOpenBell(o => !o); setOpenTheme(false); setOpenClient(false); if (!openBell) markSeen(); }}
+                  onClick={() => { setOpenBell(o => !o); setOpenTheme(false); if (!openBell) markSeen(); }}
                   title="Recent activity">
             <Icons.Bell size={16}/>
             {unread > 0 && <span className="dot"/>}
@@ -321,6 +301,7 @@ export function Topbar({ crumbs, setPage, client = null, clients = [], onSwitchC
             </div>
           )}
         </div>
+        )}
 
         <button className="topbar-btn" title="Help" onClick={() => window.open("https://github.com/Gondrong/VulnScan-Platform", "_blank")}>
           <Icons.Help size={16}/>

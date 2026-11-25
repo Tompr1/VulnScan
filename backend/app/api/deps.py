@@ -58,6 +58,27 @@ def require_role(*roles: str):
     return _check
 
 
+def require_shared_reader(*roles: str):
+    """
+    Dependency factory for what every client shares (reference datasets,
+    Threat Intel, platform version): a global admin reads it from any
+    session, Root included (no client open); anyone else needs one of the
+    given roles on the open client.
+    """
+    client_check = require_role(*roles)
+
+    def _check(
+        claims: dict = Depends(require_auth),
+        user: models.User = Depends(require_user),
+        db: Session = Depends(get_db),
+    ) -> dict:
+        if user.is_global_admin:
+            return claims
+        return client_check(claims=claims, user=user, db=db)
+
+    return _check
+
+
 def require_global_admin(claims: dict = Depends(require_auth), user: models.User = Depends(require_user)) -> dict:
     """Requires a global admin of the MSP, checked in the database: for what
     every client shares, such as the reference datasets."""

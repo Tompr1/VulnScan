@@ -6,7 +6,7 @@ import {
   ROLES, ROLE_HELP, describeSource, grantsOf, namesOf, principalLabel, scopeLabel, toggleId,
 } from "./accessModel.js";
 
-// Access administration of the MSP (global admins): who opens which client,
+// Access administration of the MSP (super admins, in Root): who opens which client,
 // with which role — users and user groups, clients and client groups, and the
 // grants tying them. "Why?" on a user explains its access client by client.
 
@@ -148,8 +148,8 @@ function AccessHeader() {
   return (
     <div className="ph">
       <div>
-        <h1>Access</h1>
-        <div className="sub">Who opens which client, and with which role. Global admins open every client.</div>
+        <h1>Clients & access</h1>
+        <div className="sub">Who opens which client, and with which role. Super admins open every client and Root.</div>
       </div>
     </div>
   );
@@ -197,7 +197,7 @@ function UsersTable({ data, onExplain, onToggleGlobal, onPassword, onDelete }) {
               <td>
                 <div style={{color: "var(--text-0)", fontSize: 13, fontWeight: 500, display: "flex", gap: 8, alignItems: "center"}}>
                   {u.email}
-                  {u.is_global_admin && <span className="tag brand" style={{height: 18}}>global admin</span>}
+                  {u.is_global_admin && <span className="tag root" style={{height: 18}}>super admin</span>}
                   {self && <span className="muted" style={{fontSize: 11}}>you</span>}
                 </div>
               </td>
@@ -210,7 +210,7 @@ function UsersTable({ data, onExplain, onToggleGlobal, onPassword, onDelete }) {
                     <Icons.Eye size={11}/> Why?
                   </button>
                   {!self && (
-                    <IconBtn title={u.is_global_admin ? "Remove global admin" : "Make global admin"} onClick={() => onToggleGlobal(u)}>
+                    <IconBtn title={u.is_global_admin ? "Remove super admin" : "Make super admin"} onClick={() => onToggleGlobal(u)}>
                       <Icons.Shield size={13}/>
                     </IconBtn>
                   )}
@@ -339,9 +339,9 @@ function EffectiveAccessDrawer({ userId, close, onGrant }) {
           {access && (
             <>
               {user.is_global_admin ? (
-                <div className="access-note brand">
+                <div className="access-note root">
                   <Icons.Shield size={14}/>
-                  <span>Global admin: admin of every client, present and future, whatever the grants below.</span>
+                  <span>Super admin: opens Root and is admin of every client, present and future, whatever the grants below.</span>
                 </div>
               ) : (
                 <div className="access-note">
@@ -363,7 +363,7 @@ function EffectiveAccessDrawer({ userId, close, onGrant }) {
                       <span className="tag brand">{c.role}</span>
                     </div>
                     {c.global_admin && (
-                      <div className="access-source effective"><Icons.Check size={12}/> <span>Global admin</span></div>
+                      <div className="access-source effective"><Icons.Check size={12}/> <span>Super admin</span></div>
                     )}
                     {c.via.map(v => (
                       <div key={v.grant_id} className={`access-source ${v.effective ? "effective" : ""}`}
@@ -447,7 +447,7 @@ function UserModal({ close, onSaved }) {
       </div>
       <label className="login-check">
         <input type="checkbox" checked={globalAdmin} onChange={e => setGlobalAdmin(e.target.checked)}/>
-        <span>Global admin — opens every client and administers access</span>
+        <span>Super admin — opens Root and every client, administers access</span>
       </label>
       {!globalAdmin && <div className="form-help">The account opens no client until you grant it access.</div>}
     </Modal>
@@ -477,7 +477,7 @@ function ClientModal({ client, close, onSaved }) {
       <div>
         <label className="form-label">Name</label>
         <input className="form-input" required autoFocus maxLength={255} value={name} onChange={e => setName(e.target.value)} placeholder="Acme Corp"/>
-        {!client && <div className="form-help">Global admins open it at once; grant access to the others.</div>}
+        {!client && <div className="form-help">Super admins open it at once; grant access to the others.</div>}
       </div>
     </Modal>
   );
@@ -552,7 +552,7 @@ function GrantModal({ data, preset, close, onSaved }) {
             {principals.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
         </div>
-        {principal === "user" && <div className="form-help">Global admins open every client already: they are not listed.</div>}
+        {principal === "user" && <div className="form-help">Super admins open every client already: they are not listed.</div>}
       </div>
       <div>
         <label className="form-label">On</label>

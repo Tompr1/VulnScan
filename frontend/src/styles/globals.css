@@ -71,6 +71,10 @@
   --text-4: #474e5a;
 
   --brand:       #5b8def;
+  --root:        #a78bfa;
+  --root-soft:   #a78bfa22;
+  --root-line:   #a78bfa55;
+  --root-text:   #c4b5fd;
   --brand-soft:  #5b8def22;
   --brand-line:  #5b8def44;
   --brand-text:  #8aabf3;
@@ -100,6 +104,10 @@
   --text-4: #a3aab6;
 
   --brand:       #3963c4;
+  --root:        #7c3aed;
+  --root-soft:   #7c3aed14;
+  --root-line:   #7c3aed40;
+  --root-text:   #6d28d9;
   --brand-soft:  #3963c416;
   --brand-line:  #3963c43a;
   --brand-text:  #2c54b0;
@@ -135,6 +143,10 @@
   --text-4: #525b6a;
 
   --brand:       #6b9bf2;
+  --root:        #b39dfc;
+  --root-soft:   #b39dfc22;
+  --root-line:   #b39dfc55;
+  --root-text:   #cdbffd;
   --brand-soft:  #6b9bf222;
   --brand-line:  #6b9bf244;
   --brand-text:  #9bb8f5;
@@ -1554,3 +1566,96 @@ input[type="time"].form-input::-webkit-calendar-picker-indicator {
 .access-pick-row:hover { background: var(--surface-2); }
 .modal .tabs { flex-shrink: 0; }
 .modal .tab { white-space: nowrap; }
+
+/* ── Context selection window (like FortiManager's ADOM selection) ─── */
+.ctx-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.55);
+  display: grid; place-items: center;
+  padding: 24px 16px;
+  animation: fadeIn 140ms ease;
+}
+.ctx-window {
+  position: relative; z-index: 1;
+  width: 100%; max-width: 920px;
+  max-height: calc(100vh - 48px);
+  display: flex; flex-direction: column;
+  background: var(--surface-0);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+}
+.ctx-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-1);
+}
+.ctx-title { font-family: var(--font-display); font-size: 17px; font-weight: 600; color: var(--text-0); letter-spacing: -0.01em; }
+.ctx-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; display: flex; align-items: center; flex-wrap: wrap; }
+.ctx-body { padding: 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+.ctx-section {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  font-size: 11px; font-weight: 600; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+.ctx-section .muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.ctx-root {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--root-line);
+  background: var(--root-soft);
+  font-family: inherit; text-align: left; cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.ctx-root:hover:not(:disabled) { border-color: var(--root); }
+.ctx-root.current { border-color: var(--root); box-shadow: 0 0 0 1px var(--root) inset; }
+.ctx-root:disabled { cursor: progress; opacity: 0.75; }
+.ctx-root .cp-name { color: var(--root-text); font-size: 15px; }
+.ctx-root .cp-current { color: var(--root-text); }
+.ctx-root-sub { font-size: 12.5px; color: var(--text-2); margin-top: 3px; }
+.ctx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.ctx-tile {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+  font-family: inherit; text-align: left; cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.ctx-tile:hover:not(:disabled) { border-color: var(--brand-line); background: var(--surface-2); }
+.ctx-tile.current { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand) inset; }
+.ctx-tile:disabled { cursor: progress; opacity: 0.75; }
+.ctx-tile-head { display: flex; align-items: center; gap: 10px; }
+.ctx-tile .cp-stats { width: 100%; }
+.ctx-tile .cp-counter { flex: 1; min-width: 0; }
+.ctx-tile-foot { font-size: 11.5px; color: var(--text-3); }
+
+.root-badge { background: var(--root); color: #fff; }
+.tag.root { background: var(--root-soft); color: var(--root-text); border-color: var(--root-line); }
+
+/* Root context: its colour on the top bar and the context button. */
+.shell[data-context="root"] .topbar { box-shadow: inset 0 2px 0 var(--root); }
+.shell[data-context="root"] .client-switch { border-color: var(--root-line); background: var(--root-soft); }
+.shell[data-context="root"] .client-switch .name { color: var(--root-text); }
+.shell[data-context="root"] .nav-item.active { box-shadow: inset 2px 0 0 var(--root); }
+.nav-context {
+  margin: 0 12px 6px; padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--root-text); background: var(--root-soft); border: 1px solid var(--root-line);
+  display: flex; align-items: center; gap: 6px;
+}
+
+@media (max-width: 760px) {
+  .ctx-grid { grid-template-columns: 1fr; }
+  .ctx-section { flex-wrap: wrap; }
+  .ctx-section .client-menu-search { width: 100% !important; }
+}
+.stat.root .accent-bar { background: var(--root); }
+.access-note.root { background: var(--root-soft); border-color: var(--root-line); color: var(--root-text); }
+.access-note.root svg { color: var(--root-text); }

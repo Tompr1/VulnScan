@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_role
+from app.api.deps import get_db, require_shared_reader
 from app.threat_intel import aggregator
 
 logger = logging.getLogger("vulnscan.api.threat_intel")
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/threat-intel", tags=["threat-intel"])
 
 @router.get("/stats")
 def stats(
-    user=Depends(require_role("admin", "analyst", "viewer")),
+    user=Depends(require_shared_reader("admin", "analyst", "viewer")),
     db: Session = Depends(get_db),
 ):
     """Summary counters for the Threat Intel page header / dashboard tiles."""
@@ -41,7 +41,7 @@ def list_cves(
     order: str = Query("desc", description="asc | desc"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-    user=Depends(require_role("admin", "analyst", "viewer")),
+    user=Depends(require_shared_reader("admin", "analyst", "viewer")),
     db: Session = Depends(get_db),
 ):
     sev_list = [s.strip() for s in (severity or "").split(",") if s.strip()] or None
@@ -58,7 +58,7 @@ def list_cves(
 @router.get("/cves/{cve_id}")
 def get_cve(
     cve_id: str,
-    user=Depends(require_role("admin", "analyst", "viewer")),
+    user=Depends(require_shared_reader("admin", "analyst", "viewer")),
     db: Session = Depends(get_db),
 ):
     rec = aggregator.detail(db, cve_id)
@@ -69,7 +69,7 @@ def get_cve(
 
 @router.post("/refresh")
 def refresh_cache(
-    user=Depends(require_role("admin", "analyst")),
+    user=Depends(require_shared_reader("admin", "analyst")),
 ):
     """Manually invalidate the Threat Intel cache (shared by every client)."""
     aggregator.invalidate()

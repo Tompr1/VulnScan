@@ -77,6 +77,15 @@ def select_client(client_id: int, user: models.User = Depends(require_user), db:
     return _session(db, user, access, client_id)
 
 
+@router.post("/select-root")
+def select_root(user: models.User = Depends(require_user), db: Session = Depends(get_db)):
+    """A session on Root, the platform itself (no client open): what every
+    client shares, the clients and the accounts. Global admins only."""
+    if not user.is_global_admin:
+        raise HTTPException(status_code=403, detail="Root is for global admins")
+    return _session(db, user, SqlAccessRepository(db).access_of(user), None)
+
+
 @router.get("/me")
 def me(claims=Depends(require_auth)):
     return claims

@@ -20,13 +20,18 @@ export function setUser(u)  { localStorage.setItem("vs_user", JSON.stringify(u))
 export function getUser() {
   try { return JSON.parse(localStorage.getItem("vs_user") || "null"); } catch { return null; }
 }
+// On a client, the role held there; on Root (no client open), a super admin
+// administers what every client shares (reference data, Threat Intel).
+function onRoot(u) {
+  return !!u?.is_global_admin && u.workspace_id == null;
+}
 export function canEdit() {
   const u = getUser();
-  return u && (u.role === "admin" || u.role === "analyst");
+  return !!u && (u.role === "admin" || u.role === "analyst" || onRoot(u));
 }
 export function isAdmin() {
   const u = getUser();
-  return u && u.role === "admin";
+  return !!u && (u.role === "admin" || onRoot(u));
 }
 /** Global admin of the MSP: every client, and what they all share (datasets, platform). */
 export function isGlobalAdmin() {
@@ -40,7 +45,8 @@ export const SESSION_ENDED_EVENT = "vs:session-ended";
 export const CLIENT_LOST_EVENT = "vs:client-lost";
 // The session's client list or role changed (a client was created, renamed…).
 export const SESSION_UPDATED_EVENT = "vs:session-updated";
-const CLIENT_LOST_DETAILS = ["No client selected", "No access to this client"];
+// Also lost: Root, when the account is no longer a global admin.
+const CLIENT_LOST_DETAILS = ["No client selected", "No access to this client", "Requires a global admin"];
 
 export async function api(path, opts = {}) {
   const token = getToken();
@@ -130,12 +136,18 @@ export async function selectClient(clientId) {
   return r;
 }
 
-/** Reload the open client's session (client list, role) after an access change. */
+/** Open Root, the platform itself (global admins): a session with no client. */
+export async function selectRoot() {
+  const r = await api("/auth/select-root", { method: "POST" });
+  saveSession(getUser()?.email, r);
+  return r;
+}
+
+/** Reload the open context's session (client list, role) after an access change. */
 export async function refreshSession() {
   const clientId = getUser()?.workspace_id;
-  if (clientId == null) return;
   try {
-    await selectClient(clientId);
+    if (clientId == null) await selectRoot(); else await selectClient(clientId);
   } catch {
     // The open client was deleted or is out of reach: choose another one.
     window.dispatchEvent(new CustomEvent(CLIENT_LOST_EVENT, { detail: "No access to this client" }));
@@ -215,6 +227,9 @@ export const settingsApi = {
   updateCheck: ()      => api("/settings/update/check"),
   updateStatus:()      => api("/settings/update/status"),
   triggerUpdate: ()    => api("/settings/update/trigger", { method: "POST" }),
+  // Scheduled refresh of the reference datasets: one for the whole platform (Root).
+  datasetRefresh:     ()     => api("/settings/dataset-refresh"),
+  saveDatasetRefresh: (body) => api("/settings/dataset-refresh", { method: "PUT", body }),
 };
 
 // ── Integrations ─────────────────────────────────────────────────────

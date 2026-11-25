@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.access.domain import Role
 from app.access.repository import SqlAccessRepository
-from app.api.deps import get_db, require_global_admin, require_role
+from app.api.deps import get_db, require_global_admin, require_role, require_shared_reader
 from app.core.config import settings
 from app.core.password import PASSWORD_MIN_LENGTH, hash_password, verify_password
 from app.core.platform_settings import (
@@ -330,7 +330,7 @@ def _redis_conn():
 
 
 @router.get("/update/check")
-def check_for_update(user=Depends(require_role("admin", "analyst", "viewer"))):
+def check_for_update(user=Depends(require_shared_reader("admin", "analyst", "viewer"))):
     """Check GitHub Releases for a newer version. Cached for 24 hours."""
     r = _redis_conn()
     cache_key = "update_check_cache"
@@ -442,7 +442,7 @@ def trigger_update(user=Depends(require_global_admin)):
 
 
 @router.get("/update/status")
-def update_status(user=Depends(require_role("admin", "analyst", "viewer"))):
+def update_status(user=Depends(require_shared_reader("admin", "analyst", "viewer"))):
     """Check the current update status (written by the host updater script)."""
     result_path = "/data/update-result.json"
     trigger_path = "/data/update-trigger.json"
@@ -705,7 +705,7 @@ def put_sla_alert(
 
 @router.get("/dataset-refresh")
 def get_dataset_refresh(
-    user=Depends(require_role("admin", "analyst", "viewer")),
+    user=Depends(require_shared_reader("admin", "analyst", "viewer")),
     db: Session = Depends(get_db),
 ):
     """Return scheduled dataset refresh configuration."""
