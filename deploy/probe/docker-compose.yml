@@ -1,0 +1,29 @@
+# v0cday scan probe, on a VM in the client's network.
+# It needs NO inbound port: it only connects out to the platform (HTTPS).
+# See README.md.
+name: v0cday-probe
+
+services:
+  probe:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile.probe
+    image: v0cday-probe:latest
+    restart: unless-stopped
+    # The scanners must reach the client's network as the VM does, and nmap
+    # needs raw sockets for SYN and UDP scans.
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    volumes:
+      - ./config:/etc/v0cday-probe          # probe.json: the probe's credential (0600)
+      - probe-state:/var/lib/v0cday-probe   # cached reference data, reports not yet sent
+    environment:
+      # Same meaning as on the platform; keep them in ascending order.
+      SCAN_TIMEOUT_SECONDS: "30"
+      SCAN_BUDGET_SECONDS: "900"
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+
+volumes:
+  probe-state:

@@ -21,9 +21,9 @@ export function toggledScanTypes(current, scanType, on, delegable) {
   return (delegable || []).filter(t => chosen.has(t));
 }
 
-/** What to run on the probe VM to enroll it (the agent comes with the probe image). */
+/** What to run on the probe VM, in deploy/probe, to enroll it (deploy/probe/README.md). */
 export function enrollCommand(platformUrl, token) {
-  return `v0cday-probe enroll --platform ${platformUrl.replace(/\/+$/, "")} --token ${token}`;
+  return `docker compose run --rm probe enroll --platform ${platformUrl.replace(/\/+$/, "")} --token ${token}`;
 }
 
 /** Clients that have scan types on a probe but no probe able to run them. */

@@ -477,6 +477,28 @@ Click "Generate PoC" on any individual finding to get an AI-generated Python exp
 
 ---
 
+## Scan Probes
+
+A client's scans can run on a **probe**: a VM in the client's network that
+only connects out to the platform over HTTPS — the client opens no port.
+
+```
+ Platform (Root › Scan probes)                 Probe VM (deploy/probe)
+ ─ choose which scan types run on the probe     ─ v0cday-probe run
+ ─ job queued for the probe  ◄── HTTPS, out ──  ─ claims it, runs the same
+ ─ findings scored, saved, alerted  ◄─────────    engine and plugins, reports
+```
+
+- Create the probe in **Root › Scan probes** and enroll the VM with its
+  one-time token; installation: [`deploy/probe/README.md`](deploy/probe/README.md).
+- The probe receives each job's credentials and the client's allowlist,
+  keeps nothing secret on disk but its own credential, and can be limited
+  further by the client (`--local-allowlist`).
+- The probe API (`/probe/v1`) is refused over plain HTTP
+  (`PROBE_REQUIRE_HTTPS`, see `.env.example`).
+
+---
+
 ## Risk Scoring
 
 ```

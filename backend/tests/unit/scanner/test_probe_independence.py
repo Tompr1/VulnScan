@@ -102,7 +102,11 @@ def test_le_controle_voit_un_import_de_la_base_fait_dans_une_fonction_d_un_modul
 # La moitié « exécution » d'un job (ce que fera la sonde) : recevoir une
 # affectation, lancer le bon exécuteur, rendre compte de la progression et
 # renvoyer un rapport.
-EXECUTION_SIDE = ("app.scan_jobs.execution", "app.scan_jobs.assignment", "app.scan_jobs.progress")
+EXECUTION_SIDE = (
+    "app.scan_jobs.execution", "app.scan_jobs.assignment", "app.scan_jobs.progress",
+    # L'agent de la sonde tout entier, commande comprise.
+    "app.probe_agent.cli", "app.probe_agent.agent", "app.probe_agent.reference",
+)
 
 
 @pytest.mark.parametrize("module", EXECUTION_SIDE)
@@ -112,3 +116,47 @@ def test_l_execution_d_un_job_ne_depend_ni_de_la_base_ni_du_chiffrement(module):
     violations = [" -> ".join(chain) for name, chain in chains.items() if _forbidden(name)]
 
     assert violations == []
+
+
+# Paquets de requirements-probe.txt → modules qu'ils fournissent.
+_MODULES_OF_PACKAGE = {"paho-mqtt": "paho", "pyyaml": "yaml"}
+_PROBE_REQUIREMENTS = APP_ROOT.parent / "requirements-probe.txt"
+
+
+def _probe_packages() -> set[str]:
+    names = set()
+    for line in _PROBE_REQUIREMENTS.read_text().splitlines():
+        line = line.split("#")[0].strip()
+        if line:
+            package = line.split("==")[0].split(">=")[0].split("[")[0].strip().lower()
+            names.add(_MODULES_OF_PACKAGE.get(package, package.replace("-", "_")))
+    return names
+
+
+def _third_party_imports(starts, root: Path = APP_ROOT) -> dict[str, str]:
+    """Paquets tiers importés (même dans une fonction) par ces modules et
+    tout le code de l'application qu'ils importent → un module qui l'importe."""
+    import sys
+
+    found: dict[str, str] = {}
+    for start in starts:
+        for module in _import_chains(start, root):
+            path = _source_of(module, root)
+            if path is None:
+                continue
+            for imported in _imports_of(module, path):
+                top = imported.split(".")[0]
+                if top and top != "app" and top not in sys.stdlib_module_names:
+                    found.setdefault(top, module)
+    return found
+
+
+def test_l_image_de_la_sonde_contient_tous_les_paquets_que_son_code_importe():
+    probe_side = (
+        ["app.probe_agent.cli", "app.scanner.plugins.api_scanner", "app.scanner.plugins.iac_scanner"]
+        + [f"app.scanner.plugins.{m}" for m in BUILTIN_PLUGIN_MODULES]
+    )
+
+    missing = {top: module for top, module in _third_party_imports(probe_side).items() if top not in _probe_packages()}
+
+    assert missing == {}, f"à ajouter à requirements-probe.txt : {missing}"

@@ -17,8 +17,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.job_queue import QueueUnavailableError
+from app.cve.cpe import Cpe
 from app.scan_jobs.notifications import Integration, ScanFailure, ScanSummary
-from app.scan_jobs.assignment import ScanAssignment
+from app.scan_jobs.assignment import ScanAssignment, ScanReport
+from app.probe_agent.platform import Dataset
 from app.scan_jobs.processing import ProcessedFinding
 from app.scan_jobs.repository import JobCompletion, JobFailure, ScanJobSnapshot
 from app.scanner.context import ScanContext
@@ -387,3 +389,67 @@ def plugin_context(resources: ScanResources | None = None, **artifacts: Any) -> 
         ctx.set(key.replace("__", "."), value)
     return ctx
 
+
+
+# ── Probe agent ───────────────────────────────────────────────────────────────
+
+class FakePlatform:
+    """The platform as a probe sees it (PlatformClient), in memory.
+
+    ``jobs`` are handed out in order; ``stop_after_progress`` makes the
+    platform answer "stop" from that many progress documents on; ``fail``
+    maps a method name to the exception it raises (once per entry)."""
+
+    def __init__(self, jobs=(), datasets=None, catalog_complete=True, records=None, stop_after_progress=None):
+        self.jobs = list(jobs)
+        self.datasets = dict(datasets or {})  # kind -> (etag, content)
+        self.catalog_complete = catalog_complete
+        self.records = list(records or [])
+        self.stop_after_progress = stop_after_progress
+        self.fail: dict[str, list[Exception]] = {}
+        self.progress_sent: list[tuple[int, dict]] = []
+        self.reports: list[ScanReport] = []
+        self.downloads: list[str] = []
+        self.lookups: list[set] = []
+        self.heartbeats = 0
+
+    def _maybe_fail(self, method: str) -> None:
+        if self.fail.get(method):
+            raise self.fail[method].pop(0)
+
+    def heartbeat(self, hostname=None):
+        self._maybe_fail("heartbeat")
+        self.heartbeats += 1
+        return {"probe_id": 1, "workspace_id": 1, "server_time": "2026-11-26T12:00:00+00:00"}
+
+    def next_job(self, wait=25):
+        self._maybe_fail("next_job")
+        return self.jobs.pop(0) if self.jobs else None
+
+    def progress(self, job_id, document):
+        self._maybe_fail("progress")
+        self.progress_sent.append((job_id, document))
+        return self.stop_after_progress is not None and len(self.progress_sent) >= self.stop_after_progress
+
+    def report(self, job_id, report):
+        self._maybe_fail("report")
+        self.reports.append(report)
+
+    def reference_status(self):
+        self._maybe_fail("reference_status")
+        return {"cve_catalog_complete": self.catalog_complete,
+                "datasets": {kind: etag for kind, (etag, _) in self.datasets.items()}}
+
+    def dataset(self, kind, etag=None):
+        self._maybe_fail("dataset")
+        current, content = self.datasets.get(kind, ("empty", []))
+        if etag == current:
+            return None
+        self.downloads.append(kind)
+        return Dataset(current, content)
+
+    def cve_records(self, products):
+        self._maybe_fail("cve_records")
+        self.lookups.append(set(products))
+        wanted = set(products)  # canonical keys, as the platform's catalog stores them
+        return [r for r in self.records if any(Cpe.parse(m["cpe23"]).product_key in wanted for m in r["matches"])]

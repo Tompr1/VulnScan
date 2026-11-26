@@ -116,13 +116,13 @@ class InventoryScanExecutor:
         return findings
 
 
-def _api_scanner() -> StandaloneScanner:
+def new_api_scanner() -> StandaloneScanner:
     from app.scanner.plugins import api_scanner
 
     return api_scanner.Check(api_scanner.META)
 
 
-def _iac_scanner() -> StandaloneScanner:
+def new_iac_scanner() -> StandaloneScanner:
     from app.scanner.plugins import iac_scanner
 
     return iac_scanner.Check()
@@ -137,7 +137,7 @@ def default_executors(
     return {
         ScanType.INTERNAL: network,
         ScanType.EXTERNAL: network,
-        ScanType.API: StandaloneScanExecutor("api_scanner_config", _api_scanner),
-        ScanType.IAC: StandaloneScanExecutor("iac_scanner_config", _iac_scanner),
+        ScanType.API: StandaloneScanExecutor("api_scanner_config", new_api_scanner),
+        ScanType.IAC: StandaloneScanExecutor("iac_scanner_config", new_iac_scanner),
         ScanType.INVENTORY: InventoryScanExecutor(inventory_collector_factory, inventory_audit_factory),
     }

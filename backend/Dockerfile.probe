@@ -1,0 +1,56 @@
+# v0cday scan probe — runs on a VM in a client's network and only connects
+# out to the platform. Same scanners as the platform image (nmap, nuclei,
+# testssl.sh, ffuf, subfinder, httpx, sqlmap); no database, no web UI, no AI
+# CLI, no Node.js.
+#
+#   docker build -f Dockerfile.probe -t v0cday-probe .
+#   (see deploy/probe/README.md to enroll and run it)
+FROM python:3.11-slim
+
+# Scanners and the tools plugins call.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl unzip git nmap dnsutils bsdmainutils ffuf dirb \
+    && mkdir -p /opt/wordlists \
+    && cp /usr/share/dirb/wordlists/common.txt /opt/wordlists/common.txt \
+    && cp /usr/share/dirb/wordlists/big.txt /opt/wordlists/raft-medium-directories.txt \
+    && test -s /opt/wordlists/common.txt \
+    && rm -rf /var/lib/apt/lists/*
+
+# Nuclei: a failed download must fail the build; templates are refreshed at
+# build time when the network allows it.
+ARG NUCLEI_VERSION=3.3.7
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_${ARCH}.zip" \
+      -o /tmp/nuclei.zip && \
+    unzip -o /tmp/nuclei.zip nuclei -d /usr/local/bin/ && \
+    chmod +x /usr/local/bin/nuclei && rm /tmp/nuclei.zip && \
+    (nuclei -update-templates -silent || echo "WARNING: nuclei templates not updated")
+
+COPY --from=projectdiscovery/subfinder:v2.6.7 /usr/local/bin/subfinder /usr/local/bin/subfinder
+# Named httpx-pd: the Python httpx package installs its own "httpx" script.
+COPY --from=projectdiscovery/httpx:v1.6.9 /usr/local/bin/httpx /usr/local/bin/httpx-pd
+
+COPY vendor/testssl.sh/ /opt/testssl.sh/
+RUN chmod +x /opt/testssl.sh/testssl.sh && ln -s /opt/testssl.sh/testssl.sh /usr/local/bin/testssl.sh
+
+ARG SQLMAP_REF=master
+RUN git clone --depth 1 --branch "${SQLMAP_REF}" https://github.com/sqlmapproject/sqlmap.git /opt/sqlmap && \
+    ln -s /opt/sqlmap/sqlmap.py /usr/local/bin/sqlmap
+
+WORKDIR /opt/v0cday
+# Only the packages the probe imports (checked by the test suite).
+ARG PIP_INDEX_URL=https://pypi.org/simple
+COPY requirements-probe.txt .
+RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" -r requirements-probe.txt
+
+COPY app/ app/
+RUN printf '#!/bin/sh\nexec python -m app.probe_agent "$@"\n' > /usr/local/bin/v0cday-probe && \
+    chmod +x /usr/local/bin/v0cday-probe
+
+ENV PYTHONUNBUFFERED=1 \
+    V0CDAY_PROBE_CONFIG=/etc/v0cday-probe/probe.json \
+    V0CDAY_PROBE_STATE=/var/lib/v0cday-probe
+VOLUME ["/etc/v0cday-probe", "/var/lib/v0cday-probe"]
+
+ENTRYPOINT ["v0cday-probe"]
+CMD ["run"]

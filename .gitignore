@@ -61,3 +61,6 @@ htmlcov/
 # iCloud Drive conflict copies ("engine 2.py", "index 2"): never source code
 * 2.*
 * 2
+
+# Scan probe configuration: holds the probe credential
+deploy/probe/config/

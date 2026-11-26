@@ -200,7 +200,8 @@ function TokenModal({ probe, enrollment, close }) {
     <Modal title={`Enroll ${probe.name}`} icon={Icons.Key} close={close} onSubmit={(e) => { e.preventDefault(); close(); }}
            submitLabel="Done" width={560}>
       <div style={{fontSize: 13, color: "var(--text-1)"}}>
-        On the probe VM, run the command below. The token works <b>once</b> and expires
+        On the probe VM, in <span className="mono">deploy/probe</span> (see its README), run the command below.
+        The token works <b>once</b> and expires
         {enrollment.expires_at ? ` on ${new Date(enrollment.expires_at).toLocaleString()}` : " soon"}. It is shown only now.
       </div>
       <pre className="mono" style={{whiteSpace: "pre-wrap", wordBreak: "break-all", background: "var(--surface-1)", border: "1px solid var(--line)",
