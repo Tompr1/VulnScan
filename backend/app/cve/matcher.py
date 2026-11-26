@@ -9,7 +9,7 @@ today and against the database-backed NVD catalog tomorrow.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -40,6 +40,17 @@ class CveRecord:
             references=tuple(item.get("refs") or ()),
             matches=matches,
         )
+
+    def to_flattened(self) -> dict[str, Any]:
+        """The flattened NVD form :meth:`from_flattened` reads back."""
+        return {
+            "cve": self.cve_id,
+            "summary": self.summary,
+            "severity": self.severity,
+            "cvss": self.cvss,
+            "refs": list(self.references),
+            "matches": [match.to_nvd() for match in self.matches],
+        }
 
 
 @dataclass(frozen=True)
@@ -86,6 +97,24 @@ class InMemoryCveCatalog:
     def records_for(self, products: Collection[ProductKey]) -> list[CveRecord]:
         positions = sorted({p for key in products for p in self._by_product.get(key, ())})
         return [self._records[p] for p in positions]
+
+
+class CompositeCveCatalog:
+    """Several catalogs read as one; for a CVE present in more than one, the
+    first catalog wins."""
+
+    def __init__(self, catalogs: Sequence[CveCatalog]) -> None:
+        self._catalogs = catalogs
+
+    def records_for(self, products: Collection[ProductKey]) -> list[CveRecord]:
+        seen: set[str] = set()
+        records = []
+        for catalog in self._catalogs:
+            for record in catalog.records_for(products):
+                if record.cve_id not in seen:
+                    seen.add(record.cve_id)
+                    records.append(record)
+        return records
 
 
 def find_vulnerabilities(catalog: CveCatalog, candidates: Iterable[ProductCandidate]) -> list[CveHit]:

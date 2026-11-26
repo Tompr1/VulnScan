@@ -34,6 +34,8 @@ DEFAULT_NOTIFICATION_PREFS: dict[str, dict[str, bool]] = {
     "device_vulnerability":  {"email": True,  "slack": True,  "webhook": True},
     "device_os_issue":       {"email": True,  "slack": True,  "webhook": True},
     "device_software_issue": {"email": False, "slack": True,  "webhook": True},
+    # A scan probe of the client went offline or came back (app/probes/watch.py)
+    "probe_status":          {"email": True,  "slack": True,  "webhook": True},
 }
 
 

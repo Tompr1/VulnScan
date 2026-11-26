@@ -33,6 +33,9 @@ if _AI_STALE_AFTER <= _AI_ANALYSIS_TIMEOUT:
 
 
 class Settings(BaseModel):
+    # "production" makes the platform refuse to start with an unsafe setting
+    # (app/core/production.py). docker-compose.prod.yml sets it.
+    APP_ENV: str = os.getenv("APP_ENV", "development")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-CHANGE-ME")
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", "postgresql+psycopg2://app:app@localhost:5432/app"
@@ -67,6 +70,23 @@ class Settings(BaseModel):
          int(os.getenv("SCAN_BUDGET_SECONDS", "900")) + 600) + 300
     )
     REPORTS_DIR: str = os.getenv("REPORTS_DIR", "/data/reports")
+
+    # Scan probes. A probe receives the credentials of its scans in clear:
+    # its API is refused over plain HTTP unless this is turned off (lab
+    # without TLS). HTTPS is recognised from the request itself or from
+    # X-Forwarded-Proto sent by a TRUSTED_PROXIES proxy.
+    PROBE_REQUIRE_HTTPS: bool = os.getenv("PROBE_REQUIRE_HTTPS", "true").lower() in ("true", "1", "yes")
+    PROBE_ENROLLMENT_TTL_HOURS: int = int(os.getenv("PROBE_ENROLLMENT_TTL_HOURS", "24"))
+    # A probe not heard from for longer is shown offline.
+    PROBE_ONLINE_SECONDS: int = int(os.getenv("PROBE_ONLINE_SECONDS", "120"))
+    # Silence after which the client is told its probe is offline (once),
+    # then told again when it is back.
+    PROBE_OFFLINE_ALERT_MINUTES: int = int(os.getenv("PROBE_OFFLINE_ALERT_MINUTES", "10"))
+    # The probe image every probe should run, pinned by digest
+    # (registry/v0cday-probe@sha256:...). Probes read it in their heartbeat;
+    # each appliance's updater pulls it, checks its signature, and switches.
+    # Empty: probes keep their image.
+    PROBE_IMAGE: str = os.getenv("PROBE_IMAGE", "")
 
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")

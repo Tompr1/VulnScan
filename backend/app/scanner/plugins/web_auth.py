@@ -23,9 +23,7 @@ import logging
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 from app.scanner.auth_session import establish_session
-from app.core.crypto import decrypt_str
-from app.db.session import SessionLocal
-from app.db import models
+from app.scanner.resources import CredentialError, CredentialVault
 
 logger = logging.getLogger("v0cday.plugin.web_auth")
 
@@ -40,55 +38,36 @@ META = PluginMeta(
 )
 
 
-def _resolve_credential(auth_config: dict, ws_id: int | None) -> tuple[dict, str]:
+def _resolve_credential(auth_config: dict, vault: CredentialVault) -> tuple[dict, str]:
     """
-    If auth_config carries a credential_id, look up the credential in the
-    workspace, decrypt it, and merge username/password (or token, for bearer)
-    into a copy of the config. Returns (resolved_config, error_or_empty).
+    If auth_config carries a credential_id, look up the client's credential
+    and merge username/password (or token, for bearer) into a copy of the
+    config. Returns (resolved_config, error_or_empty).
     Caller-provided fields take precedence — credential is a default.
     """
     cred_id = auth_config.get("credential_id")
     if not cred_id:
         return auth_config, ""
 
-    if not ws_id:
-        return auth_config, "credential_id set but no workspace_id in scan context"
-
-    db = SessionLocal()
     try:
-        cred = (
-            db.query(models.Credential)
-            .filter(
-                models.Credential.id == int(cred_id),
-                models.Credential.workspace_id == ws_id,
-            )
-            .first()
-        )
-        if not cred:
-            return auth_config, f"credential #{cred_id} not found in workspace"
+        cred = vault.get(cred_id)
+    except CredentialError as e:
+        return auth_config, f"could not decrypt credential #{cred_id}: {e}"
+    if not cred:
+        return auth_config, f"credential #{cred_id} not found in workspace"
 
-        try:
-            secret = decrypt_str(cred.secret_enc or "")
-        except Exception as e:
-            return auth_config, f"could not decrypt credential #{cred_id}: {e}"
+    merged = dict(auth_config)
+    merged.pop("credential_id", None)
 
-        merged = dict(auth_config)
-        merged.pop("credential_id", None)
+    atype = (merged.get("type") or "").lower()
+    if atype == "bearer":
+        merged.setdefault("token", cred.secret)
+    else:
+        # form / basic / cookie / header all accept a username+password
+        merged.setdefault("username", cred.username or "")
+        merged.setdefault("password", cred.secret)
 
-        atype = (merged.get("type") or "").lower()
-        if atype == "bearer":
-            merged.setdefault("token", secret)
-        else:
-            # form / basic / cookie / header all accept a username+password
-            merged.setdefault("username", cred.username or "")
-            merged.setdefault("password", secret)
-
-        return merged, ""
-    finally:
-        try:
-            db.close()
-        except Exception:
-            pass
+    return merged, ""
 
 
 class Check(Plugin):
@@ -108,8 +87,7 @@ class Check(Plugin):
         # We intentionally do NOT inject the password directly into options_json
         # — secrets are kept in the encrypted Credentials table and only
         # materialized in-memory here.
-        ws_id = ctx.get("workspace_id")
-        auth_config, cred_err = _resolve_credential(auth_config, ws_id)
+        auth_config, cred_err = _resolve_credential(auth_config, ctx.resources.credentials)
         if cred_err:
             logger.warning("web.auth credential resolution: %s", cred_err)
             return PluginResult(

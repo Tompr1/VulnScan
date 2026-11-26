@@ -149,6 +149,12 @@ class ScanJob(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Where the job runs: "platform" (an RQ worker) or "probe" (the client's
+    # probe, which claims it), and which probe claimed it.
+    runs_on: Mapped[str] = mapped_column(String(16), default="platform", server_default="platform")
+    probe_id: Mapped[int | None] = mapped_column(
+        ForeignKey("probes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
 
 class Asset(Base):
@@ -455,3 +461,45 @@ class InventoryAuditRun(Base):
     issues: Mapped[int] = mapped_column(Integer, default=0)
     # Lifecycle sources that could not be read, rule failures… empty when complete.
     warnings: Mapped[str] = mapped_column(Text, default="")
+
+
+class Probe(Base):
+    """A scan probe installed on a client's network. It connects out to the
+    platform, claims the client's jobs routed to probes and reports back.
+
+    Secrets are stored as SHA-256 digests: the enrollment token (one use,
+    short-lived) and the secret the probe signs in with once enrolled."""
+
+    __tablename__ = "probes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|active|revoked
+    enrollment_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    enrollment_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    secret_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    # Reported by the probe: the image it runs, and its appliance's version.
+    image: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    appliance_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Set when the platform said the probe went offline; cleared when it is back.
+    offline_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ProbeEvent(Base):
+    """What happened to a probe: enrollment, jobs claimed and reported,
+    revocation, image changes, offline periods. Append-only."""
+
+    __tablename__ = "probe_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    probe_id: Mapped[int] = mapped_column(ForeignKey("probes.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("scan_jobs.id", ondelete="SET NULL"), nullable=True)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)

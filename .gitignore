@@ -61,3 +61,12 @@ htmlcov/
 # iCloud Drive conflict copies ("engine 2.py", "index 2"): never source code
 * 2.*
 * 2
+
+# Scan probe configuration: holds the probe credential
+deploy/probe/config/
+
+# Appliance builds: outputs and the probe image archive
+deploy/appliance/output/
+deploy/appliance/image/*.tar
+# Never commit the signing key (cosign.pub is public)
+cosign.key

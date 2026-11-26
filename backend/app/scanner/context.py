@@ -5,6 +5,8 @@ import hashlib
 import json
 from typing import Any
 
+from app.scanner.resources import ScanResources
+
 
 class ScanPolicy:
     """
@@ -29,10 +31,14 @@ class ScanContext:
     Mutable context object shared across all plugins in a single scan.
     Plugins write artifacts keyed by their `provides` IDs, and read from
     artifact keys listed in their `consumes`.
+
+    ``resources`` gives the client's credentials and the reference data
+    (see :mod:`app.scanner.resources`); they are not artifacts.
     """
 
-    def __init__(self, policy: ScanPolicy | None = None):
+    def __init__(self, policy: ScanPolicy | None = None, resources: ScanResources | None = None):
         self.policy: ScanPolicy = policy or ScanPolicy()
+        self.resources: ScanResources = resources or ScanResources.none()
         self._artifacts: dict[str, Any] = {}
         self._seen_fingerprints: set[str] = set()
 

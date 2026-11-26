@@ -11,7 +11,8 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      # Loopback only: an exposed database is a way in. Use an SSH tunnel.
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app}"]
       interval: 5s
@@ -22,7 +23,9 @@ services:
     image: redis:7
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      # Loopback only: RQ jobs are pickles, so whoever reaches Redis runs
+      # code in the workers.
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -36,8 +39,8 @@ services:
       - NEO4J_AUTH=${NEO4J_AUTH:-neo4j/password}
       - NEO4J_PLUGINS=["apoc"]
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
     volumes:
       - neo4j_data:/data
     healthcheck:
@@ -50,7 +53,11 @@ services:
   backend:
     # Built once here; the three workers run the same image (building it per
     # service unpacked four copies in parallel and filled the disk).
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        # Official PyPI unless .env names a mirror.
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     image: v0cday-backend:latest
     env_file:
       - .env

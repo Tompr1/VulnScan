@@ -58,7 +58,7 @@ export function JobDetail({ job: jobProp, back, openDrawer }) {
 
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => {
-    if (job.status !== "running" && job.status !== "queued") return;
+    if (!["running", "queued", "processing"].includes(job.status)) return;
     const t = setInterval(refresh, 2000);
     return () => clearInterval(t);
   }, [job.status, refresh]);
@@ -82,6 +82,7 @@ export function JobDetail({ job: jobProp, back, openDrawer }) {
           <h1>{job.target}</h1>
           <div className="sub">
             {job.scan_type} scan
+            {job.runs_on === "probe" && <> · on probe {job.probe_name || "(removed)"}</>}
             {job.created_by && <> · by {job.created_by}</>}
             {job.created_at && <> · started {new Date(job.created_at).toLocaleString("en-US", {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"})}</>}
             {job.finished_at && <> · finished {new Date(job.finished_at).toLocaleString("en-US", {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"})}</>}
@@ -137,7 +138,9 @@ export function JobDetail({ job: jobProp, back, openDrawer }) {
           ) : visible.length === 0 ? (
             <div style={{padding: "60px 18px", textAlign: "center", color: "var(--text-3)"}}>
               {findings.length === 0
-                ? (job.status === "running" || job.status === "queued"
+                ? (job.status === "processing"
+                    ? "Scan finished — its findings are being scored and saved."
+                    : job.status === "running" || job.status === "queued"
                     ? "Scan in progress — findings will appear here as plugins complete."
                     : "No findings recorded for this scan.")
                 : "No findings match the current filters."}

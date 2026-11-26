@@ -1,0 +1,19 @@
+[Unit]
+Description=v0cday probe: enroll from the cloud-init seed, then start the probe
+Wants=network-online.target
+After=network-online.target docker.service cloud-final.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# The image's build account (locked) goes at the first boot.
+ExecStartPre=-/usr/sbin/userdel -r packer
+ExecStart=/usr/local/sbin/v0cday-probe-firstboot
+# 1: the platform may not be reachable yet. 3: no usable seed, retrying is useless.
+Restart=on-failure
+RestartSec=5min
+RestartPreventExitStatus=3
+
+[Install]
+WantedBy=multi-user.target

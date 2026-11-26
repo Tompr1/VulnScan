@@ -1,0 +1,11 @@
+#cloud-config
+# Image build only (Packer fills this template): a temporary account Packer
+# signs in with, with a random password made for this build only.
+# provision/90-cleanup.sh locks it and the appliance's first boot removes it.
+users:
+  - name: packer
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: "${password}"
+ssh_pwauth: true

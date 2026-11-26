@@ -50,6 +50,10 @@ class Cpe:
             return None
         return cls(part=fields[2], vendor=fields[3].lower(), product=fields[4].lower(), version=fields[5] or ANY)
 
+    def to_cpe23(self) -> str:
+        """The ``cpe:2.3:…`` name of the fields kept here (the others are ANY)."""
+        return f"cpe:2.3:{self.part}:{self.vendor}:{self.product}:{self.version}:*:*:*:*:*:*:*"
+
     @property
     def product_key(self) -> ProductKey:
         # The part is deliberately ignored: NVD sometimes files the same
@@ -135,6 +139,16 @@ class CpeMatch:
     def from_nvd(cls, match: Mapping[str, Any]) -> CpeMatch | None:
         cpe = Cpe.parse(match.get("cpe23") or match.get("criteria"))
         return cls(cpe, VersionRange.from_nvd(match)) if cpe else None
+
+    def to_nvd(self) -> dict[str, str]:
+        """The NVD form :meth:`from_nvd` reads back."""
+        bounds = {
+            "versionStartIncluding": self.versions.start_including,
+            "versionStartExcluding": self.versions.start_excluding,
+            "versionEndIncluding": self.versions.end_including,
+            "versionEndExcluding": self.versions.end_excluding,
+        }
+        return {"cpe23": self.cpe.to_cpe23(), **{k: v for k, v in bounds.items() if v}}
 
     def affects(self, candidate: Cpe, installed_version: str | None) -> bool:
         """Does this configuration cover ``candidate`` at ``installed_version``?

@@ -10,6 +10,10 @@
 # Env:     DEPLOY_DIR              install directory        (default: ~/v0cday)
 #          PUBLIC_HOST             address used in URLs/CORS (default: first host IP)
 #          HEALTH_TIMEOUT_SECONDS  wait for the backend      (default: 900)
+#          DEPLOY_STACK            dev  — docker-compose.yml: Vite dev server on
+#                                         :5173, API on :8888 (default)
+#                                  prod — docker-compose.prod.yml: HTTPS on 443
+#                                         through Caddy, nothing else exposed
 #
 # What survives a deploy: .env (created once, with random secrets) and data/
 # (datasets, reports). Everything else is replaced by the deployed commit.
@@ -20,6 +24,12 @@ SOURCE_DIR="${1:?usage: scripts/deploy.sh <source-dir>}"
 DEPLOY_DIR="${DEPLOY_DIR:-$HOME/v0cday}"
 PUBLIC_HOST="${PUBLIC_HOST:-$(hostname -I | awk '{print $1}')}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-900}"
+DEPLOY_STACK="${DEPLOY_STACK:-dev}"
+case "$DEPLOY_STACK" in
+  dev)  COMPOSE_FILE_NAME=docker-compose.yml ;;
+  prod) COMPOSE_FILE_NAME=docker-compose.prod.yml ;;
+  *)    printf 'ERROR: DEPLOY_STACK must be dev or prod, not %s\n' "$DEPLOY_STACK" >&2; exit 1 ;;
+esac
 BOOTSTRAP_MARKER="$DEPLOY_DIR/.bootstrapped"
 
 log() { printf '\n==> %s\n' "$*"; }
@@ -71,10 +81,12 @@ create_env_file() {
   refuse_stale_volumes
 
   log "First deploy: creating .env with random secrets"
-  local db_password neo4j_password admin_password
+  local db_password neo4j_password admin_password origin
   db_password=$(openssl rand -hex 16)
   neo4j_password=$(openssl rand -hex 16)
   admin_password=$(openssl rand -hex 12)
+  origin="http://$PUBLIC_HOST:5173,http://localhost:5173"
+  [[ "$DEPLOY_STACK" == prod ]] && origin="https://$PUBLIC_HOST"
   sed \
     -e "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -hex 32)|" \
     -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$db_password|" \
@@ -82,7 +94,7 @@ create_env_file() {
     -e "s|^NEO4J_PASSWORD=.*|NEO4J_PASSWORD=$neo4j_password|" \
     -e "s|^NEO4J_AUTH=.*|NEO4J_AUTH=neo4j/$neo4j_password|" \
     -e "s|^DEFAULT_ADMIN_PASSWORD=.*|DEFAULT_ADMIN_PASSWORD=$admin_password|" \
-    -e "s|^CORS_ORIGINS=.*|CORS_ORIGINS=http://$PUBLIC_HOST:5173,http://localhost:5173|" \
+    -e "s|^CORS_ORIGINS=.*|CORS_ORIGINS=$origin|" \
     "$DEPLOY_DIR/.env.example" > "$env_file"
   chmod 600 "$env_file"
   # The password is never printed: CI logs are visible on GitHub.
@@ -109,10 +121,38 @@ env_value() {
   grep -E "^$1=" "$DEPLOY_DIR/.env" | tail -n1 | cut -d= -f2-
 }
 
+# Sets KEY=VALUE in .env (replacing an existing line, empty or not).
+set_env_value() {
+  local env_file="$DEPLOY_DIR/.env"
+  if grep -qE "^$1=" "$env_file"; then
+    sed -i "s|^$1=.*|$1=$2|" "$env_file"
+  else
+    printf '%s=%s\n' "$1" "$2" >> "$env_file"
+  fi
+}
+
+# Values every deploy needs, added to an .env created by an older version.
+# The production stack also serves the UI over HTTPS on PUBLIC_HOST.
+complete_env_file() {
+  if [[ -z "$(env_value REDIS_PASSWORD)" ]]; then
+    log "Adding a random REDIS_PASSWORD to .env"
+    set_env_value REDIS_PASSWORD "$(openssl rand -hex 24)"
+  fi
+  [[ "$DEPLOY_STACK" == prod ]] || return 0
+  if [[ "$(env_value PUBLIC_HOST)" != "$PUBLIC_HOST" ]]; then
+    log "Production: UI and API at https://$PUBLIC_HOST"
+    set_env_value PUBLIC_HOST "$PUBLIC_HOST"
+    set_env_value CORS_ORIGINS "https://$PUBLIC_HOST"
+    set_env_value PUBLIC_URL "https://$PUBLIC_HOST"
+  fi
+}
+
 start_stack() {
   log "Building and starting containers (the first build takes several minutes)"
   cd "$DEPLOY_DIR"
-  docker compose up -d --build --remove-orphans
+  # --remove-orphans: switching stacks removes the other one's services
+  # (the data volumes are shared and kept).
+  docker compose -f "$COMPOSE_FILE_NAME" up -d --build --remove-orphans
 }
 
 wait_for_backend() {
@@ -121,8 +161,8 @@ wait_for_backend() {
   log "Waiting for $url"
   until curl -fsS -o /dev/null "$url"; do
     if ((SECONDS >= deadline)); then
-      docker compose ps
-      docker compose logs --tail 100 backend
+      docker compose -f "$COMPOSE_FILE_NAME" ps
+      docker compose -f "$COMPOSE_FILE_NAME" logs --tail 100 backend
       die "backend not healthy after ${HEALTH_TIMEOUT_SECONDS}s"
     fi
     sleep 5
@@ -147,6 +187,7 @@ main() {
   check_docker_mtu
   sync_code
   create_env_file
+  complete_env_file
   BACKEND_PORT=$(env_value BACKEND_PORT); BACKEND_PORT=${BACKEND_PORT:-8888}
   FRONTEND_PORT=$(env_value FRONTEND_PORT); FRONTEND_PORT=${FRONTEND_PORT:-5173}
   start_stack
@@ -157,9 +198,13 @@ main() {
   echo "$commit" > "$DEPLOY_DIR/.deployed-commit"
   docker image prune -f >/dev/null
 
-  log "Deployed $commit"
-  echo "  Frontend : http://$PUBLIC_HOST:$FRONTEND_PORT"
-  echo "  API      : http://$PUBLIC_HOST:$BACKEND_PORT"
+  log "Deployed $commit ($DEPLOY_STACK stack)"
+  if [[ "$DEPLOY_STACK" == prod ]]; then
+    echo "  Platform : https://$PUBLIC_HOST  (UI, API and probe API)"
+  else
+    echo "  Frontend : http://$PUBLIC_HOST:$FRONTEND_PORT"
+    echo "  API      : http://$PUBLIC_HOST:$BACKEND_PORT"
+  fi
 }
 
 main "$@"

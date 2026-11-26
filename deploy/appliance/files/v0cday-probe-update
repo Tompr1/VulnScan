@@ -1,0 +1,103 @@
+#!/bin/bash
+# v0cday-probe-update — moves the probe to the image the platform asks for,
+# only if this appliance trusts it, and rolls back if it does not come up.
+# Run by v0cday-probe-update.timer.
+#
+#   1. ask the platform (through the running probe's credential) for its
+#      desired image; nothing to do when none, or already running it;
+#   2. trust it: pinned by digest (…@sha256:<64 hex>), from the registry in
+#      ALLOWED_IMAGE_PREFIX, and signed by COSIGN_PUBLIC_KEY (cosign);
+#      a compromised platform cannot make a probe run another image;
+#   3. pull it, restart the probe on it, check it can reach the platform;
+#      otherwise go back to the previous image.
+#
+# /etc/v0cday-probe/update.conf (KEY=VALUE, never sourced):
+#   ALLOWED_IMAGE_PREFIX=ghcr.io/your-msp/v0cday-probe@sha256:
+#   COSIGN_PUBLIC_KEY=/etc/v0cday-probe/cosign.pub
+#   REQUIRE_SIGNATURE=yes        (no: lab only, unsigned images accepted)
+#
+# Exit codes: 0 up to date or updated; 1 update failed and rolled back;
+# 2 desired image refused (not trusted).
+set -euo pipefail
+
+CONFIG_DIR="${V0CDAY_CONFIG_DIR:-/etc/v0cday-probe}"
+COMPOSE_DIR="${V0CDAY_COMPOSE_DIR:-/opt/v0cday-probe}"
+HEALTH_TRIES="${V0CDAY_HEALTH_TRIES:-6}"
+HEALTH_DELAY="${V0CDAY_HEALTH_DELAY:-10}"
+UPDATE_CONF="$CONFIG_DIR/update.conf"
+ENV_FILE="$COMPOSE_DIR/.env"
+LOCK_DIR="$COMPOSE_DIR/.update.lock"
+
+log() { echo "v0cday-probe-update: $*"; }
+refuse() { log "refused $desired: $*"; exit 2; }
+compose() { docker compose --project-directory "$COMPOSE_DIR" -f "$COMPOSE_DIR/docker-compose.yml" "$@"; }
+conf() { [ -f "$UPDATE_CONF" ] && sed -n "s/^$1=//p" "$UPDATE_CONF" | tail -n 1 || true; }
+current_image() { [ -f "$ENV_FILE" ] && sed -n 's/^PROBE_IMAGE=//p' "$ENV_FILE" | tail -n 1 || true; }
+
+set_image() {
+  local temporary="$ENV_FILE.tmp"
+  { [ -f "$ENV_FILE" ] && grep -v '^PROBE_IMAGE=' "$ENV_FILE" || true; echo "PROBE_IMAGE=$1"; } > "$temporary"
+  mv "$temporary" "$ENV_FILE"
+}
+
+healthy() {
+  local try=1
+  while [ "$try" -le "$HEALTH_TRIES" ]; do
+    if [ -n "$(compose ps --status running -q probe 2>/dev/null)" ] \
+       && compose run --rm -T probe status </dev/null >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "$HEALTH_DELAY"
+    try=$((try + 1))
+  done
+  return 1
+}
+
+if [ ! -f "$CONFIG_DIR/probe.json" ]; then
+  log "not enrolled yet"
+  exit 0
+fi
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  log "another update is running"
+  exit 0
+fi
+trap 'rmdir "$LOCK_DIR"' EXIT
+
+desired=$(compose run --rm -T probe desired-image </dev/null | tail -n 1 | tr -d '\r')
+current=$(current_image)
+if [ -z "$desired" ] || [ "$desired" = "$current" ]; then
+  exit 0
+fi
+
+# 2. Trust.
+if ! echo "$desired" | grep -Eq '^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$'; then
+  refuse "not pinned by digest"
+fi
+prefix=$(conf ALLOWED_IMAGE_PREFIX)
+if [ -z "$prefix" ]; then
+  refuse "no ALLOWED_IMAGE_PREFIX in $UPDATE_CONF"
+fi
+case "$desired" in
+  "$prefix"*) ;;
+  *) refuse "not under $prefix" ;;
+esac
+key=$(conf COSIGN_PUBLIC_KEY)
+if [ -n "$key" ]; then
+  cosign verify --key "$key" "$desired" >/dev/null || refuse "signature check failed"
+elif [ "$(conf REQUIRE_SIGNATURE)" != "no" ]; then
+  refuse "no COSIGN_PUBLIC_KEY to check its signature (REQUIRE_SIGNATURE=no in a lab only)"
+fi
+
+# 3. Switch, check, roll back.
+log "updating ${current:-the image built in} to $desired"
+docker pull "$desired"
+set_image "$desired"
+compose up -d probe
+if healthy; then
+  log "now running $desired"
+  exit 0
+fi
+log "$desired does not come up: back to ${current:-the image built in}"
+set_image "$current"
+compose up -d probe
+exit 1

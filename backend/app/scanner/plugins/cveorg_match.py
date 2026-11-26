@@ -15,9 +15,6 @@ import os
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
 from app.scanner.context import stable_fingerprint
 from app.cve.version_cmp import parse as parse_version
-from app.db.session import SessionLocal
-from app.cve.reference_datasets import enabled_dataset_paths
-from app.cve.dataset_loader import load_json
 
 logger = logging.getLogger("v0cday.cveorg_match")
 
@@ -120,16 +117,12 @@ class Check(Plugin):
         already_found = {h.get("cve") for h in nvd_hits if h.get("cve")}
 
         # Load CVE.org CVSS + affected data
-        db = SessionLocal()
+        reference = ctx.resources.reference
         cveorg_data = {}
-        try:
-            for path in enabled_dataset_paths(db, "cvedetails_cvss"):
-                data = load_json(path)
-                if isinstance(data, dict):
-                    cveorg_data = data
-                    break
-        finally:
-            db.close()
+        for data in reference.datasets("cvedetails_cvss"):
+            if isinstance(data, dict):
+                cveorg_data = data
+                break
 
         if not cveorg_data:
             return PluginResult()
@@ -137,13 +130,11 @@ class Check(Plugin):
         # Also load NVD data for summary/refs
         nvd_by_cve = {}
         try:
-            db2 = SessionLocal()
-            for path in enabled_dataset_paths(db2, "nvd_cpe_cve"):
-                for item in load_json(path) or []:
+            for data in reference.datasets("nvd_cpe_cve"):
+                for item in data or []:
                     cve_id = item.get("cve")
                     if cve_id:
                         nvd_by_cve[cve_id] = item
-            db2.close()
         except Exception:
             pass
 

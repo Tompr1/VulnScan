@@ -674,32 +674,14 @@ class Check(Plugin):
             ssh_port = int(auth.get("ssh_port", ssh_port))
 
             if cred_id:
-                # Try loading credential from DB
                 try:
-                    from app.db.session import SessionLocal
-                    from app.db import models
-                    from app.core.crypto import decrypt_str
-
-                    ws_id = ctx.get("workspace_id")
-                    db = SessionLocal()
-                    try:
-                        cred = (
-                            db.query(models.Credential)
-                            .filter(
-                                models.Credential.id == cred_id,
-                                models.Credential.workspace_id == ws_id,
-                            )
-                            .first()
-                        )
-                        if cred:
-                            ssh_user = cred.username
-                            secret = decrypt_str(cred.secret_enc)
-                            if cred.secret_type == "password":
-                                ssh_password = secret
-                            else:
-                                ssh_key_text = secret
-                    finally:
-                        db.close()
+                    cred = ctx.resources.credentials.get(cred_id)
+                    if cred:
+                        ssh_user = cred.username
+                        if cred.secret_type == "password":
+                            ssh_password = cred.secret
+                        else:
+                            ssh_key_text = cred.secret
                 except Exception as e:
                     logger.warning("CIS Benchmark: failed to load SSH credential: %s", e)
 

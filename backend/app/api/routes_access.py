@@ -80,7 +80,7 @@ def get_client_graph():
 
 def _running_scans(db: Session, client_id: int):
     return db.query(models.ScanJob).filter(
-        models.ScanJob.workspace_id == client_id, models.ScanJob.status.in_(("queued", "running")))
+        models.ScanJob.workspace_id == client_id, models.ScanJob.status.in_(("queued", "running", "processing")))
 
 
 @router.get("/clients/{client_id}/data")

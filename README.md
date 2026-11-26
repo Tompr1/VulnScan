@@ -135,6 +135,18 @@ cd VulnScan
 2. Visit **Threat Intel** to confirm the catalog populated
 3. Create a scan profile under **Profiles**, then launch a scan from **Scan Jobs**
 
+### Production
+
+`docker-compose.yml` is the **development** stack (Vite dev server, source
+mounted, `--reload`). In production use `docker-compose.prod.yml`: HTTPS on
+443 through Caddy as the only entry point, databases unreachable from the
+network, Redis with a password, and an API that refuses to start with a
+default secret or password — see [`deploy/master/README.md`](deploy/master/README.md):
+
+```bash
+DEPLOY_STACK=prod PUBLIC_HOST=soc.example scripts/deploy.sh "$PWD"
+```
+
 ---
 
 ## Application Menu
@@ -474,6 +486,39 @@ Click "Generate PoC" on any individual finding to get an AI-generated Python exp
 18. Attack Graph        ─→ Neo4j graph modeling
 19. Cleanup             ─→ Ephemeral credentials deleted (if configured)
 ```
+
+---
+
+## Scan Probes
+
+A client's scans can run on a **probe**: a VM in the client's network that
+only connects out to the platform over HTTPS — the client opens no port.
+
+```
+ Platform (Root › Scan probes)                 Probe VM (deploy/probe)
+ ─ choose which scan types run on the probe     ─ v0cday-probe run
+ ─ job queued for the probe  ◄── HTTPS, out ──  ─ claims it, runs the same
+ ─ findings scored, saved, alerted  ◄─────────    engine and plugins, reports
+```
+
+- Create the probe in **Root › Scan probes** and enroll the VM with its
+  one-time token; installation: [`deploy/probe/README.md`](deploy/probe/README.md).
+- The probe receives each job's credentials and the client's allowlist,
+  keeps nothing secret on disk but its own credential, and can be limited
+  further by the client (`--local-allowlist`).
+- The probe API (`/probe/v1`) is refused over plain HTTP
+  (`PROBE_REQUIRE_HTTPS`, see `.env.example`).
+- Root › Scan probes shows each probe's state, agent and appliance versions,
+  whether it runs the image rolled out (`PROBE_IMAGE`), and its history
+  (enrollment, scans taken and reported, image changes, offline periods).
+  When a probe stays silent `PROBE_OFFLINE_ALERT_MINUTES`, the client's
+  integrations are told, and told again when it is back (notification
+  event *Scan probe offline / back online*). A job's page says which probe
+  ran it.
+- For clients, a ready-made VM — the **appliance** (OVA, VHDX, qcow2) —
+  enrolls itself at first boot from a configuration downloaded in Root, opens
+  no port, and updates its probe image only to images signed by the MSP:
+  [`deploy/appliance/README.md`](deploy/appliance/README.md).
 
 ---
 

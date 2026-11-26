@@ -1,6 +1,4 @@
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
-from app.db.session import SessionLocal
-from app.cve.catalogs import cve_catalog
 from app.cve.cpe import Cpe
 from app.cve.matcher import CveCatalog, CveHit, ProductCandidate, find_vulnerabilities
 from app.cve.version_cmp import is_likely_patched
@@ -109,7 +107,7 @@ class Check(Plugin):
         os_info = ctx.get("inventory.os", {}) or {}
         os_id = (os_info.get("os_id") or os_info.get("id") or os_info.get("distro") or "").lower()
 
-        catalog = cve_catalog(SessionLocal)
+        catalog = ctx.resources.reference.cve_catalog()
         hits = find_nvd_hits(cands, catalog)
 
         findings=[]

@@ -32,6 +32,7 @@ const ROOT_NAV = (counts) => [
   { section: "Platform", items: [
     { id: "overview", label: "Overview", icon: Icons.Dashboard, count: counts.clients },
     { id: "access", label: "Clients & access", icon: Icons.Users },
+    { id: "probes", label: "Scan probes", icon: Icons.Chip },
   ]},
   { section: "Shared databases", items: [
     { id: "datasets", label: "Reference data", icon: Icons.Database, count: counts.datasets },

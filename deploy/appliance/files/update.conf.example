@@ -1,0 +1,9 @@
+# /etc/v0cday-probe/update.conf — which probe images this appliance accepts.
+# Written at image build time (Packer variables); never sourced, KEY=VALUE.
+#
+# Only images under this prefix, pinned by digest, are accepted:
+ALLOWED_IMAGE_PREFIX=ghcr.io/your-msp/v0cday-probe@sha256:
+# ...and signed by this key (cosign):
+COSIGN_PUBLIC_KEY=/etc/v0cday-probe/cosign.pub
+# Lab only: "no" accepts unsigned images when there is no key above.
+REQUIRE_SIGNATURE=yes

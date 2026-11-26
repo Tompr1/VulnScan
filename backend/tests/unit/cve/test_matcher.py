@@ -87,3 +87,8 @@ def test_un_paquet_installe_vulnerable_est_detecte_une_seule_fois_par_cve():
     hits = match_nvd([{"name": "openssh-server", "version": "1:9.2p1-2+deb12u2"}], items)
 
     assert [(h["cve"], h["package"], h["installed"]) for h in hits] == [("CVE-2023-38408", "openssh-server", "9.2p1")]
+
+
+def test_un_enregistrement_cve_se_relit_depuis_sa_forme_aplatie():
+    for record in CATALOG.records_for({("openbsd", "openssh"), ("apache", "http_server")}):
+        assert CveRecord.from_flattened(record.to_flattened()) == record

@@ -1,0 +1,23 @@
+# The probe on the appliance (/opt/v0cday-probe). The image is the one built
+# into the appliance until v0cday-probe-update switches PROBE_IMAGE (in .env
+# next to this file) to a newer, signed one the platform asks for.
+name: v0cday-probe
+
+services:
+  probe:
+    image: ${PROBE_IMAGE:-v0cday-probe:appliance}
+    pull_policy: never
+    restart: unless-stopped
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    volumes:
+      - /etc/v0cday-probe:/etc/v0cday-probe
+      - /var/lib/v0cday-probe:/var/lib/v0cday-probe
+    environment:
+      # Reported to the platform, which shows whether the probe is up to date.
+      V0CDAY_PROBE_IMAGE: ${PROBE_IMAGE:-v0cday-probe:appliance}
+      SCAN_TIMEOUT_SECONDS: "30"
+      SCAN_BUDGET_SECONDS: "900"
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}

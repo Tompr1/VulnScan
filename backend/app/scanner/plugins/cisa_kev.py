@@ -1,7 +1,4 @@
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
-from app.db.session import SessionLocal
-from app.cve.reference_datasets import enabled_dataset_paths
-from app.cve.dataset_loader import load_json
 from app.scanner.context import stable_fingerprint
 
 META = PluginMeta(
@@ -21,17 +18,12 @@ class Check(Plugin):
         if not detected:
             return PluginResult(artifacts={"priority.kev_hits": []})
 
-        db = SessionLocal()
         kev=set(); rows=[]
-        try:
-            for path in enabled_dataset_paths(db, "cisa_kev"):
-                data = load_json(path)
-                for r in data or []:
-                    c = (r.get("cve") or "").upper()
-                    if c.startswith("CVE-"):
-                        kev.add(c); rows.append(r)
-        finally:
-            db.close()
+        for data in ctx.resources.reference.datasets("cisa_kev"):
+            for r in data or []:
+                c = (r.get("cve") or "").upper()
+                if c.startswith("CVE-"):
+                    kev.add(c); rows.append(r)
 
         hits = sorted(list(detected.intersection(kev)))
         findings=[]

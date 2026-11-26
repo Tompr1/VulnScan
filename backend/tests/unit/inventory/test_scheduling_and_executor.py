@@ -4,9 +4,10 @@ import pytest
 
 from app.inventory.scheduling import is_due
 from app.scan_jobs.executors import InventoryScanExecutor
-from app.scan_jobs.repository import ScanJobSnapshot
+from app.scan_jobs.assignment import ScanAssignment
 from app.scanner.plugins.base import Finding
-from app.scanner.profile import ScanProfile
+from app.scanner.resources import ScanResources
+from app.scanner.target import ScanType
 
 NOW = datetime(2026, 11, 21, 6, 0, tzinfo=timezone.utc)
 
@@ -46,7 +47,7 @@ class StubAudit:
 
 
 def job(meta):
-    return ScanJobSnapshot(id=9, workspace_id=1, target="intune:Tenant", scan_type="inventory", profile_id=None, meta=meta)
+    return ScanAssignment(job_id=9, workspace_id=1, target="intune:Tenant", scan_type="inventory", meta=meta)
 
 
 def executor(calls, findings=()):
@@ -60,7 +61,7 @@ async def test_un_job_d_inventaire_collecte_puis_audite_la_connexion_qu_il_desig
     async def progress(*args):
         events.append((args[2], args[-1]))
 
-    findings = await executor(calls, [issue]).execute(job({"inventory_connection_id": 3}), ScanProfile(), progress)
+    findings = await executor(calls, [issue]).execute(job({"inventory_connection_id": 3}), ScanResources.none(), progress)
 
     assert calls == [("collect", 3, 1), ("audit", 3, 1, 9)]
     assert findings == [issue]
@@ -77,11 +78,11 @@ async def test_un_job_d_inventaire_sans_connexion_est_refuse():
         return None
 
     with pytest.raises(ValueError, match="inventory connection"):
-        await executor(calls).execute(job({}), ScanProfile(), progress)
+        await executor(calls).execute(job({}), ScanResources.none(), progress)
     assert calls == []
 
 
 def test_un_job_d_inventaire_n_a_pas_besoin_de_profil_ni_d_analyse_ia():
     inventory = executor([])
 
-    assert (inventory.requires_profile, inventory.ai_analysis) == (False, False)
+    assert (ScanType.INVENTORY.requires_profile, inventory.ai_analysis) == (False, False)

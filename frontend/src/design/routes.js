@@ -15,7 +15,7 @@ export const CLIENT_PAGES = [
   "dashboard", "assets", "inventory", "jobs", "profiles", "reports",
   "credentials", "threat-intel", "attack-graph", "analytics", "settings",
 ];
-export const ROOT_PAGES = ["overview", "access", "datasets", "threat-intel", "platform"];
+export const ROOT_PAGES = ["overview", "access", "probes", "datasets", "threat-intel", "platform"];
 export const DEFAULT_PAGE = "dashboard";
 export const ROOT_DEFAULT_PAGE = "overview";
 

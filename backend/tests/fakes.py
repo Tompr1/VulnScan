@@ -17,12 +17,23 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.job_queue import QueueUnavailableError
+from app.cve.cpe import Cpe
 from app.scan_jobs.notifications import Integration, ScanFailure, ScanSummary
+from app.scan_jobs.assignment import ScanAssignment, ScanReport
+from app.probe_agent.platform import Dataset
 from app.scan_jobs.processing import ProcessedFinding
 from app.scan_jobs.repository import JobCompletion, JobFailure, ScanJobSnapshot
 from app.scanner.context import ScanContext
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.profile import ScanProfile
+from app.scanner.resources import (
+    CredentialError,
+    CredentialLabel,
+    InMemoryCredentialVault,
+    InMemoryReferenceData,
+    ScanCredential,
+    ScanResources,
+)
 
 
 # ── Clock ─────────────────────────────────────────────────────────────────────
@@ -119,10 +130,15 @@ class SpyJobQueue:
         self.available = available
         self.scans: list[int] = []
         self.analyses: list[int] = []
+        self.reports: list[tuple[int, dict]] = []
 
     def enqueue_scan(self, job_id: int) -> None:
         self._check()
         self.scans.append(job_id)
+
+    def enqueue_report(self, job_id: int, report: dict) -> None:
+        self._check()
+        self.reports.append((job_id, report))
 
     def enqueue_ai_analysis(self, analysis_id: int) -> None:
         self._check()
@@ -187,6 +203,11 @@ class SpyChannel:
             raise self._error
         self.alerts.append((config, alert))
 
+    def probe_status(self, config: dict, alert: Any) -> None:
+        if self._error:
+            raise self._error
+        self.alerts.append((config, alert))
+
 
 class SpyNotifier:
     """Stands in for ScanNotifier in runner tests."""
@@ -203,6 +224,9 @@ class SpyNotifier:
         self.failed.append((workspace_id, failure))
 
     def device_alert(self, workspace_id: int, alert: Any) -> None:
+        self.alerts.append((workspace_id, alert))
+
+    def probe_status(self, workspace_id: int, alert: Any) -> None:
         self.alerts.append((workspace_id, alert))
 
 
@@ -249,6 +273,12 @@ class InMemoryScanJobRepository:
     def mark_running(self, job_id: int, at: datetime) -> None:
         self.jobs[job_id].status, self.jobs[job_id].started_at = "running", at
 
+    def start_processing(self, job_id: int) -> bool:
+        if self.jobs[job_id].status != "running":
+            return False
+        self.jobs[job_id].status = "processing"
+        return True
+
     def mark_failed(self, job_id: int, failure: JobFailure, at: datetime) -> None:
         if self.fail_on_mark_failed:
             raise RuntimeError("database unavailable")
@@ -283,17 +313,21 @@ class StubExecutor:
         self,
         findings: list[Finding] | None = None,
         error: Exception | None = None,
-        requires_profile: bool = True,
         ai_analysis: bool = True,
     ) -> None:
-        self.requires_profile = requires_profile
         self.ai_analysis = ai_analysis
         self._findings = findings or []
         self._error = error
-        self.received_profiles: list[ScanProfile] = []
+        self.received_assignments: list[ScanAssignment] = []
+        self.received_resources: list[ScanResources] = []
 
-    async def execute(self, job: ScanJobSnapshot, profile: ScanProfile, progress) -> list[Finding]:
-        self.received_profiles.append(profile)
+    @property
+    def received_profiles(self) -> list[ScanProfile]:
+        return [assignment.profile for assignment in self.received_assignments]
+
+    async def execute(self, assignment: ScanAssignment, resources: ScanResources, progress) -> list[Finding]:
+        self.received_assignments.append(assignment)
+        self.received_resources.append(resources)
         await progress(0, 1, "stub", "Stub", "running")
         if self._error:
             raise self._error
@@ -324,3 +358,106 @@ class StubAiTrigger:
         if self._error:
             raise self._error
         return self._queues
+
+
+# ── Scan resources (credentials, reference data) ─────────────────────────────
+
+def credential(credential_id: int = 1, **overrides: Any) -> ScanCredential:
+    values: dict[str, Any] = {
+        "id": credential_id, "name": f"cred-{credential_id}", "username": "audit",
+        "secret_type": "password", "secret": "s3cret",
+    }
+    values.update(overrides)
+    return ScanCredential(**values)
+
+
+def scan_resources(
+    *credentials: ScanCredential,
+    datasets: dict[str, list[list[Any]]] | None = None,
+    catalog=None,
+) -> ScanResources:
+    return ScanResources(InMemoryCredentialVault(credentials), InMemoryReferenceData(datasets, catalog))
+
+
+class UnreadableCredentialVault:
+    """Every credential exists but its secret cannot be decrypted."""
+
+    def get(self, credential_id: int) -> ScanCredential | None:
+        raise CredentialError(f"cannot decrypt #{credential_id}")
+
+    def labels(self) -> list[CredentialLabel]:
+        return []
+
+
+def plugin_context(resources: ScanResources | None = None, **artifacts: Any) -> ScanContext:
+    """Context of one plugin run; artifact keys use ``__`` for ``.``
+    (``net__open_ports`` sets ``net.open_ports``)."""
+    ctx = ScanContext(resources=resources)
+    for key, value in artifacts.items():
+        ctx.set(key.replace("__", "."), value)
+    return ctx
+
+
+
+# ── Probe agent ───────────────────────────────────────────────────────────────
+
+class FakePlatform:
+    """The platform as a probe sees it (PlatformClient), in memory.
+
+    ``jobs`` are handed out in order; ``stop_after_progress`` makes the
+    platform answer "stop" from that many progress documents on; ``fail``
+    maps a method name to the exception it raises (once per entry)."""
+
+    def __init__(self, jobs=(), datasets=None, catalog_complete=True, records=None, stop_after_progress=None):
+        self.jobs = list(jobs)
+        self.datasets = dict(datasets or {})  # kind -> (etag, content)
+        self.catalog_complete = catalog_complete
+        self.records = list(records or [])
+        self.stop_after_progress = stop_after_progress
+        self.fail: dict[str, list[Exception]] = {}
+        self.progress_sent: list[tuple[int, dict]] = []
+        self.reports: list[ScanReport] = []
+        self.downloads: list[str] = []
+        self.lookups: list[set] = []
+        self.heartbeats = 0
+
+    def _maybe_fail(self, method: str) -> None:
+        if self.fail.get(method):
+            raise self.fail[method].pop(0)
+
+    def heartbeat(self, hostname=None):
+        self._maybe_fail("heartbeat")
+        self.heartbeats += 1
+        return {"probe_id": 1, "workspace_id": 1, "server_time": "2026-11-26T12:00:00+00:00"}
+
+    def next_job(self, wait=25):
+        self._maybe_fail("next_job")
+        return self.jobs.pop(0) if self.jobs else None
+
+    def progress(self, job_id, document):
+        self._maybe_fail("progress")
+        self.progress_sent.append((job_id, document))
+        return self.stop_after_progress is not None and len(self.progress_sent) >= self.stop_after_progress
+
+    def report(self, job_id, report):
+        self._maybe_fail("report")
+        self.reports.append(report)
+
+    def reference_status(self):
+        self._maybe_fail("reference_status")
+        return {"cve_catalog_complete": self.catalog_complete,
+                "datasets": {kind: etag for kind, (etag, _) in self.datasets.items()}}
+
+    def dataset(self, kind, etag=None):
+        self._maybe_fail("dataset")
+        current, content = self.datasets.get(kind, ("empty", []))
+        if etag == current:
+            return None
+        self.downloads.append(kind)
+        return Dataset(current, content)
+
+    def cve_records(self, products):
+        self._maybe_fail("cve_records")
+        self.lookups.append(set(products))
+        wanted = set(products)  # canonical keys, as the platform's catalog stores them
+        return [r for r in self.records if any(Cpe.parse(m["cpe23"]).product_key in wanted for m in r["matches"])]

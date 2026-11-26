@@ -109,14 +109,18 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}
 WORKDIR /app
 
 
-# Install Python dependencies via alternative PyPI mirror
+# Python dependencies from the official PyPI. A network that requires a
+# mirror sets the PIP_INDEX_URL build argument (docker compose build
+# --build-arg PIP_INDEX_URL=...); the image runs every client's scans and
+# holds their credentials, so its packages should come from a source you trust.
+ARG PIP_INDEX_URL=https://pypi.org/simple
 COPY requirements.txt .
 
 RUN pip install \
     --no-cache-dir \
     --timeout 30 \
     --retries 2 \
-    --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    --index-url "${PIP_INDEX_URL}" \
     -r requirements.txt
 # Copy application code
 COPY . .

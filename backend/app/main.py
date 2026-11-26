@@ -31,7 +31,10 @@ from app.api.routes_events import router as events_router
 from app.api.routes_analytics import router as analytics_router
 from app.api.routes_inventory import router as inventory_router
 from app.api.routes_access import router as access_router
+from app.api.routes_probes import router as probes_router
+from app.api.routes_probe_agent import router as probe_agent_router
 from app.api.validation import install_validation_error_handler
+from app.core.production import check_production_settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("v0cday")
@@ -269,6 +272,23 @@ def _run_migrations(db: Session) -> None:
         """
         UPDATE audit_logs SET workspace_id = NULL WHERE workspace_id = 0;
         """,
+        # Scan probes (table created by create_all above): where each job
+        # runs, and which probe claimed it.
+        """
+        ALTER TABLE scan_jobs
+            ADD COLUMN IF NOT EXISTS runs_on VARCHAR(16) NOT NULL DEFAULT 'platform',
+            ADD COLUMN IF NOT EXISTS probe_id INTEGER REFERENCES probes(id) ON DELETE SET NULL;
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS ix_scan_jobs_probe_id ON scan_jobs (probe_id);
+        """,
+        # Probe versions and offline tracking (probe_events: create_all).
+        """
+        ALTER TABLE probes
+            ADD COLUMN IF NOT EXISTS image VARCHAR(512),
+            ADD COLUMN IF NOT EXISTS appliance_version VARCHAR(64),
+            ADD COLUMN IF NOT EXISTS offline_since TIMESTAMPTZ;
+        """,
     ]
     for sql in migrations:
         try:
@@ -295,6 +315,8 @@ def _ensure_first_client(db: Session) -> None:
 
 @app.on_event("startup")
 def startup() -> None:
+    # First: in production, an unsafe setting stops the platform here.
+    check_production_settings(settings)
     Base.metadata.create_all(bind=engine)
 
     db: Session = SessionLocal()
@@ -415,6 +437,21 @@ def healthz():
 import asyncio as _asyncio
 import threading as _threading
 
+def _build_probe_watch():
+    from app.probes.watch import ProbeWatch
+    from app.scan_jobs.notifications import ScanNotifier
+    from app.scan_jobs.repository import SqlIntegrationSource
+
+    base = settings.public_url
+    return ProbeWatch(
+        SessionLocal,
+        ScanNotifier(SqlIntegrationSource(SessionLocal)),
+        lambda: datetime.now(timezone.utc),
+        timedelta(minutes=settings.PROBE_OFFLINE_ALERT_MINUTES),
+        f"{base}/#/root/probes" if base else None,
+    )
+
+
 def _schedule_loop():
     """Background thread that checks for due scan schedules every 60s."""
     import os
@@ -427,6 +464,7 @@ def _schedule_loop():
     from app.core.job_queue import get_job_queue
 
     logger.info("Scheduler started")
+    probe_watch = _build_probe_watch()
 
     # Counters for time-gated features
     _sla_check_counter = 0       # run every 60 ticks  (60 min)
@@ -489,6 +527,12 @@ def _schedule_loop():
                 except Exception as e:
                     logger.warning("Schedule #%d failed: %s", sched.id, e)
                     db.rollback()
+            # ── Scan probes gone offline, or back ───────────────────────
+            try:
+                probe_watch.check()
+            except Exception as e_probes:
+                logger.warning("Probe watch failed: %s", e_probes)
+
             # ── Stale scan job detection ───────────────────────────────
             # RQ SIGKILLs a work-horse that overruns SCAN_JOB_TIMEOUT. A
             # SIGKILLed process runs no Python, so run_scan_job's own error
@@ -500,7 +544,8 @@ def _schedule_loop():
             stale_jobs = (
                 db.query(models.ScanJob)
                 .filter(
-                    models.ScanJob.status.in_(["queued", "running"]),
+                    # "processing": the worker died while saving the findings.
+                    models.ScanJob.status.in_(["queued", "running", "processing"]),
                     or_(
                         and_(
                             models.ScanJob.started_at.isnot(None),
@@ -543,6 +588,15 @@ def _schedule_loop():
                             f"The work-horse was most likely killed after exceeding "
                             f"SCAN_JOB_TIMEOUT ({settings.SCAN_JOB_TIMEOUT}s). Raise "
                             f"SCAN_BUDGET_SECONDS, or disable the plugin it stalled on."
+                        )
+                    elif getattr(sj, "runs_on", "platform") == "probe":
+                        waited = int((now_utc - sj.created_at).total_seconds())
+                        meta["error"] = "Scan was never picked up by a probe"
+                        meta["error_type"] = "queue"
+                        meta["error_detail"] = (
+                            f"The job waited {waited}s for a probe of this client. Check in "
+                            f"Root > Probes that the client's probe is online, or run this "
+                            f"scan type on the platform."
                         )
                     else:
                         waited = int((now_utc - sj.created_at).total_seconds())
@@ -932,11 +986,22 @@ def _write_audit(entry: dict) -> None:
         db.close()
 
 
+def _audited(method: str, path: str) -> bool:
+    """Mutating requests, except the routine calls of the scan probes
+    (progress every few seconds, heartbeats, CVE lookups): enrollment and
+    reports are kept."""
+    if method not in ("POST", "PUT", "PATCH", "DELETE"):
+        return False
+    if path.startswith("/probe/v1/"):
+        return path == "/probe/v1/enroll" or path.endswith("/report")
+    return True
+
+
 @app.middleware("http")
 async def audit_mw(request: Request, call_next):
     response = await call_next(request)
     try:
-        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        if _audited(request.method, request.url.path):
             entry = audit_entry(
                 request.method,
                 request.url.path,
@@ -973,4 +1038,6 @@ app.include_router(events_router)
 app.include_router(analytics_router)
 app.include_router(inventory_router)
 app.include_router(access_router)
+app.include_router(probes_router)
+app.include_router(probe_agent_router)
 

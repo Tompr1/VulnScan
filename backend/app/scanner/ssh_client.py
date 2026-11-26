@@ -9,7 +9,6 @@ import logging
 from datetime import datetime, timezone
 
 import paramiko
-from app.core.crypto import decrypt_str
 
 logger = logging.getLogger("v0cday.ssh")
 
@@ -68,30 +67,15 @@ def ssh_inventory(
     port: int,
     username: str,
     secret_type: str,
-    secret_enc: str,
-    passphrase_enc: str | None,
+    secret: str,
+    passphrase: str | None,
     timeout: float,
 ) -> dict:
     """
     Connect via SSH and collect OS + package inventory.
+    ``secret`` is the password or the private key, in clear.
     Returns dict with keys: os_release, uname, dpkg, rpm, apk, and inventory metadata.
     """
-    try:
-        secret = decrypt_str(secret_enc)
-    except (ValueError, Exception) as e:
-        raise RuntimeError(
-            "Cannot decrypt SSH credential - the SECRET_KEY may have changed "
-            "since this credential was saved. Delete the credential and re-add it "
-            f"in the Credentials page. Detail: {e}"
-        )
-
-    passphrase = None
-    if passphrase_enc:
-        try:
-            passphrase = decrypt_str(passphrase_enc)
-        except Exception:
-            pass
-
     pkey = None
     password = None
 

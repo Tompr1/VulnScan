@@ -5,8 +5,6 @@ Connects to the target via SSH and collects OS and package information.
 from datetime import datetime, timezone
 
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
-from app.db.session import SessionLocal
-from app.db import models
 from app.scanner.ssh_client import ssh_inventory
 from app.scanner.context import stable_fingerprint
 
@@ -126,24 +124,12 @@ class Check(Plugin):
                 ]
             )
 
-        ws_id = ctx.get("workspace_id")
-        db = SessionLocal()
+        vault = ctx.resources.credentials
         try:
-            cred = (
-                db.query(models.Credential)
-                .filter(
-                    models.Credential.id == cred_id,
-                    models.Credential.workspace_id == ws_id,
-                )
-                .first()
-            )
+            cred = vault.get(cred_id)
 
             if not cred:
-                avail = (
-                    db.query(models.Credential)
-                    .filter(models.Credential.workspace_id == ws_id)
-                    .all()
-                )
+                avail = vault.labels()
                 avail_str = ", ".join(f"#{c.id} ({c.name})" for c in avail) if avail else "none - add one in Credentials page"
 
                 return PluginResult(
@@ -169,8 +155,8 @@ class Check(Plugin):
                 ssh_port,
                 cred.username,
                 cred.secret_type,
-                cred.secret_enc,
-                cred.passphrase_enc,
+                cred.secret,
+                cred.passphrase,
                 ctx.policy.timeout_seconds,
             )
 
@@ -257,5 +243,3 @@ class Check(Plugin):
                     )
                 ]
             )
-        finally:
-            db.close()

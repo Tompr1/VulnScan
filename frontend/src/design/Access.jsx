@@ -392,7 +392,7 @@ function EffectiveAccessDrawer({ userId, close, onGrant }) {
 
 // ── Modals ──────────────────────────────────────────────────────────────────
 
-function Modal({ title, icon: I = Icons.Settings, close, onSubmit, submitting, error, submitLabel, children, width = 460,
+export function Modal({ title, icon: I = Icons.Settings, close, onSubmit, submitting, error, submitLabel, children, width = 460,
                  danger = false, canSubmit = true, submittingLabel = "Saving…" }) {
   return (
     <>
@@ -418,7 +418,7 @@ function Modal({ title, icon: I = Icons.Settings, close, onSubmit, submitting, e
   );
 }
 
-function useSubmit(action, onSaved) {
+export function useSubmit(action, onSaved) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const submit = async (e) => {

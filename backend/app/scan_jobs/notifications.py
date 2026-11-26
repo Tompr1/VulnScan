@@ -15,6 +15,8 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from app.inventory.alerts import AlertItem, InventoryAlert
+from app.probes.alerts import EVENT as PROBE_STATUS_EVENT
+from app.probes.alerts import ProbeStatusAlert
 from app.risk.severity import Severity
 from app.scanner import notifier
 
@@ -115,6 +117,8 @@ class NotificationChannel(Protocol):
 
     def device_alert(self, config: dict[str, Any], alert: InventoryAlert) -> None: ...
 
+    def probe_status(self, config: dict[str, Any], alert: ProbeStatusAlert) -> None: ...
+
 
 class SlackChannel:
     def __init__(self, send: Callable[[dict, Any], Any] = notifier.send_slack_notification) -> None:
@@ -187,6 +191,17 @@ class SlackChannel:
             ],
         })
 
+    def probe_status(self, config: dict[str, Any], alert: ProbeStatusAlert) -> None:
+        blocks: list[dict[str, Any]] = [
+            {"type": "header", "text": {"type": "plain_text", "text": alert.subject.removeprefix("v0cday: ")[:150]}},
+            _text_section("\n".join(_slack_escape(line) for line in alert.lines)),
+        ]
+        if alert.url:
+            blocks.append({"type": "actions", "elements": [{
+                "type": "button", "text": {"type": "plain_text", "text": "Open scan probes"}, "url": alert.url,
+            }]})
+        self._send(config, {"text": alert.subject, "blocks": blocks})
+
 
 class TeamsChannel:
     def __init__(self, send: Callable[[dict, Any], Any] = notifier.send_teams_notification) -> None:
@@ -238,6 +253,15 @@ class TeamsChannel:
             "Error": failure.error[:300],
         })
 
+    def probe_status(self, config: dict[str, Any], alert: ProbeStatusAlert) -> None:
+        self._send(config, {
+            "title": alert.subject,
+            "text": " ".join(alert.lines),
+            "Probe": alert.probe_name,
+            "Client": alert.client_name,
+            "State": alert.state,
+        })
+
 
 class WebhookChannel:
     def __init__(self, send: Callable[[dict, dict], Any] = notifier.send_webhook_notification) -> None:
@@ -280,6 +304,9 @@ class WebhookChannel:
             },
         })
 
+    def probe_status(self, config: dict[str, Any], alert: ProbeStatusAlert) -> None:
+        self._send(config, {"event": "probe_online" if alert.online else "probe_offline", "data": alert.webhook_payload()})
+
 
 class EmailChannel:
     def __init__(self, send: Callable[[dict, str, str], Any] = notifier.send_email_notification) -> None:
@@ -299,6 +326,12 @@ class EmailChannel:
         body = "\n".join([*lines, "", alert.footer])
         if alert.devices_url:
             body += f"\n\nDevice inventory: {alert.devices_url}"
+        self._send(config, alert.subject, body)
+
+    def probe_status(self, config: dict[str, Any], alert: ProbeStatusAlert) -> None:
+        body = "\n".join(alert.lines)
+        if alert.url:
+            body += f"\n\nScan probes: {alert.url}"
         self._send(config, alert.subject, body)
 
 
@@ -348,6 +381,9 @@ class ScanNotifier:
 
     def scan_failed(self, workspace_id: int, failure: ScanFailure) -> None:
         self._dispatch(workspace_id, ["scan_failed"], lambda ch, cfg: ch.scan_failed(cfg, failure))
+
+    def probe_status(self, workspace_id: int, alert: ProbeStatusAlert) -> None:
+        self._dispatch(workspace_id, [PROBE_STATUS_EVENT], lambda ch, cfg: ch.probe_status(cfg, alert))
 
     def device_alert(self, workspace_id: int, alert: InventoryAlert) -> None:
         """Each integration gets only the issues of the events it subscribed

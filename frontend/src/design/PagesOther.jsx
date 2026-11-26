@@ -1640,6 +1640,8 @@ const NOTIF_EVENTS = [
   { key: "device_vulnerability",  label: "Devices — known vulnerabilities (CVE)" },
   { key: "device_os_issue",       label: "Devices — OS out of support or not up to date" },
   { key: "device_software_issue", label: "Devices — software out of support or not up to date" },
+  // The client's scan probe stopped answering, or came back
+  { key: "probe_status",          label: "Scan probe offline / back online" },
 ];
 const NOTIF_CHANNELS = ["email", "slack", "webhook"];
 
