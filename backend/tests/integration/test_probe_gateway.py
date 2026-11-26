@@ -132,7 +132,7 @@ def test_un_mauvais_secret_n_authentifie_pas(p):
 def test_une_sonde_revoquee_ne_s_authentifie_plus_et_ne_peut_pas_etre_reenrolee(p):
     identite, authorization = p.sonde()
     registry = ProbeRegistry(p.db, TTL)
-    registry.revoke(p.db.get(models.Probe, identite.id))
+    registry.revoke(p.db.get(models.Probe, identite.id), p.horloge())
 
     assert p.gateway.authenticate(authorization, "ip") is None
     with pytest.raises(Exception, match="revoked"):

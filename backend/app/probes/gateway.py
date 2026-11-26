@@ -34,6 +34,7 @@ from app.cve.dataset_loader import load_json
 from app.cve.reference_datasets import enabled_dataset_paths
 from app.cve.sql_catalog import SqlCveCatalog, SqlSyncStateStore
 from app.db import models
+from app.probes import events
 from app.probes.placement import PROBE
 from app.probes.registry import ProbeRegistry
 from app.scan_jobs.assigner import JobAssigner, JobNotReady
@@ -118,11 +119,12 @@ class ProbeGateway:
             registry.seen(probe, self._clock(), ip, version=version)
             return _identity(probe)
 
-    def heartbeat(self, probe: ProbeIdentity, ip: str, hostname: str | None, version: str | None) -> None:
+    def heartbeat(self, probe: ProbeIdentity, ip: str, hostname: str | None, version: str | None,
+                  image: str | None = None, appliance_version: str | None = None) -> None:
         with self._session_factory() as db:
             row = db.get(models.Probe, probe.id)
             if row is not None:
-                self._registry(db).seen(row, self._clock(), ip, hostname, version)
+                self._registry(db).seen(row, self._clock(), ip, hostname, version, image, appliance_version)
 
     # ── Jobs ─────────────────────────────────────────────────────────────
 
@@ -139,6 +141,7 @@ class ProbeGateway:
                 return self._assigner.assignment_for(job, profile)
             except JobNotReady as unready:
                 self._reports.enqueue_report(job_id, ScanReport.failed(job_id, unready.failure).to_dict())
+                self._record(probe, events.JOB_REFUSED, unready.failure.error, job_id)
         return None
 
     def progress(self, probe: ProbeIdentity, job_id: int, document: Any) -> bool:
@@ -165,6 +168,8 @@ class ProbeGateway:
         self._require_own_running_job(probe, job_id)
         self._reports.enqueue_report(job_id, report.to_dict())
         logger.info("Report of job #%d from probe #%d queued (%d findings)", job_id, probe.id, len(report.findings))
+        outcome = f"failed: {report.failure.error}" if report.failure else f"{len(report.findings)} findings"
+        self._record(probe, events.REPORT_RECEIVED, outcome, job_id)
 
     # ── Reference data ───────────────────────────────────────────────────
 
@@ -215,8 +220,19 @@ class ProbeGateway:
                 db.commit()
                 if claimed == 1:
                     logger.info("Probe #%d claimed job #%d", probe.id, job_id)
+                    job = db.get(models.ScanJob, job_id)
+                    detail = f"{job.scan_type or 'internal'} scan of {job.target}" if job else ""
+                    events.record(db, db.get(models.Probe, probe.id), events.JOB_CLAIMED, self._clock(), detail, job_id)
+                    db.commit()
                     return job_id
         return None
+
+    def _record(self, probe: ProbeIdentity, kind: str, detail: str, job_id: int | None = None) -> None:
+        with self._session_factory() as db:
+            row = db.get(models.Probe, probe.id)
+            if row is not None:
+                events.record(db, row, kind, self._clock(), detail, job_id)
+                db.commit()
 
     def _require_own_running_job(self, probe: ProbeIdentity, job_id: int) -> None:
         with self._session_factory() as db:

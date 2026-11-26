@@ -103,3 +103,54 @@ export function cloudInitUserData({ platformUrl, token, probeName, localAllowlis
   }
   return lines.join("\n") + "\n";
 }
+
+// ── Operations ───────────────────────────────────────────────────────────────
+
+// Probe image against the one the platform asks for (PROBE_IMAGE).
+const IMAGE_STATUS = {
+  current:        { label: "up to date", pill: "done" },
+  update_pending: { label: "update pending", pill: "running" },
+  unknown:        { label: "image not reported", pill: "queued" },
+  unmanaged:      { label: "", pill: "" },
+};
+
+export function imageStatus(status) {
+  return IMAGE_STATUS[status] || IMAGE_STATUS.unknown;
+}
+
+/** "registry/v0cday-probe@sha256:abcdef…" → "v0cday-probe@abcdef123456". */
+export function shortImage(reference) {
+  if (!reference) return "";
+  const [name, digest] = reference.split("@sha256:");
+  const base = name.split("/").pop();
+  return digest ? `${base}@${digest.slice(0, 12)}` : base;
+}
+
+const EVENT_LABELS = {
+  created: "Created",
+  token_renewed: "New enrollment token",
+  enrolled: "Enrolled",
+  revoked: "Revoked",
+  job_claimed: "Took a scan",
+  job_refused: "Scan could not run",
+  report_received: "Sent its results",
+  image_changed: "Image changed",
+  offline: "Went offline",
+  online: "Back online",
+};
+
+export function eventLabel(kind) {
+  return EVENT_LABELS[kind] || kind;
+}
+
+/** Events that need attention, shown in red. */
+export function isAlarmEvent(kind) {
+  return kind === "offline" || kind === "revoked" || kind === "job_refused";
+}
+
+/** Counts for the Root overview: online, offline, pending enrollment. */
+export function probeCounts(probes) {
+  const counts = { online: 0, offline: 0, pending: 0 };
+  for (const p of probes || []) if (p.status in counts) counts[p.status] += 1;
+  return counts;
+}

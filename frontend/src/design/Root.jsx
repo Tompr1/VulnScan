@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Icons } from "./icons.jsx";
-import { accessApi, clientsApi, datasetsApi, settingsApi } from "../api.js";
+import { accessApi, clientsApi, datasetsApi, probesApi, settingsApi } from "../api.js";
 import { ClientBadge } from "./ClientPicker.jsx";
 import { ageText } from "./inventoryModel.js";
 import { filterClients } from "./routes.js";
 import { PlatformEnvironment, PlatformUpdates } from "./PagesOther.jsx";
+import { probeCounts } from "./probesModel.js";
 
 // Root: the platform itself, for super admins — like the root ADOM of
 // FortiManager. It holds no client data of its own: an overview of every
@@ -15,6 +16,7 @@ export function RootOverview({ openClient, setPage }) {
   const [clients, setClients] = useState(null);
   const [superAdmins, setSuperAdmins] = useState(null);
   const [datasets, setDatasets] = useState(null);
+  const [probes, setProbes] = useState(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
 
@@ -22,7 +24,9 @@ export function RootOverview({ openClient, setPage }) {
     clientsApi.overview().then(setClients).catch(e => { setError(e.message); setClients([]); });
     accessApi.users().then(users => setSuperAdmins(users.filter(u => u.is_global_admin).length)).catch(() => {});
     datasetsApi.list().then(setDatasets).catch(() => {});
+    probesApi.list().then(r => setProbes(r.probes)).catch(() => {});
   }, []);
+  const probeTotals = probeCounts(probes);
 
   const all = clients || [];
   const total = (pick) => all.reduce((sum, c) => sum + (pick(c) || 0), 0);
@@ -93,6 +97,20 @@ export function RootOverview({ openClient, setPage }) {
       </div>
 
       <div className="grid-2-eq" style={{marginTop: 16}}>
+        <div className="card">
+          <div className="card-head"><div><div className="card-title">Scan probes</div><div className="card-sub">VMs on the clients' networks.</div></div>
+            <button className="btn btn-sm" onClick={() => setPage("probes")}>Open</button>
+          </div>
+          <div className="card-body" style={{fontSize: 13, color: "var(--text-2)"}}>
+            {probes === null ? "…" : !probes.length ? "No probe yet." : (
+              <>
+                {probeTotals.online} online
+                {probeTotals.offline > 0 && <> · <span style={{color: "var(--err)", fontWeight: 600}}>{probeTotals.offline} offline</span></>}
+                {probeTotals.pending > 0 && <> · {probeTotals.pending} waiting for enrollment</>}
+              </>
+            )}
+          </div>
+        </div>
         <div className="card">
           <div className="card-head"><div><div className="card-title">Shared databases</div><div className="card-sub">Used by every client: CVE catalog, KEV, EPSS…</div></div>
             <button className="btn btn-sm" onClick={() => setPage("datasets")}>Manage</button>

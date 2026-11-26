@@ -82,6 +82,9 @@ class EnrollBody(BaseModel):
 class HeartbeatBody(BaseModel):
     hostname: str | None = Field(default=None, max_length=255)
     version: str | None = Field(default=None, max_length=64)
+    # The image the probe runs, and the appliance's version (appliances only).
+    image: str | None = Field(default=None, max_length=512)
+    appliance_version: str | None = Field(default=None, max_length=64)
 
 
 class CveLookupBody(BaseModel):
@@ -110,7 +113,7 @@ def heartbeat(
     probe: ProbeIdentity = Depends(require_probe),
     gateway: ProbeGateway = Depends(get_probe_gateway),
 ):
-    gateway.heartbeat(probe, client_ip(request), body.hostname, body.version)
+    gateway.heartbeat(probe, client_ip(request), body.hostname, body.version, body.image, body.appliance_version)
     return {"probe_id": probe.id, "workspace_id": probe.workspace_id,
             "server_time": datetime.now(timezone.utc).isoformat(),
             # The image the appliance's updater should run (pinned by digest).

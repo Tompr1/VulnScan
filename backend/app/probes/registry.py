@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.db import models
-from app.probes import secrets
+from app.probes import events, secrets
 
 PENDING, ACTIVE, REVOKED = "pending", "active", "revoked"
 ONLINE, OFFLINE = "online", "offline"
@@ -55,11 +55,13 @@ class ProbeRegistry:
         probe = models.Probe(workspace_id=workspace_id, name=name, status=PENDING, created_at=now)
         self._db.add(probe)
         self._db.flush()
+        events.record(self._db, probe, events.CREATED, now, f"name={name}")
         return self._issue_token(probe, now)
 
     def new_enrollment(self, probe: models.Probe, now: datetime) -> Enrollment:
         if probe.status == REVOKED:
             raise ProbeStateError("A revoked probe cannot be enrolled again: create a new one")
+        events.record(self._db, probe, events.TOKEN_RENEWED, now, "the next enrollment replaces the probe's secret")
         return self._issue_token(probe, now)
 
     def enroll(self, token: str, now: datetime, hostname: str, version: str, ip: str) -> tuple[models.Probe, str]:
@@ -79,6 +81,7 @@ class ProbeRegistry:
         probe.enrollment_expires_at = None
         probe.enrolled_at = now
         self._seen(probe, now, ip, hostname, version)
+        events.record(self._db, probe, events.ENROLLED, now, f"host={hostname or '?'} ip={ip} version={version or '?'}")
         self._db.commit()
         return probe, secret
 
@@ -91,11 +94,19 @@ class ProbeRegistry:
             return None
         return probe
 
-    def seen(self, probe: models.Probe, now: datetime, ip: str, hostname: str | None = None, version: str | None = None) -> None:
+    def seen(self, probe: models.Probe, now: datetime, ip: str, hostname: str | None = None, version: str | None = None,
+             image: str | None = None, appliance_version: str | None = None) -> None:
         self._seen(probe, now, ip, hostname, version)
+        if image and image[:512] != probe.image:
+            if probe.image:
+                events.record(self._db, probe, events.IMAGE_CHANGED, now, f"{probe.image} -> {image}")
+            probe.image = image[:512]
+        if appliance_version:
+            probe.appliance_version = appliance_version[:64]
         self._db.commit()
 
-    def revoke(self, probe: models.Probe) -> None:
+    def revoke(self, probe: models.Probe, now: datetime) -> None:
+        events.record(self._db, probe, events.REVOKED, now)
         probe.status = REVOKED
         probe.secret_hash = None
         probe.enrollment_token_hash = None

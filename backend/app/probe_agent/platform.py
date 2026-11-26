@@ -71,10 +71,13 @@ def open_http(base_url: str, ca_bundle: str | None = None, client_cert: str | No
 
 
 class PlatformClient:
-    def __init__(self, http: httpx.Client, authorization: str | None, version: str) -> None:
+    def __init__(self, http: httpx.Client, authorization: str | None, version: str,
+                 image: str | None = None, appliance_version: str | None = None) -> None:
         self._http = http
         self._authorization = authorization
         self._version = version
+        self._image = image
+        self._appliance_version = appliance_version
 
     # ── Identity ─────────────────────────────────────────────────────────
 
@@ -84,7 +87,10 @@ class PlatformClient:
         return Enrolled(int(data["probe_id"]), int(data["workspace_id"]), str(data.get("name") or ""), str(data["credential"]))
 
     def heartbeat(self, hostname: str | None = None) -> dict[str, Any]:
-        return self._call("POST", "/heartbeat", json={"hostname": hostname, "version": self._version})
+        return self._call("POST", "/heartbeat", json={
+            "hostname": hostname, "version": self._version,
+            "image": self._image, "appliance_version": self._appliance_version,
+        })
 
     # ── Jobs ─────────────────────────────────────────────────────────────
 

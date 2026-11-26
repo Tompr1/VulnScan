@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api import routes_probe_agent, routes_probes
+from app.api import routes_probe_agent, routes_probes, routes_scan
 from app.api.deps import get_db
 from app.api.validation import install_validation_error_handler
 from app.core.auth import require_auth
@@ -45,6 +45,7 @@ class Env:
         install_validation_error_handler(self.app)
         self.app.include_router(routes_probes.router)
         self.app.include_router(routes_probe_agent.router)
+        self.app.include_router(routes_scan.router)
 
         def test_db():
             with session_factory() as session:
@@ -273,3 +274,68 @@ def test_supprimer_une_sonde_garde_l_historique_de_ses_jobs(env):
     env.db.expire_all()
     assert env.db.get(models.ScanJob, 20).probe_id is None
     assert env.db.get(models.Probe, probe_id) is None
+
+
+# ── Exploitation : journal, versions, où un scan a tourné ─────────────────────
+
+DIGEST = "ghcr.io/msp/v0cday-probe@sha256:" + "a" * 64
+NEW_DIGEST = "ghcr.io/msp/v0cday-probe@sha256:" + "b" * 64
+
+
+def test_le_journal_d_une_sonde_raconte_sa_vie_du_plus_recent_au_plus_ancien(env):
+    # Arrange : créée, enrôlée, un job pris et rendu, puis révoquée.
+    probe_id, sonde = env.sonde_enrolee()
+    env.https.put(f"/probes/clients/{CLIENT}/execution", json={"scan_types": ["internal"]})
+    env.job_soumis(20)
+    env.https.get("/probe/v1/jobs/next", params={"wait": 0}, headers=sonde)
+    env.https.post("/probe/v1/jobs/20/report", json=ScanReport.succeeded(20, [finding("XSS")]).to_dict(), headers=sonde)
+    env.https.post(f"/probes/{probe_id}/revoke")
+
+    # Act
+    journal = env.https.get(f"/probes/{probe_id}/events").json()
+
+    # Assert
+    assert [e["kind"] for e in journal] == ["revoked", "report_received", "job_claimed", "enrolled", "created"]
+    assert journal[1]["detail"] == "1 findings" and journal[1]["job_id"] == 20
+    assert journal[2]["detail"] == "internal scan of 10.0.0.5"
+    assert "host=probe-01" in journal[3]["detail"]
+
+
+def test_la_sonde_declare_son_image_et_root_voit_si_elle_est_a_jour(env, monkeypatch):
+    probe_id, sonde = env.sonde_enrolee()
+    monkeypatch.setattr(settings, "PROBE_IMAGE", NEW_DIGEST)
+
+    env.https.post("/probe/v1/heartbeat", json={"image": DIGEST, "appliance_version": "1.0.0"}, headers=sonde)
+    avant = env.https.get("/probes").json()["probes"][0]
+    env.https.post("/probe/v1/heartbeat", json={"image": NEW_DIGEST}, headers=sonde)
+    apres = env.https.get("/probes").json()["probes"][0]
+
+    assert (avant["image"], avant["appliance_version"], avant["image_status"]) == (DIGEST, "1.0.0", "update_pending")
+    assert (apres["image"], apres["image_status"]) == (NEW_DIGEST, "current")
+    changement = env.https.get(f"/probes/{probe_id}/events").json()[0]
+    assert (changement["kind"], changement["detail"]) == ("image_changed", f"{DIGEST} -> {NEW_DIGEST}")
+
+
+@pytest.mark.parametrize(("running", "desired", "status"), [
+    (None, None, "unmanaged"), (DIGEST, None, "unmanaged"), (None, DIGEST, "unknown"),
+    (DIGEST, DIGEST, "current"), (DIGEST, NEW_DIGEST, "update_pending"),
+])
+def test_l_etat_de_l_image_compare_ce_qui_tourne_a_ce_qui_est_demande(running, desired, status):
+    assert routes_probes.image_status(running, desired) == status
+
+
+def test_le_client_voit_sur_quelle_sonde_ses_scans_ont_tourne(env):
+    _, sonde = env.sonde_enrolee()
+    env.https.put(f"/probes/clients/{CLIENT}/execution", json={"scan_types": ["internal"]})
+    env.job_soumis(20)
+    env.https.get("/probe/v1/jobs/next", params={"wait": 0}, headers=sonde)
+    env.db.add(models.ScanJob(id=21, workspace_id=CLIENT, target="10.0.0.6", profile_id=5, status="done",
+                              scan_type="external"))
+    env.db.commit()
+    env.connecte(ADMIN_CLIENT)
+
+    liste = {j["id"]: (j["runs_on"], j["probe_name"]) for j in env.https.get("/scan/jobs").json()}
+    detail = env.https.get("/scan/jobs/20").json()["job"]
+
+    assert liste == {20: ("probe", "site-paris"), 21: ("platform", None)}
+    assert (detail["runs_on"], detail["probe_name"]) == ("probe", "site-paris")

@@ -250,6 +250,7 @@ def list_jobs(
     if user_ids:
         for u in db.query(models.User).filter(models.User.id.in_(user_ids)).all():
             user_map[u.id] = u.email
+    probe_names = _probe_names(db, user["ws"], [r.probe_id for r in rows])
 
     return [
         {
@@ -264,9 +265,21 @@ def list_jobs(
             "finished_at": r.finished_at.isoformat() if r.finished_at else None,
             "meta_json": r.meta_json if r.status == "running" else None,
             "error_info": _extract_error_info(r.meta_json) if r.status == "failed" else None,
+            "runs_on": r.runs_on or "platform",
+            "probe_name": probe_names.get(r.probe_id),
         }
         for r in rows
     ]
+
+
+def _probe_names(db: Session, workspace_id: int, probe_ids) -> dict[int, str]:
+    """Names of the client's own probes among these ids."""
+    ids = {i for i in probe_ids if i}
+    if not ids:
+        return {}
+    rows = db.query(models.Probe.id, models.Probe.name).filter(
+        models.Probe.workspace_id == workspace_id, models.Probe.id.in_(ids))
+    return {row.id: row.name for row in rows}
 
 
 def _extract_error_info(meta_json: str | None) -> dict | None:
@@ -333,6 +346,9 @@ def job_detail(
             "finished_at": job.finished_at.isoformat() if job.finished_at else None,
             "meta_json": job.meta_json,
             "error_info": error_info,
+            # Where the scan ran: "platform", or "probe" (the client's probe, named).
+            "runs_on": job.runs_on or "platform",
+            "probe_name": _probe_names(db, user["ws"], [job.probe_id]).get(job.probe_id),
         },
         "findings": [
             {

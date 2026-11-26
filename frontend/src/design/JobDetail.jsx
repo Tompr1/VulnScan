@@ -82,6 +82,7 @@ export function JobDetail({ job: jobProp, back, openDrawer }) {
           <h1>{job.target}</h1>
           <div className="sub">
             {job.scan_type} scan
+            {job.runs_on === "probe" && <> · on probe {job.probe_name || "(removed)"}</>}
             {job.created_by && <> · by {job.created_by}</>}
             {job.created_at && <> · started {new Date(job.created_at).toLocaleString("en-US", {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"})}</>}
             {job.finished_at && <> · finished {new Date(job.finished_at).toLocaleString("en-US", {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"})}</>}

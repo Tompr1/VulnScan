@@ -230,3 +230,20 @@ def test_sans_jeton_l_enrolement_le_dit(tmp_path, monkeypatch):
     monkeypatch.delenv("V0CDAY_ENROLL_TOKEN", raising=False)
 
     assert cli.main(["--config", str(tmp_path / "p.json"), "enroll", "--platform", PLATFORM]) == cli.EXIT_ERROR
+
+
+def test_la_sonde_declare_l_image_et_la_version_d_appliance_qu_elle_fait_tourner(plateforme, db, tmp_path, monkeypatch):
+    app, _ = plateforme
+    admin = TestClient(app, base_url=PLATFORM)
+    monkeypatch.setattr(cli, "open_http", lambda *args, **kwargs: TestClient(app, base_url=PLATFORM))
+    token = admin.post("/probes", json={"workspace_id": CLIENT, "name": "Paris"}).json()["enrollment"]["token"]
+    config_path = tmp_path / "probe.json"
+    cli.main(["--config", str(config_path), "enroll", "--platform", PLATFORM, "--token", token])
+    (tmp_path / "appliance-version").write_text("1.2.0\n")
+    monkeypatch.setenv("V0CDAY_PROBE_IMAGE", "ghcr.io/msp/v0cday-probe@sha256:" + "c" * 64)
+
+    assert cli.main(["--config", str(config_path), "status"]) == 0
+
+    db.expire_all()
+    probe = db.query(models.Probe).one()
+    assert (probe.image, probe.appliance_version) == ("ghcr.io/msp/v0cday-probe@sha256:" + "c" * 64, "1.2.0")

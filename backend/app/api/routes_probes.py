@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_global_admin
 from app.core.config import settings
 from app.db import models
+from app.probes import events
 from app.probes.placement import DELEGABLE_SCAN_TYPES, PROBE, NotDelegableError, probe_scan_types, set_probe_scan_types
 from app.probes.registry import Enrollment, ProbeRegistry, ProbeStateError, display_status
 from app.scan_jobs.outcome import JobStatus
@@ -95,7 +96,7 @@ def renew_enrollment(probe_id: int, db: Session = Depends(get_db)):
 @router.post("/{probe_id}/revoke")
 def revoke_probe(probe_id: int, db: Session = Depends(get_db)):
     probe = _get(db, probe_id)
-    _registry(db).revoke(probe)
+    _registry(db).revoke(probe, _now())
     client = db.get(models.Workspace, probe.workspace_id)
     return _probe(probe, {probe.workspace_id: client.name if client else ""}, _now(), 0)
 
@@ -107,6 +108,16 @@ def delete_probe(probe_id: int, db: Session = Depends(get_db)):
     db.delete(probe)
     db.commit()
     return {"deleted": probe_id}
+
+
+@router.get("/{probe_id}/events")
+def probe_events(probe_id: int, limit: int = Query(default=200, ge=1, le=1000), db: Session = Depends(get_db)):
+    """The probe's history, newest first."""
+    _get(db, probe_id)
+    return [
+        {"id": e.id, "kind": e.kind, "job_id": e.job_id, "detail": e.detail, "at": _iso(e.at)}
+        for e in events.history(db, probe_id, limit)
+    ]
 
 
 @router.put("/clients/{workspace_id}/execution")
@@ -144,7 +155,22 @@ def _probe(probe: models.Probe, client_names: dict[int, str], now: datetime, run
         "enrollment_expires_at": _iso(probe.enrollment_expires_at),
         "created_at": _iso(probe.created_at),
         "running_jobs": running_jobs,
+        "image": probe.image,
+        "appliance_version": probe.appliance_version,
+        "image_status": image_status(probe.image, settings.PROBE_IMAGE.strip() or None),
+        "offline_since": _iso(probe.offline_since),
     }
+
+
+def image_status(running: str | None, desired: str | None) -> str:
+    """current: runs the image the platform asks for; update_pending: it
+    should move to another one (its updater does within the hour, if it
+    trusts it); unknown: it does not say; unmanaged: no image is asked."""
+    if not desired:
+        return "unmanaged"
+    if not running:
+        return "unknown"
+    return "current" if running == desired else "update_pending"
 
 
 def _enrollment(enrollment: Enrollment) -> dict:

@@ -126,7 +126,7 @@ def _run(args: argparse.Namespace) -> int:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, stopping.set)
         with _http(config) as http:
-            client = PlatformClient(http, config.authorization, settings.PLATFORM_VERSION)
+            client = _client(http, config, args.config)
             await asyncio.to_thread(client.heartbeat, socket.gethostname())
             agent = ProbeAgent(client, RemoteReferenceData(client, state / "reference"), probe_executors,
                                ReportOutbox(state / "outbox"), config.local_allowlist)
@@ -144,7 +144,7 @@ def _run(args: argparse.Namespace) -> int:
 def _status(args: argparse.Namespace) -> int:
     config = ProbeConfig.load(args.config)
     with _http(config) as http:
-        answer = PlatformClient(http, config.authorization, settings.PLATFORM_VERSION).heartbeat(socket.gethostname())
+        answer = _client(http, config, args.config).heartbeat(socket.gethostname())
     print(f"Probe #{answer['probe_id']} '{config.name}' of client #{answer['workspace_id']}: "
           f"connected to {config.platform_url} (platform time {answer['server_time']})."
           + (f" Local scope: {config.local_allowlist}." if config.local_allowlist else ""))
@@ -155,9 +155,24 @@ def _desired_image(args: argparse.Namespace) -> int:
     """Prints only the image reference (or nothing), for scripts."""
     config = ProbeConfig.load(args.config)
     with _http(config) as http:
-        answer = PlatformClient(http, config.authorization, settings.PLATFORM_VERSION).heartbeat(socket.gethostname())
+        answer = _client(http, config, args.config).heartbeat(socket.gethostname())
     print(answer.get("desired_image") or "")
     return EXIT_OK
+
+
+def _client(http, config: ProbeConfig, config_path: Path) -> PlatformClient:
+    """The probe's client, telling the platform which image and appliance
+    version it runs (set by the appliance; absent on a plain Docker install)."""
+    return PlatformClient(http, config.authorization, settings.PLATFORM_VERSION,
+                          image=os.environ.get("V0CDAY_PROBE_IMAGE") or None,
+                          appliance_version=_appliance_version(config_path))
+
+
+def _appliance_version(config_path: Path) -> str | None:
+    try:
+        return (config_path.parent / "appliance-version").read_text().strip()[:64] or None
+    except OSError:
+        return None
 
 
 def _http(config: ProbeConfig):

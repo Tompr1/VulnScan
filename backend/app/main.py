@@ -282,6 +282,13 @@ def _run_migrations(db: Session) -> None:
         """
         CREATE INDEX IF NOT EXISTS ix_scan_jobs_probe_id ON scan_jobs (probe_id);
         """,
+        # Probe versions and offline tracking (probe_events: create_all).
+        """
+        ALTER TABLE probes
+            ADD COLUMN IF NOT EXISTS image VARCHAR(512),
+            ADD COLUMN IF NOT EXISTS appliance_version VARCHAR(64),
+            ADD COLUMN IF NOT EXISTS offline_since TIMESTAMPTZ;
+        """,
     ]
     for sql in migrations:
         try:
@@ -430,6 +437,21 @@ def healthz():
 import asyncio as _asyncio
 import threading as _threading
 
+def _build_probe_watch():
+    from app.probes.watch import ProbeWatch
+    from app.scan_jobs.notifications import ScanNotifier
+    from app.scan_jobs.repository import SqlIntegrationSource
+
+    base = settings.public_url
+    return ProbeWatch(
+        SessionLocal,
+        ScanNotifier(SqlIntegrationSource(SessionLocal)),
+        lambda: datetime.now(timezone.utc),
+        timedelta(minutes=settings.PROBE_OFFLINE_ALERT_MINUTES),
+        f"{base}/#/root/probes" if base else None,
+    )
+
+
 def _schedule_loop():
     """Background thread that checks for due scan schedules every 60s."""
     import os
@@ -442,6 +464,7 @@ def _schedule_loop():
     from app.core.job_queue import get_job_queue
 
     logger.info("Scheduler started")
+    probe_watch = _build_probe_watch()
 
     # Counters for time-gated features
     _sla_check_counter = 0       # run every 60 ticks  (60 min)
@@ -504,6 +527,12 @@ def _schedule_loop():
                 except Exception as e:
                     logger.warning("Schedule #%d failed: %s", sched.id, e)
                     db.rollback()
+            # ── Scan probes gone offline, or back ───────────────────────
+            try:
+                probe_watch.check()
+            except Exception as e_probes:
+                logger.warning("Probe watch failed: %s", e_probes)
+
             # ── Stale scan job detection ───────────────────────────────
             # RQ SIGKILLs a work-horse that overruns SCAN_JOB_TIMEOUT. A
             # SIGKILLed process runs no Python, so run_scan_job's own error

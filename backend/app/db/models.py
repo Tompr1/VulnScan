@@ -484,3 +484,22 @@ class Probe(Base):
     version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    # Reported by the probe: the image it runs, and its appliance's version.
+    image: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    appliance_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Set when the platform said the probe went offline; cleared when it is back.
+    offline_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ProbeEvent(Base):
+    """What happened to a probe: enrollment, jobs claimed and reported,
+    revocation, image changes, offline periods. Append-only."""
+
+    __tablename__ = "probe_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    probe_id: Mapped[int] = mapped_column(ForeignKey("probes.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("scan_jobs.id", ondelete="SET NULL"), nullable=True)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)

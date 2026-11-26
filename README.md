@@ -508,6 +508,13 @@ only connects out to the platform over HTTPS — the client opens no port.
   further by the client (`--local-allowlist`).
 - The probe API (`/probe/v1`) is refused over plain HTTP
   (`PROBE_REQUIRE_HTTPS`, see `.env.example`).
+- Root › Scan probes shows each probe's state, agent and appliance versions,
+  whether it runs the image rolled out (`PROBE_IMAGE`), and its history
+  (enrollment, scans taken and reported, image changes, offline periods).
+  When a probe stays silent `PROBE_OFFLINE_ALERT_MINUTES`, the client's
+  integrations are told, and told again when it is back (notification
+  event *Scan probe offline / back online*). A job's page says which probe
+  ran it.
 - For clients, a ready-made VM — the **appliance** (OVA, VHDX, qcow2) —
   enrolls itself at first boot from a configuration downloaded in Root, opens
   no port, and updates its probe image only to images signed by the MSP:

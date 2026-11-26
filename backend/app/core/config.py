@@ -79,6 +79,9 @@ class Settings(BaseModel):
     PROBE_ENROLLMENT_TTL_HOURS: int = int(os.getenv("PROBE_ENROLLMENT_TTL_HOURS", "24"))
     # A probe not heard from for longer is shown offline.
     PROBE_ONLINE_SECONDS: int = int(os.getenv("PROBE_ONLINE_SECONDS", "120"))
+    # Silence after which the client is told its probe is offline (once),
+    # then told again when it is back.
+    PROBE_OFFLINE_ALERT_MINUTES: int = int(os.getenv("PROBE_OFFLINE_ALERT_MINUTES", "10"))
     # The probe image every probe should run, pinned by digest
     # (registry/v0cday-probe@sha256:...). Probes read it in their heartbeat;
     # each appliance's updater pulls it, checks its signature, and switches.

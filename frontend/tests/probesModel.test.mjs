@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  applianceHostname, clientsWithoutProbe, cloudInitUserData, enrollCommand, probeStatus, seenText, toggledScanTypes,
+  applianceHostname, clientsWithoutProbe, cloudInitUserData, enrollCommand, eventLabel, imageStatus, isAlarmEvent,
+  probeCounts, probeStatus, seenText, shortImage, toggledScanTypes,
 } from "../src/design/probesModel.js";
 
 const DELEGABLE = ["internal", "external", "api"];
@@ -91,4 +92,29 @@ test("le nom d'hôte de l'appliance vient du nom de la sonde", () => {
   assert.equal(applianceHostname("Siège Lyon / DC-2"), "v0cday-probe-siege-lyon-dc-2");
   assert.equal(applianceHostname(""), "v0cday-probe");
   assert.ok(applianceHostname("x".repeat(100)).length <= 63);
+});
+
+test("l'état de l'image dit si la sonde est à jour", () => {
+  assert.deepEqual(imageStatus("current"), { label: "up to date", pill: "done" });
+  assert.equal(imageStatus("update_pending").label, "update pending");
+  assert.equal(imageStatus("unmanaged").label, "");
+  assert.equal(imageStatus("inattendu").label, "image not reported");
+});
+
+test("une image épinglée s'affiche en court", () => {
+  assert.equal(shortImage("ghcr.io/msp/v0cday-probe@sha256:" + "abcdef123456" + "0".repeat(52)), "v0cday-probe@abcdef123456");
+  assert.equal(shortImage("v0cday-probe:appliance"), "v0cday-probe:appliance");
+  assert.equal(shortImage(null), "");
+});
+
+test("le journal se lit en mots, les alertes en rouge", () => {
+  assert.equal(eventLabel("job_claimed"), "Took a scan");
+  assert.equal(eventLabel("nouveau"), "nouveau");
+  assert.deepEqual(["offline", "online", "revoked", "job_refused"].map(isAlarmEvent), [true, false, true, true]);
+});
+
+test("la vue d'ensemble compte les sondes par état", () => {
+  const probes = [{ status: "online" }, { status: "online" }, { status: "offline" }, { status: "pending" }, { status: "revoked" }];
+
+  assert.deepEqual(probeCounts(probes), { online: 2, offline: 1, pending: 1 });
 });

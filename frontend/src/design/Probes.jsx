@@ -3,8 +3,8 @@ import { Icons } from "./icons.jsx";
 import { probesApi } from "../api.js";
 import { Modal, useSubmit } from "./Access.jsx";
 import {
-  SCAN_TYPE_LABELS, applianceHostname, clientsWithoutProbe, cloudInitUserData, enrollCommand, probeStatus, seenText,
-  toggledScanTypes,
+  SCAN_TYPE_LABELS, applianceHostname, clientsWithoutProbe, cloudInitUserData, enrollCommand, eventLabel, imageStatus,
+  isAlarmEvent, probeStatus, seenText, shortImage, toggledScanTypes,
 } from "./probesModel.js";
 
 // Root > Scan probes: the VMs installed on clients' networks. A probe only
@@ -82,22 +82,34 @@ export function Probes() {
             <div className="empty"><div className="empty-body" style={{margin: "0 auto"}}>No probe yet. Create one for a client, then enroll the VM with its token.</div></div>
           ) : (
             <table className="tbl">
-              <thead><tr><th>Probe</th><th>Client</th><th>Status</th><th>Host</th><th>Last seen</th><th className="num">Scans</th><th style={{width: 120}}/></tr></thead>
+              <thead><tr><th>Probe</th><th>Client</th><th>Status</th><th>Host</th><th>Versions</th><th>Last seen</th><th className="num">Scans</th><th style={{width: 150}}/></tr></thead>
               <tbody>
                 {probes.map(p => {
                   const status = probeStatus(p.status);
+                  const image = imageStatus(p.image_status);
                   return (
                     <tr key={p.id}>
                       <td style={{color: "var(--text-0)", fontWeight: 500}}>{p.name}</td>
                       <td>{p.client_name}</td>
-                      <td><span className={`status ${status.pill}`}>{status.label}</span></td>
+                      <td>
+                        <span className={`status ${status.pill}`}>{status.label}</span>
+                        {p.offline_since && <div className="muted" style={{fontSize: 11}} title={p.offline_since}>client alerted {seenText(p.offline_since)}</div>}
+                      </td>
                       <td className="muted" style={{fontSize: 12}}>
-                        {p.hostname || "—"}{p.version ? <span className="mono"> · v{p.version}</span> : null}
+                        {p.hostname || "—"}
                         {p.last_seen_ip && p.last_seen_ip !== "unknown" ? <div className="mono" style={{fontSize: 11}}>{p.last_seen_ip}</div> : null}
+                      </td>
+                      <td className="muted" style={{fontSize: 12}}>
+                        {p.version ? <span className="mono">agent v{p.version}</span> : "—"}
+                        {p.appliance_version && <div className="mono" style={{fontSize: 11}}>appliance {p.appliance_version}</div>}
+                        {p.image && <div className="mono" style={{fontSize: 11}} title={p.image}>{shortImage(p.image)}</div>}
+                        {image.label && <span className={`status ${image.pill}`} style={{fontSize: 11}}>{image.label}</span>}
                       </td>
                       <td className="muted" style={{fontSize: 12}} title={p.last_seen_at || ""}>{seenText(p.last_seen_at)}</td>
                       <td className="num">{p.running_jobs}</td>
                       <td style={{whiteSpace: "nowrap", textAlign: "right"}}>
+                        <button className="btn btn-ghost btn-icon btn-sm" title="History" aria-label="History"
+                                onClick={() => setModal({ kind: "history", probe: p })}><Icons.Clock size={13}/></button>
                         {p.status !== "revoked" && (
                           <button className="btn btn-ghost btn-icon btn-sm" title="New enrollment token (reinstalled VM)" aria-label="New enrollment token"
                                   onClick={() => renew(p)}><Icons.Key size={13}/></button>
@@ -156,6 +168,7 @@ export function Probes() {
                           onCreated={async (created) => { setModal({ kind: "token", probe: created, enrollment: created.enrollment }); await refresh(); }}/>
       )}
       {modal?.kind === "token" && <TokenModal probe={modal.probe} enrollment={modal.enrollment} close={() => setModal(null)}/>}
+      {modal?.kind === "history" && <HistoryModal probe={modal.probe} close={() => setModal(null)}/>}
       {modal?.kind === "revoke" && (
         <ConfirmModal title={`Revoke ${modal.probe.name}`} danger submitLabel="Revoke" close={() => setModal(null)}
                       action={() => probesApi.revoke(modal.probe.id)} onDone={async () => { setModal(null); await refresh(); }}>
@@ -263,6 +276,35 @@ function TokenModal({ probe, enrollment, close }) {
           </button>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+function HistoryModal({ probe, close }) {
+  const [events, setEvents] = useState(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    probesApi.events(probe.id).then(setEvents).catch(e => { setError(e.message); setEvents([]); });
+  }, [probe.id]);
+  return (
+    <Modal title={`History of ${probe.name}`} icon={Icons.Clock} close={close} onSubmit={(e) => { e.preventDefault(); close(); }}
+           submitLabel="Close" width={640} error={error}>
+      {events === null ? <div className="muted">Loading…</div> : !events.length ? <div className="muted">Nothing recorded yet.</div> : (
+        <table className="tbl" style={{fontSize: 12}}>
+          <thead><tr><th style={{width: 150}}>When</th><th style={{width: 160}}>Event</th><th>Detail</th></tr></thead>
+          <tbody>
+            {events.map(e => (
+              <tr key={e.id}>
+                <td className="muted" title={e.at}>{e.at ? new Date(e.at).toLocaleString() : ""}</td>
+                <td style={{color: isAlarmEvent(e.kind) ? "var(--err)" : "var(--text-0)"}}>{eventLabel(e.kind)}</td>
+                <td className="mono" style={{fontSize: 11, wordBreak: "break-all"}}>
+                  {e.job_id ? <span>job #{e.job_id} · </span> : null}{e.detail}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </Modal>
   );
 }

@@ -203,6 +203,11 @@ class SpyChannel:
             raise self._error
         self.alerts.append((config, alert))
 
+    def probe_status(self, config: dict, alert: Any) -> None:
+        if self._error:
+            raise self._error
+        self.alerts.append((config, alert))
+
 
 class SpyNotifier:
     """Stands in for ScanNotifier in runner tests."""
@@ -219,6 +224,9 @@ class SpyNotifier:
         self.failed.append((workspace_id, failure))
 
     def device_alert(self, workspace_id: int, alert: Any) -> None:
+        self.alerts.append((workspace_id, alert))
+
+    def probe_status(self, workspace_id: int, alert: Any) -> None:
         self.alerts.append((workspace_id, alert))
 
 

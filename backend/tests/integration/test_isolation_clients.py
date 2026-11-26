@@ -289,6 +289,8 @@ def donnees(db, workspace, tmp_path):
     db.flush()
     db.add_all([
         models.InventoryDeviceApp(device_id=V.appareil, name="logiciel-voisin", version="1.0"),
+        models.ProbeEvent(probe_id=V.sonde, workspace_id=VOISIN, kind="job_claimed", job_id=V.job,
+                          detail="scan de srv.voisin.example", at=maintenant),
         models.InventoryDeviceChange(device_id=V.appareil, kind="app_added", subject="logiciel-voisin",
                                      detected_at=maintenant),
     ])
