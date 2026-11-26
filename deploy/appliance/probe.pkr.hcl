@@ -83,8 +83,8 @@ source "qemu" "probe" {
 
   cd_label = "cidata"
   cd_content = {
-    "meta-data" = file("${path.root}/build/meta-data")
-    "user-data" = templatefile("${path.root}/build/user-data.pkrtpl", { password = local.build_password })
+    "meta-data" = file("${path.root}/cloud-init/meta-data")
+    "user-data" = templatefile("${path.root}/cloud-init/user-data.pkrtpl", { password = local.build_password })
   }
 
   ssh_username     = "packer"
