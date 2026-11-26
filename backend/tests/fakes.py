@@ -18,6 +18,7 @@ from typing import Any
 
 from app.core.job_queue import QueueUnavailableError
 from app.scan_jobs.notifications import Integration, ScanFailure, ScanSummary
+from app.scan_jobs.assignment import ScanAssignment
 from app.scan_jobs.processing import ProcessedFinding
 from app.scan_jobs.repository import JobCompletion, JobFailure, ScanJobSnapshot
 from app.scanner.context import ScanContext
@@ -257,6 +258,12 @@ class InMemoryScanJobRepository:
     def mark_running(self, job_id: int, at: datetime) -> None:
         self.jobs[job_id].status, self.jobs[job_id].started_at = "running", at
 
+    def start_processing(self, job_id: int) -> bool:
+        if self.jobs[job_id].status != "running":
+            return False
+        self.jobs[job_id].status = "processing"
+        return True
+
     def mark_failed(self, job_id: int, failure: JobFailure, at: datetime) -> None:
         if self.fail_on_mark_failed:
             raise RuntimeError("database unavailable")
@@ -298,10 +305,16 @@ class StubExecutor:
         self.ai_analysis = ai_analysis
         self._findings = findings or []
         self._error = error
-        self.received_profiles: list[ScanProfile] = []
+        self.received_assignments: list[ScanAssignment] = []
+        self.received_resources: list[ScanResources] = []
 
-    async def execute(self, job: ScanJobSnapshot, profile: ScanProfile, progress) -> list[Finding]:
-        self.received_profiles.append(profile)
+    @property
+    def received_profiles(self) -> list[ScanProfile]:
+        return [assignment.profile for assignment in self.received_assignments]
+
+    async def execute(self, assignment: ScanAssignment, resources: ScanResources, progress) -> list[Finding]:
+        self.received_assignments.append(assignment)
+        self.received_resources.append(resources)
         await progress(0, 1, "stub", "Stub", "running")
         if self._error:
             raise self._error

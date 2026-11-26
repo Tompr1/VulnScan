@@ -7,7 +7,7 @@ import pytest
 from app.cve.matcher import InMemoryCveCatalog
 from app.db import models
 from app.scanner.resources import CredentialError, CredentialLabel, ScanCredential
-from app.scanner.sql_resources import SqlCredentialVault, SqlReferenceData, SqlScanResources
+from app.scanner.sql_resources import SqlCredentialVault, SqlReferenceData
 
 
 def chiffrer(valeur: str) -> str:
@@ -69,13 +69,6 @@ def test_le_coffre_ignore_une_phrase_de_passe_indechiffrable(session_factory, db
 
 def test_le_coffre_ne_liste_que_les_identifiants_du_client(session_factory, identifiants):
     assert coffre(session_factory).labels() == [CredentialLabel(10, "linux"), CredentialLabel(11, "web")]
-
-
-def test_chaque_scan_recoit_les_identifiants_de_son_client(session_factory, identifiants):
-    ressources = SqlScanResources(session_factory, decrypt=dechiffrer)
-
-    assert ressources(2).credentials.get(20).secret == "pw2"
-    assert ressources(1).credentials.get(20) is None
 
 
 def test_les_jeux_de_reference_actifs_sont_lus_du_plus_recent_au_plus_ancien(session_factory, db):

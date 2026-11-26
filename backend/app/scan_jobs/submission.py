@@ -15,11 +15,9 @@ from sqlalchemy.orm import Session
 
 from app.core.job_queue import QueueUnavailableError, ScanJobQueue
 from app.db import models
+from app.scan_jobs.assignment import INVENTORY_CONNECTION_KEY
 
 logger = logging.getLogger(__name__)
-
-# Key of the job metadata naming the inventory connection to collect.
-INVENTORY_CONNECTION_KEY = "inventory_connection_id"
 
 QUEUE_DOWN_DETAIL = (
     "Could not submit the scan job to the task queue. The Redis worker may be "

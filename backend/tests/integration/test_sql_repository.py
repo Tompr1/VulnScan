@@ -62,6 +62,24 @@ def test_le_cycle_de_vie_d_un_job_est_persiste(repository, job, db):
     assert json.loads(row.meta_json) == {"findings_total": 4, "findings_saved": 3, "findings_dropped": 1, "min_confidence_threshold": 0.2}
 
 
+def test_seul_le_premier_passage_en_traitement_d_un_job_en_cours_reussit(repository, job, db):
+    repository.mark_running(10, NOW)
+
+    results = (repository.start_processing(10), repository.start_processing(10))
+
+    db.expire_all()
+    assert results == (True, False)
+    assert db.get(models.ScanJob, 10).status == "processing"
+
+
+@pytest.mark.parametrize("status", ["queued", "done", "failed", "cancelled"])
+def test_un_job_qui_n_est_pas_en_cours_ne_passe_pas_en_traitement(repository, job, db, status):
+    db.get(models.ScanJob, 10).status = status
+    db.commit()
+
+    assert repository.start_processing(10) is False
+
+
 def test_un_echec_conserve_le_detail_et_une_trace_tronquee(repository, job, db):
     repository.mark_failed(10, JobFailure("boom", "scan_engine", "detail", "x" * 5000), NOW)
 

@@ -611,6 +611,9 @@ table { border-collapse: collapse; width: 100%; }
 }
 .status.running::before { background: var(--brand); animation: pulse 1.4s ease-in-out infinite; }
 .status.running { color: var(--brand-text); }
+/* processing: the scan is over, its findings are being scored and saved */
+.status.processing::before { background: var(--brand); animation: pulse 1.4s ease-in-out infinite; }
+.status.processing { color: var(--brand-text); }
 .status.done::before    { background: var(--ok); }
 .status.done    { color: var(--ok); }
 .status.failed::before  { background: var(--err); }

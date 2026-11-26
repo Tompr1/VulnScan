@@ -50,24 +50,15 @@ async def test_un_plugin_lit_les_artefacts_publies_par_ses_dependances():
     assert seen["ports"] == [80, 443]
 
 
-async def test_le_contexte_porte_les_ressources_du_client_scanne():
+async def test_le_contexte_porte_les_ressources_donnees_au_scan():
     # Arrange
-    requested = []
     resources = scan_resources(credential(3))
     plugin = FakePlugin(meta("p"))
-    engine = ScanEngine(
-        registry=PluginRegistry([plugin]),
-        allowlist=AllowlistPolicy.from_setting(""),
-        budget=ScanBudget(total_seconds=900, kill_grace_seconds=0),
-        request_timeout_seconds=5,
-        resources=lambda workspace_id: requested.append(workspace_id) or resources,
-    )
 
     # Act
-    await engine.scan(TARGET, ScanProfile(), workspace_id=7)
+    await scan(make_engine(plugin), resources=resources)
 
     # Assert
-    assert requested == [7]
     assert plugin.contexts[0].resources is resources
 
 

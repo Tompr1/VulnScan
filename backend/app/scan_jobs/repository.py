@@ -22,15 +22,13 @@ from app.cve.dataset_loader import load_json
 from app.cve.reference_datasets import enabled_dataset_paths
 from app.db import models
 from app.scan_jobs.notifications import Integration
+from app.scan_jobs.outcome import JobCompletion, JobFailure, JobStatus
 from app.scan_jobs.processing import ProcessedFinding
 from app.scanner.profile import ScanProfile
 
 logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], Session]
-
-_MAX_TRACEBACK_CHARS = 2000
-
 
 @dataclass(frozen=True)
 class ScanJobSnapshot:
@@ -64,44 +62,16 @@ class ScanJobSnapshot:
         return config if isinstance(config, dict) else {}
 
 
-@dataclass(frozen=True)
-class JobFailure:
-    error: str
-    error_type: str
-    detail: str | None = None
-    traceback: str | None = None
-
-    def to_meta(self) -> dict[str, Any]:
-        meta: dict[str, Any] = {"error": self.error[:500], "error_type": self.error_type}
-        if self.detail:
-            meta["error_detail"] = self.detail
-        if self.traceback:
-            meta["traceback"] = self.traceback[:_MAX_TRACEBACK_CHARS]
-        return meta
-
-
-@dataclass(frozen=True)
-class JobCompletion:
-    findings_total: int
-    findings_saved: int
-    findings_dropped: int
-    min_confidence_threshold: float
-
-    def to_meta(self) -> dict[str, Any]:
-        return {
-            "findings_total": self.findings_total,
-            "findings_saved": self.findings_saved,
-            "findings_dropped": self.findings_dropped,
-            "min_confidence_threshold": self.min_confidence_threshold,
-        }
-
-
 class ScanJobRepository(Protocol):
     def load_job(self, job_id: int) -> ScanJobSnapshot | None: ...
 
     def load_profile(self, workspace_id: int, profile_id: int | None) -> ScanProfile | None: ...
 
     def mark_running(self, job_id: int, at: datetime) -> None: ...
+
+    def start_processing(self, job_id: int) -> bool:
+        """Move a running job to processing; False when it is not running
+        (results already received, or the job was failed meanwhile)."""
 
     def mark_failed(self, job_id: int, failure: JobFailure, at: datetime) -> None: ...
 
@@ -153,16 +123,28 @@ class SqlScanJobRepository:
     def mark_running(self, job_id: int, at: datetime) -> None:
         # Stamped here, not at creation: the stale-job watchdog must measure how
         # long the job has been running, not how long it waited in the queue.
-        self._update_job(job_id, status="running", started_at=at)
+        self._update_job(job_id, status=JobStatus.RUNNING.value, started_at=at)
+
+    def start_processing(self, job_id: int) -> bool:
+        # One conditional UPDATE: of two deliveries of the same results, only
+        # one sees the job still running.
+        with self._session_factory() as db:
+            changed = (
+                db.query(models.ScanJob)
+                .filter(models.ScanJob.id == job_id, models.ScanJob.status == JobStatus.RUNNING.value)
+                .update({"status": JobStatus.PROCESSING.value})
+            )
+            db.commit()
+        return changed == 1
 
     def mark_failed(self, job_id: int, failure: JobFailure, at: datetime) -> None:
-        self._update_job(job_id, status="failed", finished_at=at, meta_json=json.dumps(failure.to_meta()))
+        self._update_job(job_id, status=JobStatus.FAILED.value, finished_at=at, meta_json=json.dumps(failure.to_meta()))
 
     def mark_done(self, job_id: int, completion: JobCompletion, at: datetime) -> None:
-        self._update_job(job_id, status="done", finished_at=at, meta_json=json.dumps(completion.to_meta()))
+        self._update_job(job_id, status=JobStatus.DONE.value, finished_at=at, meta_json=json.dumps(completion.to_meta()))
 
     def mark_analyzing(self, job_id: int) -> None:
-        self._update_job(job_id, status="analyzing")
+        self._update_job(job_id, status=JobStatus.ANALYZING.value)
 
     def write_progress(self, job_id: int, progress_json: str) -> None:
         self._update_job(job_id, meta_json=progress_json)

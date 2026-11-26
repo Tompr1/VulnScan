@@ -15,7 +15,7 @@ from app.cve.dataset_loader import load_json
 from app.cve.matcher import CveCatalog
 from app.cve.reference_datasets import enabled_dataset_paths
 from app.db import models
-from app.scanner.resources import CredentialError, CredentialLabel, ScanCredential, ScanResources
+from app.scanner.resources import CredentialError, CredentialLabel, ScanCredential
 
 SessionFactory = Callable[[], Session]
 
@@ -103,14 +103,3 @@ class SqlReferenceData:
     def cve_catalog(self) -> CveCatalog:
         return cve_catalog(self._session_factory, self._load_dataset)
 
-
-class SqlScanResources:
-    """Factory of the resources of each client's scan."""
-
-    def __init__(self, session_factory: SessionFactory, decrypt: Callable[[str], str] = decrypt_str) -> None:
-        self._session_factory = session_factory
-        self._decrypt = decrypt
-        self._reference = SqlReferenceData(session_factory)
-
-    def __call__(self, workspace_id: int) -> ScanResources:
-        return ScanResources(SqlCredentialVault(self._session_factory, workspace_id, self._decrypt), self._reference)

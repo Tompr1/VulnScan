@@ -8,14 +8,15 @@ themselves, so the same plugins can run where there is no database at all
 provides its own implementation:
 
 - the platform reads them from its database (``app.scanner.sql_resources``);
-- tests, and later a probe, provide them from memory.
+- a scan receives the credentials its profile names with its assignment
+  (``app.scan_jobs.assignment``), held in memory.
 
 The credentials a scan receives are already bound to one client: a plugin
 cannot ask for another client's credential, whatever id a profile names.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -81,19 +82,35 @@ class ScanResources:
         return cls(InMemoryCredentialVault(), InMemoryReferenceData())
 
 
-# The resources of one client's scan, from its workspace id.
-ScanResourcesFactory = Callable[[int], ScanResources]
-
-
 class InMemoryCredentialVault:
-    def __init__(self, credentials: Iterable[ScanCredential] = ()) -> None:
+    """Credentials held in memory.
+
+    ``labels`` lists every credential of the client (default: the ones held);
+    ``errors`` gives, by id, why a credential could not be read: ``get``
+    raises :class:`CredentialError` for those, as the database vault does.
+    """
+
+    def __init__(
+        self,
+        credentials: Iterable[ScanCredential] = (),
+        labels: Iterable[CredentialLabel] | None = None,
+        errors: Mapping[int, str] | None = None,
+    ) -> None:
         self._credentials = {credential.id: credential for credential in credentials}
+        self._labels = list(labels) if labels is not None else [CredentialLabel(c.id, c.name) for c in self._credentials.values()]
+        self._errors = dict(errors or {})
 
     def get(self, credential_id: int) -> ScanCredential | None:
+        try:
+            credential_id = int(credential_id)
+        except (TypeError, ValueError):
+            return None
+        if credential_id in self._errors:
+            raise CredentialError(self._errors[credential_id])
         return self._credentials.get(credential_id)
 
     def labels(self) -> list[CredentialLabel]:
-        return [CredentialLabel(c.id, c.name) for c in self._credentials.values()]
+        return list(self._labels)
 
 
 class InMemoryReferenceData:

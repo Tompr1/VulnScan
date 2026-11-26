@@ -2,13 +2,13 @@
 Scan engine — runs the plugins enabled by a profile against one target.
 
 The engine receives every collaborator it needs (plugin registry, allowlist,
-time budget, cancellation signal, clock). Production wiring lives in
-:func:`default_engine`; tests build an engine from fakes.
+time budget, cancellation signal, clock), and each scan the resources of its
+client. The platform wires it in ``app.worker_tasks``; tests build one from
+fakes.
 """
 from __future__ import annotations
 
 import asyncio
-import functools
 import inspect
 import logging
 import time
@@ -16,16 +16,15 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from app.core.config import settings
 from app.scanner.allowlist import AllowlistPolicy, AllowlistSource
 from app.scanner.budget import ScanBudget
-from app.scanner.cancellation import CancellationSignal, NeverCancelled, RedisCancellationSignal
+from app.scanner.cancellation import CancellationSignal, NeverCancelled
 from app.scanner.context import ScanContext, ScanPolicy, stable_fingerprint
 from app.scanner.plugins.base import Finding, Plugin
-from app.scanner.plugins.loader import PluginRegistry, builtin_registry
+from app.scanner.plugins.loader import PluginRegistry
 from app.scanner.profile import ScanProfile
 from app.scanner.remediation import enrich_description, enrich_remediation
-from app.scanner.resources import ScanResources, ScanResourcesFactory
+from app.scanner.resources import ScanResources
 from app.scanner.target import ScanTarget, ScanType
 
 logger = logging.getLogger(__name__)
@@ -49,7 +48,6 @@ class ScanEngine:
         request_timeout_seconds: float,
         cancellation: CancellationSignal | None = None,
         monotonic: Callable[[], float] = time.monotonic,
-        resources: ScanResourcesFactory | None = None,
     ) -> None:
         self._registry = registry
         self._allowlist = allowlist
@@ -57,7 +55,6 @@ class ScanEngine:
         self._request_timeout_seconds = request_timeout_seconds
         self._cancellation = cancellation or NeverCancelled()
         self._monotonic = monotonic
-        self._resources = resources or (lambda _workspace_id: ScanResources.none())
 
     async def scan(
         self,
@@ -67,8 +64,12 @@ class ScanEngine:
         scan_type: ScanType = ScanType.INTERNAL,
         progress_callback: ProgressCallback | None = None,
         job_id: int | None = None,
+        resources: ScanResources | None = None,
     ) -> list[Finding]:
         """Run the profile's plugins and return deduplicated, enriched findings.
+
+        ``resources`` are the scanned client's credentials and the reference
+        data; without them, plugins that need them skip.
 
         Raises :class:`app.scanner.target.InvalidTargetError` for a target
         without a host.
@@ -86,7 +87,7 @@ class ScanEngine:
             target=scan_target,
             scan_type=scan_type,
             plugin_ids=self._registry.resolve_enabled(profile.plugin_selection),
-            context=self._new_context(scan_target, profile, workspace_id, scan_type),
+            context=self._new_context(scan_target, profile, workspace_id, scan_type, resources),
             progress=_ProgressReporter(progress_callback),
             job_id=job_id,
         )
@@ -97,12 +98,14 @@ class ScanEngine:
         return findings
 
     def _new_context(
-        self, target: ScanTarget, profile: ScanProfile, workspace_id: int, scan_type: ScanType
+        self,
+        target: ScanTarget,
+        profile: ScanProfile,
+        workspace_id: int,
+        scan_type: ScanType,
+        resources: ScanResources | None,
     ) -> ScanContext:
-        ctx = ScanContext(
-            policy=ScanPolicy(timeout_seconds=self._request_timeout_seconds),
-            resources=self._resources(workspace_id),
-        )
+        ctx = ScanContext(policy=ScanPolicy(timeout_seconds=self._request_timeout_seconds), resources=resources)
         ctx.set("workspace_id", workspace_id)
         ctx.set("target_raw", target.raw)
         ctx.set("target_host", target.host)
@@ -313,19 +316,3 @@ class _ProgressReporter:
         except Exception as exc:  # progress is cosmetic: never fail the scan on it
             logger.warning("Progress callback failed at %s/%s: %s", plugin_id, status, exc)
 
-
-@functools.lru_cache(maxsize=1)
-def default_engine() -> ScanEngine:
-    """Engine wired with the built-in plugins and the application settings."""
-    from app.db.session import SessionLocal
-    from app.scanner.client_allowlists import SqlClientAllowlists
-    from app.scanner.sql_resources import SqlScanResources
-
-    return ScanEngine(
-        registry=builtin_registry(),
-        allowlist=SqlClientAllowlists(SessionLocal, platform_default=settings.ALLOWLIST),
-        budget=ScanBudget(total_seconds=float(settings.SCAN_BUDGET_SECONDS)),
-        request_timeout_seconds=float(settings.SCAN_TIMEOUT_SECONDS),
-        cancellation=RedisCancellationSignal.from_url(settings.REDIS_URL),
-        resources=SqlScanResources(SessionLocal),
-    )

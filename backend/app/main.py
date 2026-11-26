@@ -500,7 +500,8 @@ def _schedule_loop():
             stale_jobs = (
                 db.query(models.ScanJob)
                 .filter(
-                    models.ScanJob.status.in_(["queued", "running"]),
+                    # "processing": the worker died while saving the findings.
+                    models.ScanJob.status.in_(["queued", "running", "processing"]),
                     or_(
                         and_(
                             models.ScanJob.started_at.isnot(None),

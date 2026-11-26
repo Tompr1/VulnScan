@@ -97,3 +97,18 @@ def test_le_controle_voit_un_import_de_la_base_fait_dans_une_fonction_d_un_modul
     assert chains["app.db.session"] == [
         "app.scanner.plugins.fake", "app.scanner.helper", "app.db.session",
     ]
+
+
+# La moitié « exécution » d'un job (ce que fera la sonde) : recevoir une
+# affectation, lancer le bon exécuteur, rendre compte de la progression et
+# renvoyer un rapport.
+EXECUTION_SIDE = ("app.scan_jobs.execution", "app.scan_jobs.assignment", "app.scan_jobs.progress")
+
+
+@pytest.mark.parametrize("module", EXECUTION_SIDE)
+def test_l_execution_d_un_job_ne_depend_ni_de_la_base_ni_du_chiffrement(module):
+    chains = _import_chains(module)
+
+    violations = [" -> ".join(chain) for name, chain in chains.items() if _forbidden(name)]
+
+    assert violations == []

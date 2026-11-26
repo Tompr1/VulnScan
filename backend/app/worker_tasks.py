@@ -10,7 +10,7 @@ import http.client
 import json
 import logging
 from datetime import datetime, timezone
-from functools import partial
+from functools import lru_cache, partial
 
 from redis import Redis
 
@@ -40,8 +40,13 @@ from app.scan_jobs.notifications import ScanNotifier
 from app.scan_jobs.processing import FindingProcessor
 from app.scan_jobs.repository import ScanJobSnapshot, SqlIntegrationSource, SqlScanJobRepository
 from app.scan_jobs.runner import ScanJobRunner
-from app.scanner.engine import default_engine
+from app.scanner.budget import ScanBudget
+from app.scanner.cancellation import RedisCancellationSignal
+from app.scanner.client_allowlists import SqlClientAllowlists
+from app.scanner.engine import ScanEngine
+from app.scanner.plugins.loader import builtin_registry
 from app.scanner.profile import ScanProfile
+from app.scanner.sql_resources import SqlCredentialVault, SqlReferenceData
 from app.scanner.target import ScanType
 
 if not logging.getLogger().handlers:
@@ -100,12 +105,24 @@ def build_cve_catalog_sync() -> NvdCatalogSync:
     )
 
 
+@lru_cache(maxsize=1)
+def build_scan_engine() -> ScanEngine:
+    """Engine wired with the built-in plugins and the application settings."""
+    return ScanEngine(
+        registry=builtin_registry(),
+        allowlist=SqlClientAllowlists(SessionLocal, platform_default=settings.ALLOWLIST),
+        budget=ScanBudget(total_seconds=float(settings.SCAN_BUDGET_SECONDS)),
+        request_timeout_seconds=float(settings.SCAN_TIMEOUT_SECONDS),
+        cancellation=RedisCancellationSignal.from_url(settings.REDIS_URL),
+    )
+
+
 def build_scan_job_runner() -> ScanJobRunner:
     repository = SqlScanJobRepository(SessionLocal)
     notifier = ScanNotifier(SqlIntegrationSource(SessionLocal))
     return ScanJobRunner(
         repository=repository,
-        executors=default_executors(default_engine, lambda: InventoryCollector(SessionLocal), build_inventory_audit),
+        executors=default_executors(build_scan_engine, lambda: InventoryCollector(SessionLocal), build_inventory_audit),
         processor_factory=partial(_build_finding_processor, repository, _open_cvss_enricher()),
         notifier=notifier,
         graph_factory=open_finding_graph,
@@ -113,6 +130,8 @@ def build_scan_job_runner() -> ScanJobRunner:
         announcers={
             ScanType.INVENTORY: InventoryAlerter(SqlAlertHistory(SessionLocal), notifier, DeviceLinks(settings.public_url)),
         },
+        credentials=lambda workspace_id: SqlCredentialVault(SessionLocal, workspace_id),
+        reference=SqlReferenceData(SessionLocal),
     )
 
 
