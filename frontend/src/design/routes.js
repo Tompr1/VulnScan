@@ -21,6 +21,14 @@ export const ROOT_DEFAULT_PAGE = "overview";
 
 // Pages that lived in each client before Root existed: old links open them in Root.
 const MOVED_TO_ROOT = new Set(["datasets", "access"]);
+// Pages of a client only its admins open: an analyst or a viewer lands on
+// the dashboard instead.
+const ADMIN_PAGES = new Set(["settings"]);
+
+/** May this session open this page of its client? */
+export function canOpenPage(user, page) {
+  return !ADMIN_PAGES.has(page) || user?.role === "admin" || !!user?.is_global_admin;
+}
 
 /** "#/root/<page>", or "#/c/<client>/<page>[/devices/<id>]" */
 export function routeHash({ root = false, clientId = null, page, deviceId = null }) {
@@ -91,6 +99,7 @@ export function resolveRoute(route, user) {
   if (!route || route.clientId == null) {
     return { action: "redirect", hash: routeHash({ clientId: current, page: route?.page, deviceId: route?.deviceId }) };
   }
+  if (!canOpenPage(user, route.page)) return { action: "redirect", hash: routeHash({ clientId: current }) };
   return { action: "show", route };
 }
 

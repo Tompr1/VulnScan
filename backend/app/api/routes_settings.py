@@ -48,7 +48,7 @@ class AllowlistUpdate(BaseModel):
 
 
 @router.get("/allowlist")
-def get_allowlist(user=Depends(require_role("admin", "analyst", "viewer")), db: Session = Depends(get_db)):
+def get_allowlist(user=Depends(require_role("admin")), db: Session = Depends(get_db)):
     """Return the client's allowlist as structured data."""
     own = client_allowlist(db, user["ws"])
     if own is None:
@@ -514,7 +514,7 @@ DEFAULT_SLA = {
 
 
 @router.get("/sla")
-def get_sla(user=Depends(require_role("admin", "analyst", "viewer")), db: Session = Depends(get_db)):
+def get_sla(user=Depends(require_role("admin")), db: Session = Depends(get_db)):
     return get_workspace_setting(db, user["ws"], "sla", DEFAULT_SLA)
 
 
@@ -527,7 +527,7 @@ class SLAUpdate(BaseModel):
 
 
 @router.put("/sla")
-def put_sla(body: SLAUpdate, user=Depends(require_role("admin", "analyst")), db: Session = Depends(get_db)):
+def put_sla(body: SLAUpdate, user=Depends(require_role("admin")), db: Session = Depends(get_db)):
     current = get_workspace_setting(db, user["ws"], "sla", DEFAULT_SLA)
     incoming = body.dict(exclude_unset=True)
     current.update(incoming)
@@ -536,7 +536,7 @@ def put_sla(body: SLAUpdate, user=Depends(require_role("admin", "analyst")), db:
 
 
 @router.post("/sla/reset")
-def reset_sla(user=Depends(require_role("admin", "analyst")), db: Session = Depends(get_db)):
+def reset_sla(user=Depends(require_role("admin")), db: Session = Depends(get_db)):
     set_workspace_setting(db, user["ws"], "sla", DEFAULT_SLA)
     return DEFAULT_SLA
 
@@ -550,7 +550,7 @@ _VALID_NOTIF_CHANNELS = {"email", "slack", "webhook"}
 
 @router.get("/notifications")
 def get_notification_prefs(
-    user=Depends(require_role("admin", "analyst", "viewer")),
+    user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     return notification_preferences(db, user["ws"])
@@ -559,7 +559,7 @@ def get_notification_prefs(
 @router.put("/notifications")
 def put_notification_prefs(
     body: dict,
-    user=Depends(require_role("admin", "analyst")),
+    user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     # Validate: only known event keys with known channel bools
@@ -583,7 +583,7 @@ def put_notification_prefs(
 
 @router.post("/notifications/reset")
 def reset_notification_prefs(
-    user=Depends(require_role("admin", "analyst")),
+    user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     set_workspace_setting(db, user["ws"], "notification_preferences", DEFAULT_NOTIFICATION_PREFS)
@@ -601,7 +601,7 @@ DEFAULT_AUTO_AI = {
 
 @router.get("/auto-ai")
 def get_auto_ai(
-    user=Depends(require_role("admin", "analyst", "viewer")),
+    user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     """Return auto AI analysis configuration."""
@@ -645,7 +645,7 @@ class AutoAIUpdate(BaseModel):
 @router.put("/auto-ai")
 def put_auto_ai(
     body: AutoAIUpdate,
-    user=Depends(require_role("admin", "analyst")),
+    user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     """Update auto AI analysis configuration."""
@@ -672,7 +672,7 @@ DEFAULT_SLA_ALERT = {
 
 @router.get("/sla-alert")
 def get_sla_alert(
-    user=Depends(require_role("admin", "analyst", "viewer")),
+    user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     return get_workspace_setting(db, user["ws"], "sla_breach_alert", DEFAULT_SLA_ALERT)
@@ -686,7 +686,7 @@ class SLAAlertUpdate(BaseModel):
 @router.put("/sla-alert")
 def put_sla_alert(
     body: SLAAlertUpdate,
-    user=Depends(require_role("admin", "analyst")),
+    user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     current = get_workspace_setting(db, user["ws"], "sla_breach_alert", DEFAULT_SLA_ALERT)
@@ -744,7 +744,7 @@ DEFAULT_AUTO_REPORT = {
 
 @router.get("/auto-report")
 def get_auto_report(
-    user=Depends(require_role("admin", "analyst", "viewer")),
+    user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     """Return auto report generation configuration."""
@@ -759,7 +759,7 @@ class AutoReportUpdate(BaseModel):
 @router.put("/auto-report")
 def put_auto_report(
     body: AutoReportUpdate,
-    user=Depends(require_role("admin", "analyst")),
+    user=Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     """Update auto report generation configuration."""

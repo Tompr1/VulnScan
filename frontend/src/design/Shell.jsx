@@ -2,6 +2,7 @@ import React, { useState, useEffect, Fragment } from "react";
 import { Icons } from "./icons.jsx";
 import { eventsApi, getUser, isGlobalAdmin } from "../api.js";
 import { ClientBadge, RootBadge } from "./ClientPicker.jsx";
+import { canOpenPage } from "./routes.js";
 
 // Pages of a client.
 const CLIENT_NAV = (counts) => [
@@ -42,7 +43,10 @@ const ROOT_NAV = (counts) => [
 ];
 
 export function Nav({ page, setPage, onSignOut, counts = {}, version = "", root = false }) {
-  const NAV_ITEMS = (root ? ROOT_NAV : CLIENT_NAV)(counts);
+  // Settings: for the client's admins only.
+  const NAV_ITEMS = (root ? ROOT_NAV : CLIENT_NAV)(counts)
+    .map(g => ({ ...g, items: g.items.filter(i => root || canOpenPage(getUser(), i.id)) }))
+    .filter(g => g.items.length);
 
   return (
     <aside className="nav">
@@ -112,7 +116,7 @@ function NavUser({ onSignOut, setPage }) {
             <div className="nav-user-name">{email.split("@")[0]}</div>
             <div style={{fontSize: 11.5, color: "var(--text-3)", marginTop: 2}}>{email}</div>
           </div>
-          {setPage && (
+          {setPage && canOpenPage(u, "settings") && (
             <>
               <button className="nav-user-menu-item" onClick={() => { setOpen(false); setPage("settings", "users"); }}>
                 <Icons.User size={13}/> My profile

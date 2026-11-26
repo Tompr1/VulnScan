@@ -6,6 +6,7 @@ import {
   clientHue,
   clientInitials,
   filterClients,
+  canOpenPage,
   isRootSession,
   parseRoute,
   resolveRoute,
@@ -146,4 +147,16 @@ test("la recherche filtre les clients par nom, sans tenir compte de la casse", (
 
   assert.deepEqual(filterClients(clients, " acme ").map(c => c.id), [1, 3]);
   assert.equal(filterClients(clients, "").length, 3);
+});
+
+test("les paramètres d'un client sont réservés à son admin", () => {
+  for (const role of ["analyst", "viewer"]) {
+    const user = { workspace_id: 2, role };
+    assert.equal(canOpenPage(user, "settings"), false, role);
+    assert.deepEqual(resolveRoute(parseRoute("#/c/2/settings"), user), { action: "redirect", hash: "#/c/2/dashboard" });
+    assert.equal(canOpenPage(user, "jobs"), true);
+  }
+  const route = parseRoute("#/c/2/settings");
+  assert.deepEqual(resolveRoute(route, { workspace_id: 2, role: "admin" }), { action: "show", route });
+  assert.deepEqual(resolveRoute(route, { workspace_id: 2, role: "viewer", is_global_admin: true }), { action: "show", route });
 });

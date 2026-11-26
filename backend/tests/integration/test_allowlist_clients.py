@@ -95,7 +95,7 @@ def test_chaque_client_lit_sa_propre_allowlist(client, session_de):
     client.put("/settings/allowlist", json={"allowlist": "192.168.0.0/16,.client.example"})
 
     vue_du_client = client.get("/settings/allowlist").json()
-    client.app.dependency_overrides[require_auth] = lambda: session_de(VOISIN, "viewer", email="lecteur@voisin.example")
+    client.app.dependency_overrides[require_auth] = lambda: session_de(VOISIN, "admin", email="admin@voisin.example")
     vue_du_voisin = client.get("/settings/allowlist").json()
 
     assert vue_du_client == {
