@@ -34,6 +34,7 @@ from app.api.routes_access import router as access_router
 from app.api.routes_probes import router as probes_router
 from app.api.routes_probe_agent import router as probe_agent_router
 from app.api.validation import install_validation_error_handler
+from app.core.production import check_production_settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("v0cday")
@@ -307,6 +308,8 @@ def _ensure_first_client(db: Session) -> None:
 
 @app.on_event("startup")
 def startup() -> None:
+    # First: in production, an unsafe setting stops the platform here.
+    check_production_settings(settings)
     Base.metadata.create_all(bind=engine)
 
     db: Session = SessionLocal()

@@ -1,0 +1,151 @@
+# v0cday master in production.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Differences with docker-compose.yml (development):
+# - one entry point, Caddy, on 80/443 with TLS (deploy/master/Caddyfile);
+#   the UI is built, not served by the Vite dev server;
+# - Postgres, Redis and Neo4j publish no port; Redis requires a password;
+# - the API is published on 127.0.0.1 only (health checks, bootstrap);
+# - code is baked in the images: no source mount, no --reload;
+# - APP_ENV=production: the API refuses to start with an unsafe setting.
+# Same project name and volumes as development: switching keeps the data.
+name: v0cday-platform
+
+x-backend: &backend
+  image: v0cday-backend:latest
+  env_file: [.env]
+  environment: &backend-env
+    APP_ENV: production
+    REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
+  depends_on:
+    db: {condition: service_healthy}
+    redis: {condition: service_healthy}
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  logging: &logging
+    driver: json-file
+    options: {max-size: "20m", max-file: "5"}
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+    volumes: [db_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  neo4j:
+    image: neo4j:5
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:?set NEO4J_AUTH in .env}
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes: [neo4j_data:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  backend:
+    <<: *backend
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    volumes:
+      - ./data:/data
+      - ${CLAUDE_PROFILE_DIR:-./data/claude-config}:/root/.claude
+    # Loopback only: reached from the network through Caddy.
+    ports: ["127.0.0.1:${BACKEND_PORT:-8888}:8888"]
+    # One process: the API process also runs the scheduler (main.py), which
+    # must not run twice.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8888"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8888/healthz')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker-scan:
+    <<: *backend
+    pull_policy: never
+    volumes:
+      - ./data:/data
+      - ./scripts:/scripts:ro
+      - ${CLAUDE_PROFILE_DIR:-./data/claude-config}:/root/.claude
+    command: >
+      sh -c 'for i in $$(seq 1 $${SCAN_WORKERS:-1}); do
+        rq worker --url "$$REDIS_URL" scans &
+      done; wait'
+
+  worker-ai:
+    <<: *backend
+    pull_policy: never
+    volumes:
+      - ./data:/data
+      - ./scripts:/scripts:ro
+      - ${CLAUDE_PROFILE_DIR:-./data/claude-config}:/root/.claude
+    command: >
+      sh -c 'for i in $$(seq 1 $${AI_WORKERS:-2}); do
+        rq worker --url "$$REDIS_URL" ai &
+      done; wait'
+
+  worker-data:
+    <<: *backend
+    pull_policy: never
+    volumes:
+      - ./data:/data
+      - ./scripts:/scripts:ro
+    command: ["sh", "-c", "rq worker --url \"$$REDIS_URL\" datasets"]
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    image: v0cday-web:latest
+    restart: unless-stopped
+    depends_on:
+      backend: {condition: service_healthy}
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST in .env (domain name or IP of the platform)}
+      CADDY_TLS: ${CADDY_TLS:-internal}
+      BACKEND_UPSTREAM: backend:8888
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./deploy/master/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data        # certificates, and the internal CA's root
+      - caddy_config:/config
+    logging: *logging
+
+volumes:
+  db_data:
+  neo4j_data:
+  caddy_data:
+  caddy_config:

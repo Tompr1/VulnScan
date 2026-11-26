@@ -33,6 +33,9 @@ if _AI_STALE_AFTER <= _AI_ANALYSIS_TIMEOUT:
 
 
 class Settings(BaseModel):
+    # "production" makes the platform refuse to start with an unsafe setting
+    # (app/core/production.py). docker-compose.prod.yml sets it.
+    APP_ENV: str = os.getenv("APP_ENV", "development")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-CHANGE-ME")
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", "postgresql+psycopg2://app:app@localhost:5432/app"

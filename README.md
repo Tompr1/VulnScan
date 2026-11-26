@@ -135,6 +135,18 @@ cd VulnScan
 2. Visit **Threat Intel** to confirm the catalog populated
 3. Create a scan profile under **Profiles**, then launch a scan from **Scan Jobs**
 
+### Production
+
+`docker-compose.yml` is the **development** stack (Vite dev server, source
+mounted, `--reload`). In production use `docker-compose.prod.yml`: HTTPS on
+443 through Caddy as the only entry point, databases unreachable from the
+network, Redis with a password, and an API that refuses to start with a
+default secret or password — see [`deploy/master/README.md`](deploy/master/README.md):
+
+```bash
+DEPLOY_STACK=prod PUBLIC_HOST=soc.example scripts/deploy.sh "$PWD"
+```
+
 ---
 
 ## Application Menu

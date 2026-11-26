@@ -1,0 +1,13 @@
+# Production web entry point: the built UI served by Caddy, which terminates
+# TLS and forwards the API (deploy/master/Caddyfile, mounted at run time).
+FROM node:24-slim AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --no-audit --no-fund
+COPY . .
+# Same-origin API calls: the browser talks to the proxy only.
+ENV VITE_API_URL=
+RUN npx vite build
+
+FROM caddy:2.8
+COPY --from=build /app/dist /srv

@@ -7,6 +7,8 @@ name: Deploy
 # Settings → Secrets and variables → Actions → Variables:
 #   DEPLOY_BRANCH  branch to deploy                 (default: main)
 #   PUBLIC_HOST    VM address used in the URLs     (default: 192.168.2.11)
+#   DEPLOY_STACK   dev (Vite :5173, API :8888) or prod (HTTPS :443 through
+#                  Caddy, docker-compose.prod.yml)  (default: dev)
 
 on:
   push:
@@ -27,7 +29,7 @@ jobs:
       cancel-in-progress: false
     environment:
       name: lab-vm
-      url: http://${{ vars.PUBLIC_HOST || '192.168.2.11' }}:5173
+      url: ${{ vars.DEPLOY_STACK == 'prod' && format('https://{0}', vars.PUBLIC_HOST || '192.168.2.11') || format('http://{0}:5173', vars.PUBLIC_HOST || '192.168.2.11') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,3 +37,4 @@ jobs:
         run: bash scripts/deploy.sh "$GITHUB_WORKSPACE"
         env:
           PUBLIC_HOST: ${{ vars.PUBLIC_HOST || '192.168.2.11' }}
+          DEPLOY_STACK: ${{ vars.DEPLOY_STACK || 'dev' }}
