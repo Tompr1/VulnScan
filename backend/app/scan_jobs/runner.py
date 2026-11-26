@@ -29,17 +29,18 @@ from datetime import datetime, timezone
 from typing import Any, Protocol, TypeVar
 
 from app.scan_jobs.ai_trigger import AutoAnalysisTrigger
-from app.scan_jobs.assignment import ScanAssignment, ScanReport, assign
-from app.scan_jobs.execution import ScanExecution, executor_for, unknown_scan_type
+from app.scan_jobs.assigner import JobAssigner, JobNotReady, VaultFactory
+from app.scan_jobs.assignment import ScanReport
+from app.scan_jobs.execution import ScanExecution, executor_for
 from app.scan_jobs.executors import ScanExecutor
 from app.scan_jobs.graph import FindingGraph
 from app.scan_jobs.notifications import ScanFailure, ScanNotifier, ScanSummary, build_summary
-from app.scan_jobs.outcome import JobCompletion, JobFailure
+from app.scan_jobs.outcome import JobCompletion, JobFailure, unknown_scan_type
 from app.scan_jobs.processing import FindingProcessor, ProcessedFinding, ProcessingReport
 from app.scan_jobs.progress import ThrottledProgressWriter
 from app.scan_jobs.repository import ScanJobRepository, ScanJobSnapshot
 from app.scanner.profile import ScanProfile
-from app.scanner.resources import CredentialVault, InMemoryCredentialVault, ReferenceData
+from app.scanner.resources import InMemoryCredentialVault, ReferenceData
 from app.scanner.target import ScanType
 
 logger = logging.getLogger(__name__)
@@ -47,21 +48,11 @@ logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
 
 ProcessorFactory = Callable[[ScanJobSnapshot, ScanProfile], FindingProcessor]
-# The credentials of one client, from its workspace id.
-VaultFactory = Callable[[int], CredentialVault]
 
 
 class CompletionAnnouncer(Protocol):
     def announce(self, job: ScanJobSnapshot, findings: Sequence[ProcessedFinding], summary: ScanSummary) -> Any:
         """Tell the workspace about a finished job (instead of "scan completed")."""
-
-
-class _Unready(Exception):
-    """The job cannot be scanned (unknown type, profile gone)."""
-
-    def __init__(self, failure: JobFailure) -> None:
-        super().__init__(failure.error)
-        self.failure = failure
 
 
 def _utc_now() -> datetime:
@@ -91,7 +82,7 @@ class ScanJobRunner:
         self._ai_trigger = ai_trigger
         self._clock = clock
         self._announcers = dict(announcers or {})
-        self._credentials = credentials or (lambda _workspace_id: InMemoryCredentialVault())
+        self._assigner = JobAssigner(repository, credentials or (lambda _workspace_id: InMemoryCredentialVault()))
 
     # ── Use cases ────────────────────────────────────────────────────────
 
@@ -122,7 +113,7 @@ class ScanJobRunner:
 
     def _run(self, job: ScanJobSnapshot) -> None:
         profile = self._profile_for(job)
-        assignment = self._assign(job, profile)
+        assignment = self._assigner.assignment_for(job, profile)
         self._repository.mark_running(job.id, self._clock())
         logger.info("Starting scan job #%d target=%s type=%s", job.id, job.target, job.scan_type)
         progress = ThrottledProgressWriter(lambda document: self._repository.write_progress(job.id, document))
@@ -132,7 +123,7 @@ class ScanJobRunner:
     def _guarded(self, job: ScanJobSnapshot, step: Callable[[], _T]) -> _T | None:
         try:
             return step()
-        except _Unready as unready:
+        except JobNotReady as unready:
             self._fail(job, unready.failure)
         except Exception as exc:  # last resort: a job must never stay "running"
             logger.exception("Unhandled error in scan job #%d", job.id)
@@ -145,12 +136,6 @@ class ScanJobRunner:
         finally:
             self._delete_ephemeral_credential(job)
         return None
-
-    def _assign(self, job: ScanJobSnapshot, profile: ScanProfile) -> ScanAssignment:
-        return assign(
-            job.id, job.workspace_id, job.target, job.scan_type, profile, job.meta,
-            self._credentials(job.workspace_id),
-        )
 
     def _finalize(self, job: ScanJobSnapshot, profile: ScanProfile, report: ScanReport) -> bool:
         # A report, success or failure, is accepted once and only for a
@@ -192,31 +177,19 @@ class ScanJobRunner:
     def _executor_for(self, job: ScanJobSnapshot) -> ScanExecutor:
         executor = executor_for(self._executors, job.scan_type)
         if executor is None:
-            raise _Unready(unknown_scan_type(job.scan_type))
+            raise JobNotReady(unknown_scan_type(job.scan_type))
         return executor
 
     def _profile_for(self, job: ScanJobSnapshot) -> ScanProfile:
-        if not self._executor_for(job).requires_profile:
-            profile: ScanProfile | None = ScanProfile()
-        else:
-            profile = self._repository.load_profile(job.workspace_id, job.profile_id)
-        if profile is None:
-            raise _Unready(JobFailure(
-                error="Profile not found",
-                error_type="configuration",
-                detail=(
-                    f"Profile ID {job.profile_id} does not exist in workspace {job.workspace_id}. "
-                    "Create a scan profile first under Configuration -> Profiles."
-                ),
-            ))
-        return profile.with_web_auth(job.web_auth)
+        self._executor_for(job)  # a type this platform cannot run fails first
+        return self._assigner.profile_for(job)
 
     def _profile_after_scan(self, job: ScanJobSnapshot) -> ScanProfile:
         """The profile used to process findings that arrive after the scan:
         one deleted in the meantime must not cost the results."""
         try:
             return self._profile_for(job)
-        except _Unready:
+        except JobNotReady:
             self._executor_for(job)  # an unknown scan type still fails the job
             logger.warning("Profile of job #%d is gone: its findings are processed with defaults", job.id)
             return ScanProfile().with_web_auth(job.web_auth)

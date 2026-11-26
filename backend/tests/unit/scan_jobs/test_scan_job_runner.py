@@ -151,7 +151,7 @@ def test_un_job_dont_le_profil_a_disparu_echoue_en_erreur_de_configuration():
 
 
 def test_un_scan_api_n_a_pas_besoin_de_profil():
-    h = Harness(executor=StubExecutor(requires_profile=False))
+    h = Harness()
     h.add_job(scan_type="api", profile_id=None, with_profile=False)
 
     h.runner.run(10)

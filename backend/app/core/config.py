@@ -68,6 +68,15 @@ class Settings(BaseModel):
     )
     REPORTS_DIR: str = os.getenv("REPORTS_DIR", "/data/reports")
 
+    # Scan probes. A probe receives the credentials of its scans in clear:
+    # its API is refused over plain HTTP unless this is turned off (lab
+    # without TLS). HTTPS is recognised from the request itself or from
+    # X-Forwarded-Proto sent by a TRUSTED_PROXIES proxy.
+    PROBE_REQUIRE_HTTPS: bool = os.getenv("PROBE_REQUIRE_HTTPS", "true").lower() in ("true", "1", "yes")
+    PROBE_ENROLLMENT_TTL_HOURS: int = int(os.getenv("PROBE_ENROLLMENT_TTL_HOURS", "24"))
+    # A probe not heard from for longer is shown offline.
+    PROBE_ONLINE_SECONDS: int = int(os.getenv("PROBE_ONLINE_SECONDS", "120"))
+
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "password")

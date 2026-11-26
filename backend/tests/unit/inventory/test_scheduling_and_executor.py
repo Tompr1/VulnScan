@@ -7,6 +7,7 @@ from app.scan_jobs.executors import InventoryScanExecutor
 from app.scan_jobs.assignment import ScanAssignment
 from app.scanner.plugins.base import Finding
 from app.scanner.resources import ScanResources
+from app.scanner.target import ScanType
 
 NOW = datetime(2026, 11, 21, 6, 0, tzinfo=timezone.utc)
 
@@ -84,4 +85,4 @@ async def test_un_job_d_inventaire_sans_connexion_est_refuse():
 def test_un_job_d_inventaire_n_a_pas_besoin_de_profil_ni_d_analyse_ia():
     inventory = executor([])
 
-    assert (inventory.requires_profile, inventory.ai_analysis) == (False, False)
+    assert (ScanType.INVENTORY.requires_profile, inventory.ai_analysis) == (False, False)

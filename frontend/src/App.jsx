@@ -13,6 +13,7 @@ import { Inventory } from "./design/Inventory.jsx";
 import { ContextWindow } from "./design/ClientPicker.jsx";
 import { Access } from "./design/Access.jsx";
 import { RootOverview, RootPlatform } from "./design/Root.jsx";
+import { Probes } from "./design/Probes.jsx";
 import { Icons } from "./design/icons.jsx";
 import { CLIENT_PAGES, DEFAULT_PAGE, isRootSession, parseRoute, resolveRoute, routeHash } from "./design/routes.js";
 import {
@@ -211,7 +212,7 @@ function RootWorkspace({ user, route, navigate, onOpenSelector, onSignOut, versi
   const openClient = (clientId) => navigate(routeHash({ clientId }));
 
   const crumbs = {
-    overview: ["Overview"], access: ["Clients & access"], datasets: ["Reference data"],
+    overview: ["Overview"], access: ["Clients & access"], probes: ["Scan probes"], datasets: ["Reference data"],
     "threat-intel": ["Threat Intel"], platform: ["Updates & system"],
   }[page] || [];
 
@@ -223,6 +224,7 @@ function RootWorkspace({ user, route, navigate, onOpenSelector, onSignOut, versi
         <div className="page">
           {page === "overview"     && <RootOverview openClient={openClient} setPage={setPage}/>}
           {page === "access"       && <Access/>}
+          {page === "probes"       && <Probes/>}
           {page === "datasets"     && <Datasets/>}
           {page === "threat-intel" && <ThreatIntel/>}
           {page === "platform"     && <RootPlatform version={version}/>}

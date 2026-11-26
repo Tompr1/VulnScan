@@ -65,6 +65,10 @@ class ScanAssignment:
     credential_labels: tuple[CredentialLabel, ...] = ()
     # Credentials the profile names whose secret could not be read, by id.
     credential_errors: dict[int, str] = field(default_factory=dict)
+    # The client's scan allowlist, in the ALLOWLIST setting form ("*" allows
+    # everything). None when the executor applies its own (platform worker);
+    # an executor elsewhere must refuse an assignment without one.
+    allowlist: str | None = None
 
     def scanner_config(self, key: str) -> dict[str, Any]:
         config = self.meta.get(key)
@@ -84,6 +88,7 @@ class ScanAssignment:
             "credentials": [asdict(c) for c in self.credentials],
             "credential_labels": [asdict(label) for label in self.credential_labels],
             "credential_errors": {str(k): v for k, v in self.credential_errors.items()},
+            "allowlist": self.allowlist,
         }
 
     @classmethod
@@ -102,6 +107,7 @@ class ScanAssignment:
             credentials=tuple(ScanCredential(**c) for c in data.get("credentials") or ()),
             credential_labels=tuple(CredentialLabel(**label) for label in data.get("credential_labels") or ()),
             credential_errors={int(k): str(v) for k, v in (data.get("credential_errors") or {}).items()},
+            allowlist=data.get("allowlist"),
         )
 
 
@@ -113,6 +119,7 @@ def assign(
     profile: ScanProfile,
     meta: Mapping[str, Any],
     vault: CredentialVault,
+    allowlist: str | None = None,
 ) -> ScanAssignment:
     """The assignment of a job, with the client's credentials its profile names."""
     credentials, errors = [], {}
@@ -134,6 +141,7 @@ def assign(
         credentials=tuple(credentials),
         credential_labels=tuple(vault.labels()),
         credential_errors=errors,
+        allowlist=allowlist,
     )
 
 

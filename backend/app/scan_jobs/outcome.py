@@ -61,6 +61,10 @@ class JobFailure:
         )
 
 
+def unknown_scan_type(scan_type: str) -> JobFailure:
+    return JobFailure(error=f"Unknown scan type: {scan_type}", error_type="configuration")
+
+
 @dataclass(frozen=True)
 class JobCompletion:
     findings_total: int

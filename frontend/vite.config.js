@@ -38,6 +38,9 @@ export default defineConfig({
       "/analytics":     proxyOpts,
       "/inventory":     proxyOpts,
       "/access":        proxyOpts,
+      // "/probes" (Root administration) and "/probe/v1" (the probes' own API).
+      "/probes":        proxyOpts,
+      "/probe":         proxyOpts,
     },
   },
   build: {

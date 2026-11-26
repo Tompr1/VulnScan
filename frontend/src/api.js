@@ -156,6 +156,16 @@ export async function refreshSession() {
   window.dispatchEvent(new CustomEvent(SESSION_UPDATED_EVENT));
 }
 
+// ── Scan probes (global admins, Root) ───────────────────────────────
+export const probesApi = {
+  list:          ()               => api("/probes"),
+  create:        (body)           => api("/probes", { method: "POST", body }),
+  renew:         (id)             => api(`/probes/${id}/enrollment`, { method: "POST" }),
+  revoke:        (id)             => api(`/probes/${id}/revoke`, { method: "POST" }),
+  remove:        (id)             => api(`/probes/${id}`, { method: "DELETE" }),
+  setExecution:  (clientId, scanTypes) => api(`/probes/clients/${clientId}/execution`, { method: "PUT", body: { scan_types: scanTypes } }),
+};
+
 // ── Access administration (global admins) ───────────────────────────
 export const accessApi = {
   clients:           ()         => api("/access/clients"),

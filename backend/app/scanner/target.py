@@ -23,6 +23,12 @@ class ScanType(StrEnum):
             return default or cls.INTERNAL
         return cls(raw.strip().lower())
 
+    @property
+    def requires_profile(self) -> bool:
+        """Network scans run the plugins a scan profile selects; API and IaC
+        scans are driven by an uploaded document, inventory by a connection."""
+        return self in (ScanType.INTERNAL, ScanType.EXTERNAL)
+
 
 class InvalidTargetError(ValueError):
     """Raised when a scan target does not contain a usable host."""

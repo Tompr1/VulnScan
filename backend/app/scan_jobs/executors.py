@@ -24,7 +24,6 @@ from app.scanner.target import ScanType
 
 
 class ScanExecutor(Protocol):
-    requires_profile: bool
     # Whether the workspace's automatic AI analysis may run on the findings.
     ai_analysis: bool
 
@@ -38,7 +37,6 @@ class StandaloneScanner(Protocol):
 
 
 class EngineScanExecutor:
-    requires_profile = True
     ai_analysis = True
 
     def __init__(self, engine_factory: Callable[[], ScanEngine]) -> None:
@@ -59,7 +57,6 @@ class EngineScanExecutor:
 
 
 class StandaloneScanExecutor:
-    requires_profile = False
     ai_analysis = True
 
     def __init__(self, config_key: str, scanner_factory: Callable[[], StandaloneScanner]) -> None:
@@ -87,7 +84,6 @@ class InventoryScanExecutor:
     it, then audits it (support, versions, known CVEs): the findings are the
     issues of each device."""
 
-    requires_profile = False
     # Inventory findings name users and devices, and validating outdated
     # software needs no AI: never send them to an AI provider automatically.
     ai_analysis = False

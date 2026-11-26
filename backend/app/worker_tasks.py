@@ -33,6 +33,7 @@ from app.inventory.collector import InventoryCollector
 from app.inventory.repository import SqlAlertHistory, SqlInventoryRepository
 from app.risk.risk_engine import parse_criticality
 from app.scan_jobs.ai_trigger import SqlAutoAnalysisTrigger
+from app.scan_jobs.assignment import ScanReport
 from app.scan_jobs.executors import default_executors
 from app.scan_jobs.filtering import FindingFilterPolicy
 from app.scan_jobs.graph import open_finding_graph
@@ -61,6 +62,16 @@ _CVE_SYNC_LOCK = "cve_catalog_sync_lock"
 def run_scan_job(job_id: int) -> None:
     """RQ task — runs one scan job end to end."""
     build_scan_job_runner().run(job_id)
+
+
+def finalize_scan_report(job_id: int, report: dict) -> None:
+    """RQ task — saves and announces the report a probe sent for a job."""
+    try:
+        parsed = ScanReport.from_dict(report)
+    except (KeyError, TypeError, ValueError) as exc:  # validated by the API: should not happen
+        logger.error("Unreadable report for job #%d: %s", job_id, exc)
+        return
+    build_scan_job_runner().finalize(job_id, parsed)
 
 
 def run_cve_catalog_sync() -> None:

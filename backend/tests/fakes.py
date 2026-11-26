@@ -128,10 +128,15 @@ class SpyJobQueue:
         self.available = available
         self.scans: list[int] = []
         self.analyses: list[int] = []
+        self.reports: list[tuple[int, dict]] = []
 
     def enqueue_scan(self, job_id: int) -> None:
         self._check()
         self.scans.append(job_id)
+
+    def enqueue_report(self, job_id: int, report: dict) -> None:
+        self._check()
+        self.reports.append((job_id, report))
 
     def enqueue_ai_analysis(self, analysis_id: int) -> None:
         self._check()
@@ -298,10 +303,8 @@ class StubExecutor:
         self,
         findings: list[Finding] | None = None,
         error: Exception | None = None,
-        requires_profile: bool = True,
         ai_analysis: bool = True,
     ) -> None:
-        self.requires_profile = requires_profile
         self.ai_analysis = ai_analysis
         self._findings = findings or []
         self._error = error
@@ -383,3 +386,4 @@ def plugin_context(resources: ScanResources | None = None, **artifacts: Any) -> 
     for key, value in artifacts.items():
         ctx.set(key.replace("__", "."), value)
     return ctx
+

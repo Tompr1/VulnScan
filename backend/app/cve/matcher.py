@@ -41,6 +41,17 @@ class CveRecord:
             matches=matches,
         )
 
+    def to_flattened(self) -> dict[str, Any]:
+        """The flattened NVD form :meth:`from_flattened` reads back."""
+        return {
+            "cve": self.cve_id,
+            "summary": self.summary,
+            "severity": self.severity,
+            "cvss": self.cvss,
+            "refs": list(self.references),
+            "matches": [match.to_nvd() for match in self.matches],
+        }
+
 
 @dataclass(frozen=True)
 class ProductCandidate:

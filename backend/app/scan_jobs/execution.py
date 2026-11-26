@@ -19,16 +19,12 @@ from collections.abc import Mapping
 
 from app.scan_jobs.assignment import ScanAssignment, ScanReport
 from app.scan_jobs.executors import ScanExecutor
-from app.scan_jobs.outcome import JobFailure
+from app.scan_jobs.outcome import JobFailure, unknown_scan_type
 from app.scanner.engine import ProgressCallback
 from app.scanner.resources import InMemoryReferenceData, ReferenceData, ScanResources
 from app.scanner.target import ScanType
 
 logger = logging.getLogger(__name__)
-
-
-def unknown_scan_type(scan_type: str) -> JobFailure:
-    return JobFailure(error=f"Unknown scan type: {scan_type}", error_type="configuration")
 
 
 def executor_for(executors: Mapping[ScanType, ScanExecutor], scan_type: str) -> ScanExecutor | None:

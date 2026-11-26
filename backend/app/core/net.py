@@ -79,3 +79,17 @@ def client_ip(request: Request) -> str:
 
     # Every hop was a trusted proxy, or the header was absent/unusable.
     return hops[0] if hops else peer
+
+
+def is_https(request: Request) -> bool:
+    """Did the client reach us over HTTPS? Either directly, or through a
+    trusted proxy that terminated TLS and says so in X-Forwarded-Proto (the
+    header is ignored from anyone else: a client could send it)."""
+    if request.url.scheme == "https":
+        return True
+    peer = request.client.host if request.client else ""
+    nets = _networks()
+    if not peer or not nets or not _is_trusted(peer, nets):
+        return False
+    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return proto == "https"

@@ -28,7 +28,8 @@ from sqlalchemy import or_, select
 from app.api import (
     routes_access, routes_ai, routes_analytics, routes_api_scanner, routes_assets, routes_auth, routes_credentials,
     routes_datasets, routes_events, routes_graph, routes_iac_scanner, routes_integrations,
-    routes_inventory, routes_reports, routes_scan, routes_settings, routes_threat_intel, routes_web_auth,
+    routes_inventory, routes_probe_agent, routes_probes, routes_reports, routes_scan, routes_settings,
+    routes_threat_intel, routes_web_auth,
 )
 from app.api.deps import get_db
 from app.api.validation import install_validation_error_handler
@@ -53,7 +54,7 @@ ROUTERS = [
     routes_auth, routes_credentials, routes_datasets, routes_scan, routes_settings, routes_graph,
     routes_integrations, routes_ai, routes_api_scanner, routes_iac_scanner, routes_web_auth,
     routes_threat_intel, routes_assets, routes_reports, routes_events, routes_analytics, routes_inventory,
-    routes_access,
+    routes_access, routes_probes, routes_probe_agent,
 ]
 
 
@@ -74,6 +75,7 @@ class Ids:
     analyse_ia: int = 910
     connexion: int = 911
     appareil: int = 912
+    sonde: int = 913
     asset_client: int = 101
     job_client: int = 102
     fournisseur_ia_client: int = 103
@@ -104,6 +106,8 @@ VALEURS_DE_CHEMIN = {
     "target": CIBLE_DU_VOISIN,
     "group_id": V.groupe,
     "grant_id": V.attribution,
+    "probe_id": V.sonde,
+    "workspace_id": VOISIN,
 }
 
 # Paramètres de requête → objet du voisin visé.
@@ -125,6 +129,8 @@ CORPS = {
     ("PATCH", "/access/user-groups/{group_id}"): {"name": "pirate", "user_ids": []},
     ("PATCH", "/access/users/{user_id}"): {"password": "Pirate-1234567!", "is_global_admin": True},
     ("PATCH", "/access/grants/{grant_id}"): {"role": "viewer"},
+    ("PUT", "/probes/clients/{workspace_id}/execution"): {"scan_types": ["internal"]},
+    ("POST", "/probes"): {"workspace_id": VOISIN, "name": "pirate"},
     # Sans corps, le test d'intégration relit la configuration enregistrée.
     ("POST", "/integrations/{provider}/test"): None,
 }
@@ -266,6 +272,8 @@ def donnees(db, workspace, tmp_path):
         models.AuditLog(workspace_id=VOISIN, actor_email="admin@voisin.example", action="login voisin"),
         models.InventoryConnection(id=V.connexion, workspace_id=VOISIN, name="intune-voisin",
                                    tenant_id="t-voisin", client_id="c-voisin", client_secret_enc=encrypt_str("s-voisin")),
+        models.Probe(id=V.sonde, workspace_id=VOISIN, name="sonde-voisin", status="active",
+                     secret_hash="0" * 64, hostname="probe.voisin.example"),
     ])
     db.flush()
     db.add_all([
