@@ -28,7 +28,7 @@ META = PluginMeta(
     timeout_seconds=60.0,
 )
 
-_MARKER = "VULNSCAN_CMDI_7x3k9"
+_MARKER = "V0CDAY_CMDI_7x3k9"
 _TIME_DELAY = 5
 
 # ── In-band payloads (Linux) ───────────────────────────────────────────
@@ -129,7 +129,7 @@ async def _http_request(host, port, method, path, body="",
             r, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
 
         hdrs = {
-            "Host": host, "User-Agent": "VulnScan/2.1",
+            "Host": host, "User-Agent": "v0cday/2.1",
             "Accept": "*/*", "Connection": "close",
         }
         if method == "POST":
@@ -219,7 +219,7 @@ class Check(Plugin):
                         if st > 0 and _MARKER in body:
                             # Double-check: send a DIFFERENT marker with same
                             # syntax to rule out the app merely echoing input
-                            confirm_marker = "VULNSCAN_CMDv_8y4l0"
+                            confirm_marker = "V0CDAY_CMDv_8y4l0"
                             confirm_payload = payload.replace(_MARKER, confirm_marker)
                             c_path = f"{endpoint}?{param}={urllib.parse.quote(confirm_payload)}"
                             c_st, c_body, _ = await _http_request(host, port, "GET", c_path, use_tls=tls)
@@ -262,7 +262,7 @@ class Check(Plugin):
                         st, body, _ = await _http_request(host, port, "GET", path, use_tls=tls)
                         if st > 0 and _MARKER in body:
                             # Double-check with different marker
-                            confirm_marker = "VULNSCAN_CMDv_8y4l0"
+                            confirm_marker = "V0CDAY_CMDv_8y4l0"
                             confirm_payload = payload.replace(_MARKER, confirm_marker)
                             c_path = f"{endpoint}?{param}={urllib.parse.quote(confirm_payload)}"
                             c_st, c_body, _ = await _http_request(host, port, "GET", c_path, use_tls=tls)
@@ -356,7 +356,7 @@ class Check(Plugin):
                         st, body, _ = await _http_request(host, port, "GET", path, use_tls=tls)
                         if st > 0 and _MARKER in body:
                             # Double-check with different marker
-                            confirm_marker = "VULNSCAN_CMDv_8y4l0"
+                            confirm_marker = "V0CDAY_CMDv_8y4l0"
                             confirm_payload = payload.replace(_MARKER, confirm_marker)
                             c_path = f"{endpoint}?{param}={urllib.parse.quote(confirm_payload)}" if "%" not in confirm_payload else f"{endpoint}?{param}={confirm_payload}"
                             c_st, c_body, _ = await _http_request(host, port, "GET", c_path, use_tls=tls)

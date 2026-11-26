@@ -16,7 +16,7 @@ import shutil
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint, web_base_url
 
-logger = logging.getLogger("vulnscan.plugin.ffuf")
+logger = logging.getLogger("v0cday.plugin.ffuf")
 
 META = PluginMeta(
     plugin_id="ext.ffuf",

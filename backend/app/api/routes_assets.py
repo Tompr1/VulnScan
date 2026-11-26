@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_role
 from app.db import models
 
-logger = logging.getLogger("vulnscan.assets")
+logger = logging.getLogger("v0cday.assets")
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 

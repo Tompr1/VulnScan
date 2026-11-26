@@ -19,7 +19,7 @@ from app.db.session import SessionLocal
 from app.cve.reference_datasets import enabled_dataset_paths
 from app.cve.dataset_loader import load_json
 
-logger = logging.getLogger("vulnscan.cveorg_match")
+logger = logging.getLogger("v0cday.cveorg_match")
 
 META = PluginMeta(
     plugin_id="cve.match.cveorg",

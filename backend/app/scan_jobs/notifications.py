@@ -69,7 +69,7 @@ class ScanSummary:
     @property
     def message(self) -> str:
         return (
-            f"VulnScan Job #{self.job_id} on {self.target} completed in {self.duration_text}. "
+            f"v0cday Job #{self.job_id} on {self.target} completed in {self.duration_text}. "
             f"Risk posture: {self.risk_level}. Findings: {self.saved_count} "
             f"({self.count(Severity.CRITICAL)} Critical, {self.count(Severity.HIGH)} High, "
             f"{self.count(Severity.MEDIUM)} Medium, {self.count(Severity.LOW)} Low, "
@@ -103,7 +103,7 @@ class ScanFailure:
     @property
     def message(self) -> str:
         return (
-            f"VulnScan Job #{self.job_id} on {self.target} FAILED. "
+            f"v0cday Job #{self.job_id} on {self.target} FAILED. "
             f"Type: {self.error_type}. Error: {self.error[:200]}"
         )
 
@@ -122,7 +122,7 @@ class SlackChannel:
 
     def scan_completed(self, config: dict[str, Any], summary: ScanSummary) -> None:
         blocks: list[dict[str, Any]] = [
-            {"type": "header", "text": {"type": "plain_text", "text": "VulnScan Scan Completed", "emoji": True}},
+            {"type": "header", "text": {"type": "plain_text", "text": "v0cday Scan Completed", "emoji": True}},
             {
                 "type": "section",
                 "fields": [
@@ -177,7 +177,7 @@ class SlackChannel:
         self._send(config, {
             "text": failure.message,
             "blocks": [
-                {"type": "header", "text": {"type": "plain_text", "text": "VulnScan Scan Failed"}},
+                {"type": "header", "text": {"type": "plain_text", "text": "v0cday Scan Failed"}},
                 {"type": "section", "fields": [
                     _field("Target", f"`{failure.target}`"),
                     _field("Job", f"#{failure.job_id}"),
@@ -194,7 +194,7 @@ class TeamsChannel:
 
     def scan_completed(self, config: dict[str, Any], summary: ScanSummary) -> None:
         self._send(config, {
-            "title": "VulnScan Scan Completed",
+            "title": "v0cday Scan Completed",
             "text": summary.message,
             "Target": summary.target,
             "Job": f"#{summary.job_id}",
@@ -230,7 +230,7 @@ class TeamsChannel:
 
     def scan_failed(self, config: dict[str, Any], failure: ScanFailure) -> None:
         self._send(config, {
-            "title": "VulnScan Scan Failed",
+            "title": "v0cday Scan Failed",
             "text": failure.message,
             "Target": failure.target,
             "Job": f"#{failure.job_id}",
@@ -396,7 +396,7 @@ class ScanNotifier:
 
 
 def _header(alert: InventoryAlert) -> str:
-    return alert.subject.removeprefix("VulnScan: ")[:150]  # Slack header limit
+    return alert.subject.removeprefix("v0cday: ")[:150]  # Slack header limit
 
 
 def _severity_tag(item: AlertItem) -> str:

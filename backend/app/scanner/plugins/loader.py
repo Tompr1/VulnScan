@@ -16,7 +16,7 @@ from collections.abc import Iterable, Iterator, Mapping
 
 from app.scanner.plugins.base import Plugin, PluginMeta
 
-logger = logging.getLogger("vulnscan.loader")
+logger = logging.getLogger("v0cday.loader")
 
 # Built-in plugin modules (relative to app.scanner.plugins). The list order is
 # the tie-breaker of the topological sort, so it is kept explicit.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Convert CISA KEV JSON into the flat format used by the VulnScan platform.
+Convert CISA KEV JSON into the flat format used by the v0cday platform.
 """
 import argparse, json
 

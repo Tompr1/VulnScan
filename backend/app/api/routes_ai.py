@@ -15,7 +15,7 @@ from app.ai.providers import DB_PROVIDER_PREFIX
 from app.core.config import settings
 from app.api.deps import get_db, require_role
 
-logger = logging.getLogger("vulnscan.api.ai")
+logger = logging.getLogger("v0cday.api.ai")
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -245,7 +245,7 @@ def test_provider(
         provider = get_provider_from_db_config(row)
         resp = provider.generate(
             system_prompt="You are a helpful assistant. Respond in JSON.",
-            user_prompt='Respond with exactly: {"status": "ok", "message": "VulnScan AI test successful"}',
+            user_prompt='Respond with exactly: {"status": "ok", "message": "v0cday AI test successful"}',
             max_tokens=100,
         )
         return {"ok": True, "model": resp.model, "tokens": resp.tokens_used, "response": resp.content[:200]}

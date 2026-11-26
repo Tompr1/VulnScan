@@ -10,7 +10,7 @@ import re
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.ssti")
+logger = logging.getLogger("v0cday.api_scanner.ssti")
 
 # Math-based detection: inject expression, check if result appears
 _SSTI_PAYLOADS = [

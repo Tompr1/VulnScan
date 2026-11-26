@@ -148,9 +148,9 @@ class InventoryAlert:
     def subject(self) -> str:
         count = len(self.items)
         if self.baseline:
-            text = f"VulnScan: first device audit of {self.target}, {count} open {_plural(count, 'issue')} on {self.devices} {_plural(self.devices, 'device')}"
+            text = f"v0cday: first device audit of {self.target}, {count} open {_plural(count, 'issue')} on {self.devices} {_plural(self.devices, 'device')}"
         else:
-            text = f"VulnScan: {count} new device {_plural(count, 'issue')} on {self.devices} {_plural(self.devices, 'device')}"
+            text = f"v0cday: {count} new device {_plural(count, 'issue')} on {self.devices} {_plural(self.devices, 'device')}"
         if self.exploited:
             text += f" ({self.exploited} actively exploited)"
         return text

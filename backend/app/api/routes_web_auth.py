@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_role
 
-logger = logging.getLogger("vulnscan.api.web_auth")
+logger = logging.getLogger("v0cday.api.web_auth")
 router = APIRouter(prefix="/scan/web-auth", tags=["web-auth"])
 
 

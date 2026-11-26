@@ -653,7 +653,7 @@ export function Settings({ initialTab }) {
             <>
               <div className="card-head"><div><div className="card-title">General</div><div className="card-sub" style={{marginTop: 0}}>Workspace name, default time zone, and locale.</div></div></div>
               <div className="card-body" style={{display: "flex", flexDirection: "column", gap: 14}}>
-                <div><label className="form-label">Workspace name</label><input className="form-input" defaultValue="VulnScan Production"/></div>
+                <div><label className="form-label">Workspace name</label><input className="form-input" defaultValue="v0cday Production"/></div>
                 <div><label className="form-label">Default time zone</label><select className="form-input" defaultValue="UTC"><option>UTC</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Singapore</option></select></div>
                 <div><label className="form-label">Date format</label><select className="form-input"><option>2026-04-29 (ISO)</option><option>Apr 29, 2026</option><option>29/04/2026</option></select></div>
               </div>
@@ -1810,7 +1810,7 @@ function IntegrationsPanel() {
   return (
     <>
       <div className="card-head" style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-        <div><div className="card-title">Integrations</div><div className="card-sub" style={{marginTop: 0}}>Connect VulnScan to chat, email, and custom HTTP endpoints.</div></div>
+        <div><div className="card-title">Integrations</div><div className="card-sub" style={{marginTop: 0}}>Connect v0cday to chat, email, and custom HTTP endpoints.</div></div>
         <span className="tag brand">{apps.filter(a => a.status === "connected").length} connected</span>
       </div>
       <div className="card-body">

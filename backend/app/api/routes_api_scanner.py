@@ -16,7 +16,7 @@ from app.api.deps import get_db, require_role
 from app.core.job_queue import QueueUnavailableError, get_job_queue
 from app.db import models
 
-logger = logging.getLogger("vulnscan.api.api_scanner")
+logger = logging.getLogger("v0cday.api.api_scanner")
 router = APIRouter(prefix="/scan/api-scanner", tags=["api-scanner"])
 
 # Hard caps on spec ingestion to keep workers safe
@@ -61,7 +61,7 @@ def _safe_fetch_spec(url: str, max_bytes: int = _MAX_SPEC_BYTES) -> str:
                 "Private, loopback, link-local, and metadata IPs are not allowed."
             )
 
-    req = urllib.request.Request(url, headers={"User-Agent": "VulnScan/2.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "v0cday/2.1"})
     try:
         with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT_SECONDS) as resp:
             chunks = []

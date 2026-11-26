@@ -1,12 +1,12 @@
 [Unit]
-Description=VulnScan Platform Auto-Updater
-Documentation=https://github.com/Gondrong/VulnScan-Platform
+Description=v0cday Platform Auto-Updater
+Documentation=https://github.com/Tompr1/VulnScan
 After=docker.service
 Requires=docker.service
 
 [Service]
 Type=simple
-ExecStart=__PROJECT_DIR__/scripts/vulnscan-updater.sh
+ExecStart=__PROJECT_DIR__/scripts/v0cday-updater.sh
 Restart=always
 RestartSec=10
 StandardOutput=journal

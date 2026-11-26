@@ -85,7 +85,7 @@ async def _fetch(host: str, port: int, path: str, use_tls: bool = True,
         request = (
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {host}\r\n"
-            f"User-Agent: VulnScan/2.1\r\n"
+            f"User-Agent: v0cday/2.1\r\n"
             f"Accept: application/json\r\n"
             f"Connection: close\r\n\r\n"
         )

@@ -23,7 +23,7 @@ from typing import Optional
 
 from app.risk.cvss_engine import severity_from_score
 
-logger = logging.getLogger("vulnscan.cve.enricher")
+logger = logging.getLogger("v0cday.cve.enricher")
 
 
 class CveSeverityEnricher:

@@ -1,4 +1,4 @@
-name: vulnscan-platform
+name: v0cday-platform
 
 services:
   db:
@@ -51,7 +51,7 @@ services:
     # Built once here; the three workers run the same image (building it per
     # service unpacked four copies in parallel and filled the disk).
     build: ./backend
-    image: vulnscan-backend:latest
+    image: v0cday-backend:latest
     env_file:
       - .env
     depends_on:
@@ -84,7 +84,7 @@ services:
   # worker-data   → dataset refresh (NVD, KEV, EPSS, …)
 
   worker-scan:
-    image: vulnscan-backend:latest
+    image: v0cday-backend:latest
     pull_policy: never
     env_file:
       - .env
@@ -105,7 +105,7 @@ services:
     restart: unless-stopped
 
   worker-ai:
-    image: vulnscan-backend:latest
+    image: v0cday-backend:latest
     pull_policy: never
     env_file:
       - .env
@@ -126,7 +126,7 @@ services:
     restart: unless-stopped
 
   worker-data:
-    image: vulnscan-backend:latest
+    image: v0cday-backend:latest
     pull_policy: never
     env_file:
       - .env

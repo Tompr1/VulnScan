@@ -22,7 +22,7 @@ import re
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.excessive_data")
+logger = logging.getLogger("v0cday.api_scanner.excessive_data")
 
 _MAX_ENDPOINTS = 30
 

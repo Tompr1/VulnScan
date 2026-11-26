@@ -17,7 +17,7 @@ import logging
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.mass_assignment")
+logger = logging.getLogger("v0cday.api_scanner.mass_assignment")
 
 _MAX_ENDPOINTS = 20
 

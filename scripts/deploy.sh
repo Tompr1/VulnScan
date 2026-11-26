@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════
-# VulnScan — deploys the checked-out commit on this host.
+# v0cday — deploys the checked-out commit on this host.
 # Run by the self-hosted GitHub Actions runner (.github/workflows/deploy.yml),
 # and can be run by hand the same way.
 #
 # Usage:   scripts/deploy.sh <source-dir>
 #            <source-dir>  checkout of the commit to deploy (the CI workspace)
 #
-# Env:     DEPLOY_DIR              install directory        (default: ~/vulnscan)
+# Env:     DEPLOY_DIR              install directory        (default: ~/v0cday)
 #          PUBLIC_HOST             address used in URLs/CORS (default: first host IP)
 #          HEALTH_TIMEOUT_SECONDS  wait for the backend      (default: 900)
 #
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 SOURCE_DIR="${1:?usage: scripts/deploy.sh <source-dir>}"
-DEPLOY_DIR="${DEPLOY_DIR:-$HOME/vulnscan}"
+DEPLOY_DIR="${DEPLOY_DIR:-$HOME/v0cday}"
 PUBLIC_HOST="${PUBLIC_HOST:-$(hostname -I | awk '{print $1}')}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-900}"
 BOOTSTRAP_MARKER="$DEPLOY_DIR/.bootstrapped"

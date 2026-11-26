@@ -26,7 +26,7 @@ import urllib.parse
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.ssti")
+logger = logging.getLogger("v0cday.ssti")
 
 META = PluginMeta(
     plugin_id="web.ssti.scanner",

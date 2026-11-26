@@ -9,7 +9,7 @@ import logging
 
 from app.core.config import settings
 
-logger = logging.getLogger("vulnscan.geoip")
+logger = logging.getLogger("v0cday.geoip")
 
 _reader = None
 _init_done = False

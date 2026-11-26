@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_shared_reader
 from app.threat_intel import aggregator
 
-logger = logging.getLogger("vulnscan.api.threat_intel")
+logger = logging.getLogger("v0cday.api.threat_intel")
 router = APIRouter(prefix="/threat-intel", tags=["threat-intel"])
 
 

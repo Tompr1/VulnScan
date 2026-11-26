@@ -90,12 +90,12 @@ class Settings(BaseModel):
 
     # CORS: comma-separated origins, or "*" for all (NOT recommended in production)
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:8888")
-    # Address of the web UI, for links in alerts (e.g. https://vulnscan.example.com).
+    # Address of the web UI, for links in alerts (e.g. https://v0cday.example.com).
     # Empty: the first CORS origin, which is where the UI is served from.
     PUBLIC_URL: str = os.getenv("PUBLIC_URL", "")
 
     # ── Platform Update ────────────────────────────────────────────
-    GITHUB_REPO: str = os.getenv("GITHUB_REPO", "Gondrong/VulnScan-Platform")
+    GITHUB_REPO: str = os.getenv("GITHUB_REPO", "Tompr1/VulnScan")
     PLATFORM_VERSION: str = os.getenv("PLATFORM_VERSION", "3.2.1")
 
     # ── AI Providers ──────────────────────────────────────────────

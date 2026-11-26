@@ -18,7 +18,7 @@ import struct
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.snmp_community")
+logger = logging.getLogger("v0cday.snmp_community")
 
 META = PluginMeta(
     plugin_id="infra.snmp.community",

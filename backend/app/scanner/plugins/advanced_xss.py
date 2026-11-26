@@ -191,7 +191,7 @@ async def _http_request(host, port, method, path, body="",
             r, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
 
         hdrs = {
-            "Host": host, "User-Agent": "VulnScan/2.1",
+            "Host": host, "User-Agent": "v0cday/2.1",
             "Accept": "text/html,*/*", "Connection": "close",
         }
         if method == "POST":

@@ -150,14 +150,14 @@ TRAVERSAL_SUCCESS_PATTERNS = [
 # ─── Command Injection payloads ─────────────────────────────────────────────
 
 CMDI_PAYLOADS = [
-    ("; echo vulnscan_cmd_test", "semicolon"),
-    ("| echo vulnscan_cmd_test", "pipe"),
-    ("` echo vulnscan_cmd_test`", "backtick"),
-    ("$(echo vulnscan_cmd_test)", "subshell"),
-    ("& echo vulnscan_cmd_test &", "ampersand"),
+    ("; echo v0cday_cmd_test", "semicolon"),
+    ("| echo v0cday_cmd_test", "pipe"),
+    ("` echo v0cday_cmd_test`", "backtick"),
+    ("$(echo v0cday_cmd_test)", "subshell"),
+    ("& echo v0cday_cmd_test &", "ampersand"),
 ]
 
-CMDI_SUCCESS_PATTERN = r"vulnscan_cmd_test"
+CMDI_SUCCESS_PATTERN = r"v0cday_cmd_test"
 
 # ─── SSRF payloads ──────────────────────────────────────────────────────────
 
@@ -606,7 +606,7 @@ class Check(Plugin):
         baseline_body = ""
         baseline_len = 0
         try:
-            canary = base_url + "/vulnscan_404_check_" + str(int(time.monotonic() * 1000))
+            canary = base_url + "/v0cday_404_check_" + str(int(time.monotonic() * 1000))
             br = await _safe_get(client, canary)
             if br and br.status_code == 200:
                 baseline_body = br.text[:1000].lower()
@@ -1122,7 +1122,7 @@ class Check(Plugin):
         # Safe XXE probe — internal entity expansion only (no file access)
         xxe_payload = (
             '<?xml version="1.0" encoding="UTF-8"?>'
-            '<!DOCTYPE foo [<!ENTITY xxe "vulnscan_xxe_test">]>'
+            '<!DOCTYPE foo [<!ENTITY xxe "v0cday_xxe_test">]>'
             '<root><data>&xxe;</data></root>'
         )
         xxe_headers = {"Content-Type": "application/xml"}
@@ -1141,7 +1141,7 @@ class Check(Plugin):
                 continue
 
             body = r2.text
-            if "vulnscan_xxe_test" in body:
+            if "v0cday_xxe_test" in body:
                 findings.append(Finding(
                     severity="high",
                     plugin_id=META.plugin_id,

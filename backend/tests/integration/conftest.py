@@ -10,9 +10,9 @@ from app.db.session import Base
 
 # Set to a throwaway PostgreSQL database to run the integration tests on the
 # production engine (foreign keys and constraints enforced), e.g.
-#   VULNSCAN_TEST_DATABASE_URL=postgresql+psycopg2://app:app@127.0.0.1:55432/tests
+#   V0CDAY_TEST_DATABASE_URL=postgresql+psycopg2://app:app@127.0.0.1:55432/tests
 # Every table of that database is dropped before each test.
-POSTGRES_URL = os.environ.get("VULNSCAN_TEST_DATABASE_URL")
+POSTGRES_URL = os.environ.get("V0CDAY_TEST_DATABASE_URL")
 # Ids the database generates start above the fixed ids tests insert.
 _FIRST_GENERATED_ID = 100_000
 
@@ -20,7 +20,7 @@ _FIRST_GENERATED_ID = 100_000
 @pytest.fixture
 def session_factory():
     """Fresh database per test (isolated, repeatable): in-memory SQLite, or
-    PostgreSQL when VULNSCAN_TEST_DATABASE_URL is set."""
+    PostgreSQL when V0CDAY_TEST_DATABASE_URL is set."""
     if POSTGRES_URL:
         engine = create_engine(POSTGRES_URL)
         Base.metadata.drop_all(engine)

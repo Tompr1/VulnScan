@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_role
 from app.db import models
 
-logger = logging.getLogger("vulnscan.api.integrations")
+logger = logging.getLogger("v0cday.api.integrations")
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 VALID_PROVIDERS = {"slack", "email", "webhook", "teams"}

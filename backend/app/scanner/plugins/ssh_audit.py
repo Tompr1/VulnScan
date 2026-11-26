@@ -21,7 +21,7 @@ import struct
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.ssh_audit")
+logger = logging.getLogger("v0cday.ssh_audit")
 
 META = PluginMeta(
     plugin_id="infra.ssh.audit",
@@ -170,7 +170,7 @@ async def _ssh_handshake(host: str, port: int = 22,
             return result
 
         # Send our client banner
-        client_banner = b"SSH-2.0-VulnScan_Audit\r\n"
+        client_banner = b"SSH-2.0-v0cday_Audit\r\n"
         writer.write(client_banner)
         await writer.drain()
 

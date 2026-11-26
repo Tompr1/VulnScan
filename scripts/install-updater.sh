@@ -1,10 +1,10 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════
-# VulnScan Platform — Updater Service Installer
+# v0cday Platform — Updater Service Installer
 # Auto-detects project directory. Works on any Linux distro/user/path.
 #
 # Usage:
-#   cd /path/to/VulnScan-Platform
+#   cd /path/to/v0cday-Platform
 #   sudo bash scripts/install-updater.sh
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -12,12 +12,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT="$(dirname "$SCRIPT_DIR")"
-SERVICE_TEMPLATE="$SCRIPT_DIR/vulnscan-updater.service"
-SERVICE_DST="/etc/systemd/system/vulnscan-updater.service"
-UPDATER_SCRIPT="$SCRIPT_DIR/vulnscan-updater.sh"
+SERVICE_TEMPLATE="$SCRIPT_DIR/v0cday-updater.service"
+SERVICE_DST="/etc/systemd/system/v0cday-updater.service"
+UPDATER_SCRIPT="$SCRIPT_DIR/v0cday-updater.sh"
 
 echo "╔═══════════════════════════════════════════════╗"
-echo "║  VulnScan Platform — Updater Installer        ║"
+echo "║  v0cday Platform — Updater Installer        ║"
 echo "╚═══════════════════════════════════════════════╝"
 echo ""
 echo "  Project directory: $PROJECT"
@@ -60,17 +60,17 @@ systemctl daemon-reload
 
 # Enable service (auto-start on boot)
 echo "[3/4] Enabling service..."
-systemctl enable vulnscan-updater
+systemctl enable v0cday-updater
 
 # Start service
 echo "[4/4] Starting updater service..."
-systemctl start vulnscan-updater
+systemctl start v0cday-updater
 
 echo ""
 echo "═══════════════════════════════════════════════"
-echo "  ✓ VulnScan updater installed successfully!"
+echo "  ✓ v0cday updater installed successfully!"
 echo ""
-echo "  Status:  systemctl status vulnscan-updater"
-echo "  Logs:    journalctl -u vulnscan-updater -f"
-echo "  Update:  tail -f /var/log/vulnscan-update.log"
+echo "  Status:  systemctl status v0cday-updater"
+echo "  Logs:    journalctl -u v0cday-updater -f"
+echo "  Update:  tail -f /var/log/v0cday-update.log"
 echo "═══════════════════════════════════════════════"

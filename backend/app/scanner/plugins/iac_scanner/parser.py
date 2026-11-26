@@ -17,7 +17,7 @@ import os
 import zipfile
 from dataclasses import dataclass
 
-logger = logging.getLogger("vulnscan.iac.parser")
+logger = logging.getLogger("v0cday.iac.parser")
 
 _MAX_FILES_PER_ARCHIVE = 2000
 _MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB per individual file

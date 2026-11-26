@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-fast_update_datasets.py — Parallel dataset fetcher for VulnScan Platform.
+fast_update_datasets.py — Parallel dataset fetcher for v0cday Platform.
 
 Fetches from ALL FREE sources in parallel:
   1. NVD API        — NIST CVSS scores + CPE data (primary)
@@ -134,7 +134,7 @@ def score_to_sev(s):
 def fetch_cveorg_single(cve_id):
     """Fetch CNA + ADP CVSS from CVE.org API (free)."""
     try:
-        data = json.loads(fetch_url(f"{CVEORG_API}/{cve_id}", {"Accept": "application/json", "User-Agent": "VulnScan/1.0"}, 15))
+        data = json.loads(fetch_url(f"{CVEORG_API}/{cve_id}", {"Accept": "application/json", "User-Agent": "v0cday/1.0"}, 15))
         containers = data.get("containers", {})
         cna_score = adp_score = None
         # CNA score

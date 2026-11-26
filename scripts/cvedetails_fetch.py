@@ -55,7 +55,7 @@ def fetch_cvedetails_score(cve_id, timeout=10):
     """
     url = f"https://www.cvedetails.com/cve/{cve_id}/"
     headers = {
-        "User-Agent": "VulnScan-Platform/1.0 (Security Scanner Dataset Update)",
+        "User-Agent": "v0cday-Platform/1.0 (Security Scanner Dataset Update)",
         "Accept": "text/html",
     }
 
@@ -125,7 +125,7 @@ def fetch_cvedetails_api(cve_id, api_key=None, timeout=10):
 
     url = f"https://www.cvedetails.com/api/v1/vulnerability/{cve_id}"
     headers = {
-        "User-Agent": "VulnScan-Platform/1.0",
+        "User-Agent": "v0cday-Platform/1.0",
         "Accept": "application/json",
         "Authorization": f"Bearer {api_key}",
     }

@@ -64,7 +64,7 @@ class Check(Plugin):
         try:
             url = _CRTSH_API.format(domain=urllib.parse.quote(f"%.{domain}"))
             req = urllib.request.Request(url, headers={
-                "User-Agent": "VulnScan/2.1",
+                "User-Agent": "v0cday/2.1",
                 "Accept": "application/json",
             })
 

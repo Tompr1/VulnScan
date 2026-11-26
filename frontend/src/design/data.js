@@ -5,23 +5,23 @@ const FINDINGS = [
   { id: 1420, severity: "critical", title: "Exposed Kubernetes API on port 6443 (no auth)", host: "k8s-master.prod", plugin: "k8s_api", risk: 9.6, cvss: 9.4, kev: false, confidence: 0.99, sla: 2, port: 6443, desc: "The Kubernetes API server on this host accepts unauthenticated requests to /api/v1/namespaces. An attacker can list secrets, deploy pods, and pivot across the cluster.", remediation: "Enable RBAC and require client-cert or token authentication. Disable the anonymous-auth flag in the kube-apiserver manifest.", evidence: "$ curl -k https://k8s-master.prod:6443/api/v1/namespaces\n{\"kind\":\"NamespaceList\", \"items\":[...]}", compliance: ["NIST AC-3", "CIS K8s 1.2.1"] },
   { id: 1419, severity: "high", title: "JWT 'alg:none' bypass on /api/auth/refresh", host: "api-prod-01.internal", plugin: "jwt_scanner", risk: 8.4, cvss: 8.2, kev: false, confidence: 0.92, sla: 7, port: 443, desc: "The /api/auth/refresh endpoint accepts JWTs signed with alg:none, allowing token forgery without the signing key.", remediation: "Configure your JWT library to reject 'none' algorithms explicitly. Whitelist allowed algs (HS256/RS256). Rotate signing keys.", evidence: 'eyJhbGciOiJub25lIn0.eyJzdWIiOiJhZG1pbiJ9.', compliance: ["OWASP API2", "NIST IA-2"] },
   { id: 1418, severity: "high", title: "Outdated nginx 1.18.0 (multiple CVEs)", host: "web-edge-02.dmz", plugin: "deep_fingerprint", risk: 7.8, cvss: 7.5, kev: false, confidence: 0.88, sla: 7, port: 443, cve: "CVE-2023-44487", desc: "nginx 1.18.0 has known vulnerabilities including HTTP/2 rapid reset (CVE-2023-44487).", remediation: "Upgrade to nginx 1.24.0 or later. Enable rate limiting on HTTP/2 streams.", compliance: ["NIST SI-2"] },
-  { id: 1417, severity: "high", title: "AWS S3 bucket 'vulnscan-backups' world-readable", host: "s3.amazonaws.com", plugin: "cloud_storage_misconfig", risk: 7.6, cvss: 7.5, kev: false, confidence: 1.0, sla: 7, port: 443, desc: "The S3 bucket allows public list and read. 47 backup files containing database dumps are exposed.", remediation: "Apply bucket policy denying * principal. Enable Block Public Access at the account level.", compliance: ["PCI 1.4", "CIS AWS 2.1.5"] },
+  { id: 1417, severity: "high", title: "AWS S3 bucket 'v0cday-backups' world-readable", host: "s3.amazonaws.com", plugin: "cloud_storage_misconfig", risk: 7.6, cvss: 7.5, kev: false, confidence: 1.0, sla: 7, port: 443, desc: "The S3 bucket allows public list and read. 47 backup files containing database dumps are exposed.", remediation: "Apply bucket policy denying * principal. Enable Block Public Access at the account level.", compliance: ["PCI 1.4", "CIS AWS 2.1.5"] },
   { id: 1416, severity: "medium", title: "Missing security header: Strict-Transport-Security", host: "web-edge-02.dmz", plugin: "security_headers", risk: 5.2, cvss: 5.0, kev: false, confidence: 1.0, sla: 30, port: 443, desc: "HSTS header is absent, exposing users to SSL stripping attacks." },
   { id: 1415, severity: "medium", title: "TLS 1.0 still enabled on /admin", host: "admin.internal", plugin: "tls_basic", risk: 5.0, cvss: 5.3, kev: false, confidence: 1.0, sla: 30, port: 443 },
   { id: 1414, severity: "medium", title: "GraphQL introspection enabled in production", host: "api-prod-01.internal", plugin: "graphql_scanner", risk: 4.8, cvss: 5.0, kev: false, confidence: 0.9, sla: 30, port: 443 },
   { id: 1413, severity: "medium", title: "SSH server allows weak diffie-hellman-group1-sha1", host: "bastion-01.internal", plugin: "ssh_audit", risk: 4.4, cvss: 4.3, kev: false, confidence: 1.0, sla: 30, port: 22 },
   { id: 1412, severity: "low", title: "Server header reveals version (Apache/2.4.41)", host: "web-edge-02.dmz", plugin: "http_fingerprint", risk: 2.6, cvss: 2.0, kev: false, confidence: 1.0, sla: 90, port: 80 },
   { id: 1411, severity: "low", title: "Cookie missing 'Secure' flag", host: "api-prod-01.internal", plugin: "security_headers", risk: 2.2, cvss: 2.5, kev: false, confidence: 1.0, sla: 90, port: 443 },
-  { id: 1410, severity: "info", title: "Subdomain discovered: staging.vulnscan.io", host: "staging.vulnscan.io", plugin: "dns_enum", risk: 0, cvss: 0, kev: false, confidence: 1.0, sla: 365, port: 0 },
+  { id: 1410, severity: "info", title: "Subdomain discovered: staging.v0cday.io", host: "staging.v0cday.io", plugin: "dns_enum", risk: 0, cvss: 0, kev: false, confidence: 1.0, sla: 365, port: 0 },
 ];
 
 const JOBS = [
   { id: 1842, target: "10.20.0.0/16", scan_type: "internal", status: "running", profile: "Full Network Audit", created_at: "2026-04-28T09:14:00Z", duration: "8m 32s", progress: 64, findings: 0, plugins_run: 18, plugins_total: 31 },
   { id: 1841, target: "api-prod-01.internal", scan_type: "internal", status: "done", profile: "Web Application Deep", created_at: "2026-04-28T08:02:00Z", duration: "12m 04s", findings: 47, critical: 2, high: 6, medium: 14 },
-  { id: 1840, target: "vulnscan.io", scan_type: "external", status: "done", profile: "External Surface", created_at: "2026-04-28T06:30:00Z", duration: "6m 11s", findings: 23, critical: 0, high: 2, medium: 8 },
+  { id: 1840, target: "v0cday.io", scan_type: "external", status: "done", profile: "External Surface", created_at: "2026-04-28T06:30:00Z", duration: "6m 11s", findings: 23, critical: 0, high: 2, medium: 8 },
   { id: 1839, target: "k8s-master.prod", scan_type: "internal", status: "done", profile: "Infrastructure Audit", created_at: "2026-04-28T03:11:00Z", duration: "4m 47s", findings: 18, critical: 1, high: 3, medium: 6 },
   { id: 1838, target: "10.20.5.0/24", scan_type: "internal", status: "failed", profile: "Quick Discovery", created_at: "2026-04-27T22:18:00Z", duration: "1m 02s", findings: 0, error: "Network unreachable: 10.20.5.0/24" },
-  { id: 1837, target: "api.vulnscan.io", scan_type: "external", status: "done", profile: "API Scanner (OpenAPI)", created_at: "2026-04-27T18:45:00Z", duration: "9m 23s", findings: 31, critical: 1, high: 4, medium: 11 },
+  { id: 1837, target: "api.v0cday.io", scan_type: "external", status: "done", profile: "API Scanner (OpenAPI)", created_at: "2026-04-27T18:45:00Z", duration: "9m 23s", findings: 31, critical: 1, high: 4, medium: 11 },
   { id: 1836, target: "iot-gateway.dmz", scan_type: "internal", status: "done", profile: "IoT / MQTT Audit", created_at: "2026-04-27T15:00:00Z", duration: "3m 12s", findings: 7, critical: 0, high: 1, medium: 3 },
   { id: 1835, target: "bastion-01.internal", scan_type: "internal", status: "queued", profile: "SSH Hardening", created_at: "2026-04-27T14:30:00Z", duration: "—", findings: 0 },
 ];
@@ -83,16 +83,16 @@ const ASSET_TARGETS = {
   "prod-api": [
     { host: "api-prod-01.internal", type: "host", env: "prod",    findings: 47, last_scan: "12m ago" },
     { host: "api-prod-02.internal", type: "host", env: "prod",    findings: 12, last_scan: "12m ago" },
-    { host: "api.vulnscan.io",      type: "domain", env: "prod",  findings: 31, last_scan: "yesterday" },
+    { host: "api.v0cday.io",      type: "domain", env: "prod",  findings: 31, last_scan: "yesterday" },
     { host: "10.20.10.0/24",        type: "cidr", env: "prod",    findings: 64, last_scan: "12m ago" },
   ],
 };
 
 const REPORTS = [
   { id: "R-1841", job_id: 1841, target: "api-prod-01.internal", profile: "Web Application Deep", asset: "Production · API", generated: "2 hours ago", findings: 47, formats: ["pdf", "csv", "json", "sarif"], size_pdf: "2.4 MB", template: "Executive + Technical" },
-  { id: "R-1840", job_id: 1840, target: "vulnscan.io",          profile: "External Surface",     asset: "Production · Web", generated: "5 hours ago", findings: 23, formats: ["pdf", "csv", "json", "sarif"], size_pdf: "1.1 MB", template: "Executive Summary" },
+  { id: "R-1840", job_id: 1840, target: "v0cday.io",          profile: "External Surface",     asset: "Production · Web", generated: "5 hours ago", findings: 23, formats: ["pdf", "csv", "json", "sarif"], size_pdf: "1.1 MB", template: "Executive Summary" },
   { id: "R-1839", job_id: 1839, target: "k8s-master.prod",      profile: "Infrastructure Audit", asset: "Production · Infra", generated: "8 hours ago", findings: 18, formats: ["pdf", "csv", "json", "sarif"], size_pdf: "1.8 MB", template: "Technical Detail" },
-  { id: "R-1837", job_id: 1837, target: "api.vulnscan.io",      profile: "API Scanner (OpenAPI)", asset: "Production · API", generated: "yesterday", findings: 31, formats: ["pdf", "csv", "json", "sarif"], size_pdf: "1.6 MB", template: "Executive + Technical" },
+  { id: "R-1837", job_id: 1837, target: "api.v0cday.io",      profile: "API Scanner (OpenAPI)", asset: "Production · API", generated: "yesterday", findings: 31, formats: ["pdf", "csv", "json", "sarif"], size_pdf: "1.6 MB", template: "Executive + Technical" },
   { id: "R-1836", job_id: 1836, target: "iot-gateway.dmz",      profile: "IoT / MQTT Audit",     asset: "IoT & Edge",       generated: "yesterday", findings:  7, formats: ["pdf", "csv", "json", "sarif"], size_pdf: "0.6 MB", template: "Technical Detail" },
 ];
 

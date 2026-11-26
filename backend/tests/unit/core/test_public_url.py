@@ -6,7 +6,7 @@ from app.core.config import Settings
 @pytest.mark.parametrize(
     ("public_url", "cors", "expected"),
     [
-        ("https://vulnscan.example.com/", "http://localhost:5173", "https://vulnscan.example.com"),
+        ("https://v0cday.example.com/", "http://localhost:5173", "https://v0cday.example.com"),
         ("", "http://10.0.0.20:5173, http://localhost:5173", "http://10.0.0.20:5173"),  # where the UI is served
         ("", "*", None),
         ("  ", "", None),

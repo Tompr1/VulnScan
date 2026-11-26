@@ -124,7 +124,7 @@ async def _probe_joomla(client, base_url):
 async def _probe_error_page_version(client, base_url):
     """Extract server version from default 404 error pages."""
     results = []
-    r = await _safe_get(client, f"{base_url}/vulnscan_nonexistent_path_probe_404")
+    r = await _safe_get(client, f"{base_url}/v0cday_nonexistent_path_probe_404")
     if r and r.status_code in (404, 403):
         body = r.text[-500:] if len(r.text) > 500 else r.text
 
@@ -322,7 +322,7 @@ async def _probe_tomcat(client, base_url):
 
     # Check error page for Tomcat default styling
     if not results:
-        r = await _safe_get(client, f"{base_url}/vulnscan_probe_404")
+        r = await _safe_get(client, f"{base_url}/v0cday_probe_404")
         if r and r.text:
             m = re.search(r'Apache Tomcat[/ ]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)', r.text, re.I)
             if m:

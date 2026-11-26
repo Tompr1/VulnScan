@@ -12,7 +12,7 @@ import re
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.xxe")
+logger = logging.getLogger("v0cday.api_scanner.xxe")
 
 # Classic XXE payloads
 _XXE_FILE_READ = [
@@ -36,7 +36,7 @@ _XXE_FILE_READ = [
 # Error-based XXE
 _XXE_ERROR = [
     (
-        '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///nonexistent_vulnscan_test">]><root>&xxe;</root>',
+        '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///nonexistent_v0cday_test">]><root>&xxe;</root>',
         [r"failed to load external entity", r"No such file", r"FileNotFoundException", r"SYSTEM.*entity"],
         "error_entity",
     ),

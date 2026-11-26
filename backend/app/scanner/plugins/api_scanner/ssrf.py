@@ -14,7 +14,7 @@ import urllib.parse
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.ssrf")
+logger = logging.getLogger("v0cday.api_scanner.ssrf")
 
 _METADATA_URLS = [
     ("http://169.254.169.254/latest/meta-data/", "AWS", ["ami-id", "instance-id", "hostname"]),

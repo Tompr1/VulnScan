@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.cve.reference_datasets import latest_dataset_path
 
-logger = logging.getLogger("vulnscan.threat_intel")
+logger = logging.getLogger("v0cday.threat_intel")
 
 _CACHE_TTL_SECONDS = 300.0
 

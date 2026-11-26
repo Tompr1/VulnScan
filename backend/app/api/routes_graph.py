@@ -14,7 +14,7 @@ from app.api.deps import get_db, require_role
 from app.db import models
 from app.graph.neo4j_client import Neo4jClient
 
-logger = logging.getLogger("vulnscan.graph")
+logger = logging.getLogger("v0cday.graph")
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 

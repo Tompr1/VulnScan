@@ -52,7 +52,7 @@ export function Nav({ page, setPage, onSignOut, counts = {}, version = "", root 
     <aside className="nav">
       <div className="nav-brand">
         <div className="nav-logo">V</div>
-        <div className="nav-name">VulnScan<span className="ver">{version ? `v${version}` : ""}</span></div>
+        <div className="nav-name">v0cday<span className="ver">{version ? `v${version}` : ""}</span></div>
       </div>
       <div className="nav-search">
         <span className="icon"><Icons.Search size={14}/></span>
@@ -80,9 +80,6 @@ export function Nav({ page, setPage, onSignOut, counts = {}, version = "", root 
       </div>
       <div className="nav-foot">
         <NavUser onSignOut={onSignOut} setPage={root ? null : setPage}/>
-        <div style={{padding: "10px 16px 14px", fontSize: 11, color: "var(--text-4)", textAlign: "center", lineHeight: 1.5}}>
-          Powered by <span style={{fontWeight: 600, color: "var(--text-3)"}}>Gondrong</span>
-        </div>
       </div>
     </aside>
   );
@@ -307,7 +304,7 @@ export function Topbar({ crumbs, setPage, context = null, onOpenSelector }) {
         </div>
         )}
 
-        <button className="topbar-btn" title="Help" onClick={() => window.open("https://github.com/Gondrong/VulnScan-Platform", "_blank")}>
+        <button className="topbar-btn" title="Help" onClick={() => window.open("https://github.com/Tompr1/VulnScan", "_blank")}>
           <Icons.Help size={16}/>
         </button>
       </div>

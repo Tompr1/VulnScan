@@ -28,7 +28,7 @@ from app.core.password import PASSWORD_MIN_LENGTH, hash_password
 from app.db import models
 from app.scanner.cancellation import CancellationSignal
 
-logger = logging.getLogger("vulnscan.access")
+logger = logging.getLogger("v0cday.access")
 
 router = APIRouter(prefix="/access", tags=["access"], dependencies=[Depends(require_global_admin)])
 

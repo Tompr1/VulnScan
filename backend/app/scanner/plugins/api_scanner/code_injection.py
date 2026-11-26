@@ -14,7 +14,7 @@ import re
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.code_injection")
+logger = logging.getLogger("v0cday.api_scanner.code_injection")
 
 _TIME_DELAY = 5
 _MATH_RESULT = "5765761"  # 2401 * 2401
@@ -28,7 +28,7 @@ _MATH_PAYLOADS = [
 # Language-specific payloads
 _PYTHON_PAYLOADS = [
     (f"__import__('time').sleep({_TIME_DELAY})", "python_sleep", "time"),
-    ("__import__('os').popen('echo VULNSCAN_CODE').read()", "python_popen", "inband"),
+    ("__import__('os').popen('echo V0CDAY_CODE').read()", "python_popen", "inband"),
     ("str(7*7)", "49", "python_str_eval", "math"),
 ]
 
@@ -163,7 +163,7 @@ async def check(client, endpoints, ctx) -> list[Finding]:
 
             # 3. In-band detection (language-specific markers)
             inband_checks = [
-                ("VULNSCAN_CODE", _PYTHON_PAYLOADS[1][0], "python_inband"),
+                ("V0CDAY_CODE", _PYTHON_PAYLOADS[1][0], "python_inband"),
                 ("PHP Version", _PHP_PAYLOADS[1][0], "php_inband"),
             ]
             for marker, payload, desc in inband_checks:

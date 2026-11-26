@@ -17,7 +17,7 @@ from app.api.deps import get_db, require_role
 from app.db import models
 from app.core.job_queue import QueueUnavailableError, get_job_queue
 
-logger = logging.getLogger("vulnscan.analytics")
+logger = logging.getLogger("v0cday.analytics")
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 

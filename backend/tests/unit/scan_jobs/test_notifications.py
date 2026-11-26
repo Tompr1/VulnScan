@@ -165,7 +165,7 @@ def test_slack_liste_chaque_appareil_avec_son_lien_et_un_bouton_vers_l_inventair
     channel.device_alert({}, device_alert(alert_item(is_kev=True)))
 
     [(_, message)] = sent
-    assert message["text"] == "VulnScan: 1 new device issue on 1 device (1 actively exploited)"
+    assert message["text"] == "v0cday: 1 new device issue on 1 device (1 actively exploited)"
     blocks = message["blocks"]
     assert blocks[0]["text"]["text"] == "1 new device issue on 1 device (1 actively exploited)"
     assert blocks[1]["text"]["text"] == (
@@ -229,7 +229,7 @@ def test_l_e_mail_donne_le_lien_de_chaque_appareil():
     channel.device_alert({}, device_alert())
 
     [(_, subject, body)] = sent
-    assert subject == "VulnScan: 1 new device issue on 1 device"
+    assert subject == "v0cday: 1 new device issue on 1 device"
     assert body.splitlines()[:2] == [
         "- [CRITICAL] PC-COMPTA-04: Google Chrome 131 has 1 known vulnerabilities",
         "  https://vs.example/#/inventory/devices/7",

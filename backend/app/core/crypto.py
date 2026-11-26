@@ -7,7 +7,7 @@ import logging
 from cryptography.fernet import Fernet, InvalidToken
 from app.core.config import settings
 
-logger = logging.getLogger("vulnscan.crypto")
+logger = logging.getLogger("v0cday.crypto")
 
 
 def _fernet() -> Fernet:

@@ -20,7 +20,7 @@ import re
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.spec_hygiene")
+logger = logging.getLogger("v0cday.api_scanner.spec_hygiene")
 
 _SECRET_PATTERNS = [
     (re.compile(r"sk_live_[A-Za-z0-9]{16,}"), "Stripe live secret key"),

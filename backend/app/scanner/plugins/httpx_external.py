@@ -17,7 +17,7 @@ import tempfile
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.plugin.httpx")
+logger = logging.getLogger("v0cday.plugin.httpx")
 
 META = PluginMeta(
     plugin_id="ext.httpx",

@@ -19,7 +19,7 @@ import urllib.parse
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.host_header_injection")
+logger = logging.getLogger("v0cday.host_header_injection")
 
 META = PluginMeta(
     plugin_id="web.host_header_injection",
@@ -33,7 +33,7 @@ META = PluginMeta(
     timeout_seconds=20.0,
 )
 
-_CANARY = "evil.vulnscan-test.com"
+_CANARY = "evil.v0cday-test.com"
 
 _TESTS = [
     {
@@ -79,7 +79,7 @@ async def _send_request(host: str, port: int, path: str, scheme: str,
         # Build request — use real Host unless overridden
         headers = {
             "Host": real_host,
-            "User-Agent": "VulnScan/2.1",
+            "User-Agent": "v0cday/2.1",
             "Accept": "*/*",
             "Connection": "close",
         }

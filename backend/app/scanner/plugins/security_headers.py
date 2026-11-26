@@ -179,7 +179,7 @@ async def _fetch_headers(url: str, timeout: float = 8.0) -> tuple[int, dict]:
         request = (
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {host}\r\n"
-            f"User-Agent: VulnScan/2.1\r\n"
+            f"User-Agent: v0cday/2.1\r\n"
             f"Accept: */*\r\n"
             f"Connection: close\r\n\r\n"
         )
@@ -230,7 +230,7 @@ async def _fetch_cors_test(url: str, origin: str, timeout: float = 8.0) -> tuple
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {host}\r\n"
             f"Origin: {origin}\r\n"
-            f"User-Agent: VulnScan/2.1\r\n"
+            f"User-Agent: v0cday/2.1\r\n"
             f"Accept: */*\r\n"
             f"Connection: close\r\n\r\n"
         )

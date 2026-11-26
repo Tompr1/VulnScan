@@ -1,7 +1,7 @@
 """
 AI Analysis Prompts — system and user prompt builders for each analysis mode.
 
-Provides the prompt templates that drive VulnScan's AI analysis engine across
+Provides the prompt templates that drive v0cday's AI analysis engine across
 four modes: validate, full analysis, full + exploit, and single-finding PoC.
 """
 import json
@@ -98,7 +98,7 @@ def _parse_evidence_kv(evidence: str) -> dict:
 _SCANNER_CONTEXT = """
 ## Scanner context
 
-You are analysing output from **VulnScan**, an automated vulnerability scanner.
+You are analysing output from **v0cday**, an automated vulnerability scanner.
 Understanding the data format is essential for accurate analysis.
 
 ### Data format
@@ -476,7 +476,7 @@ The client has signed a Rules of Engagement document and explicitly approved exp
 
 ## Scanner context
 
-The finding below was produced by **VulnScan**, an automated vulnerability scanner.
+The finding below was produced by **v0cday**, an automated vulnerability scanner.
 The **evidence** field contains space-separated `key=value` pairs with the raw
 detection data (e.g. `url=/login param=id type=error db=mysql payload=extractvalue`).
 **Parse these values** — they are your primary input for building the exploit.

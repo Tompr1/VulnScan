@@ -18,7 +18,7 @@ import re
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.jwt")
+logger = logging.getLogger("v0cday.api_scanner.jwt")
 
 _WEAK_SECRETS = [
     "secret", "password", "123456", "key", "jwt_secret", "changeme",

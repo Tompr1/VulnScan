@@ -12,7 +12,7 @@ import logging
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.cve_verifier")
+logger = logging.getLogger("v0cday.cve_verifier")
 
 META = PluginMeta(
     plugin_id="cve.verifier",

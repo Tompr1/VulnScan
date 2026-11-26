@@ -76,7 +76,7 @@ async def _ws_upgrade(host: str, port: int, path: str, use_tls: bool,
             "Connection": "Upgrade",
             "Sec-WebSocket-Key": key,
             "Sec-WebSocket-Version": "13",
-            "User-Agent": "VulnScan/2.1",
+            "User-Agent": "v0cday/2.1",
         }
         if origin:
             headers["Origin"] = origin

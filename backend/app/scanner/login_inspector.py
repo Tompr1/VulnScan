@@ -18,7 +18,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
-logger = logging.getLogger("vulnscan.login_inspector")
+logger = logging.getLogger("v0cday.login_inspector")
 
 _MAX_BYTES = 1 * 1024 * 1024  # 1 MB cap on login-page HTML
 _DEFAULT_TIMEOUT = 10.0
@@ -227,7 +227,7 @@ async def inspect_login_page(
         async with httpx.AsyncClient(
             timeout=timeout, verify=False, follow_redirects=True,
         ) as client:
-            resp = await client.get(url, headers={"User-Agent": "VulnScan/2.1 LoginInspector"})
+            resp = await client.get(url, headers={"User-Agent": "v0cday/2.1 LoginInspector"})
     except httpx.TimeoutException:
         return InspectResult(login_url=url, final_url=url, fetched_status=0,
                              error=f"Timed out fetching {url} after {timeout}s")

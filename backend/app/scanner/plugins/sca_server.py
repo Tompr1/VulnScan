@@ -19,7 +19,7 @@ import paramiko
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.sca_server")
+logger = logging.getLogger("v0cday.sca_server")
 
 META = PluginMeta(
     plugin_id="audit.sca_server",

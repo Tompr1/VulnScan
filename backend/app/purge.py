@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from app.db import models
 from app.db.session import Base
 
-logger = logging.getLogger("vulnscan.purge")
+logger = logging.getLogger("v0cday.purge")
 
 # Reference data shared by every client: kept.
 KEPT_TABLES = frozenset({"cve_catalog", "cve_cpe_matches", "cve_datasets", "cve_sync_state", "platform_settings"})

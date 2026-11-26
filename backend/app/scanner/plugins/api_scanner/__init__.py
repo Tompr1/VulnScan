@@ -16,7 +16,7 @@ from typing import Any
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
 from app.scanner.context import stable_fingerprint, ScanContext
 
-logger = logging.getLogger("vulnscan.api_scanner")
+logger = logging.getLogger("v0cday.api_scanner")
 
 META = PluginMeta(
     plugin_id="api.scanner",

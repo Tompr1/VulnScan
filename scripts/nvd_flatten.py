@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Flatten NVD CVE data into a simple JSON format for the VulnScan platform.
+Flatten NVD CVE data into a simple JSON format for the v0cday platform.
 
 Supports BOTH:
   - Old NVD JSON feeds (retired Dec 2023): {"CVE_Items": [...]}

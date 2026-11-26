@@ -67,18 +67,18 @@ export default function App() {
   }
 
   const crumbs = ((p) => {
-    if (p === "dashboard")    return ["VulnScan", "Dashboard"];
-    if (p === "assets")       return openedAsset ? ["VulnScan", "Assets", openedAsset.name] : ["VulnScan", "Assets"];
-    if (p === "jobs")         return openedJob ? ["VulnScan", "Scans", `#${openedJob.id}`] : ["VulnScan", "Scan jobs"];
-    if (p === "profiles")     return ["VulnScan", "Profiles"];
-    if (p === "reports")      return ["VulnScan", "Reports"];
-    if (p === "credentials")  return ["VulnScan", "Credentials"];
-    if (p === "datasets")     return ["VulnScan", "Datasets"];
-    if (p === "threat-intel") return ["VulnScan", "Threat Intel"];
-    if (p === "attack-graph") return ["VulnScan", "Attack Graph"];
-    if (p === "analytics")    return ["VulnScan", "Analytics"];
-    if (p === "settings")     return ["VulnScan", "Settings"];
-    return ["VulnScan"];
+    if (p === "dashboard")    return ["v0cday", "Dashboard"];
+    if (p === "assets")       return openedAsset ? ["v0cday", "Assets", openedAsset.name] : ["v0cday", "Assets"];
+    if (p === "jobs")         return openedJob ? ["v0cday", "Scans", `#${openedJob.id}`] : ["v0cday", "Scan jobs"];
+    if (p === "profiles")     return ["v0cday", "Profiles"];
+    if (p === "reports")      return ["v0cday", "Reports"];
+    if (p === "credentials")  return ["v0cday", "Credentials"];
+    if (p === "datasets")     return ["v0cday", "Datasets"];
+    if (p === "threat-intel") return ["v0cday", "Threat Intel"];
+    if (p === "attack-graph") return ["v0cday", "Attack Graph"];
+    if (p === "analytics")    return ["v0cday", "Analytics"];
+    if (p === "settings")     return ["v0cday", "Settings"];
+    return ["v0cday"];
   })(page);
 
   function setPageWrap(p, tab) { setOpenedJob(null); setOpenedAsset(null); setSettingsTab(p === "settings" ? (tab || null) : null); setPage(p); }

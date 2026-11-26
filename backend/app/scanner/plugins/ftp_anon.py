@@ -16,7 +16,7 @@ import re
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.ftp_anon")
+logger = logging.getLogger("v0cday.ftp_anon")
 
 META = PluginMeta(
     plugin_id="infra.ftp.anonymous",

@@ -14,7 +14,7 @@ from app.db import models
 from app.ai.providers import EmptyResponseError, get_provider
 from app.ai.prompts import build_prompt, build_poc_prompt
 
-logger = logging.getLogger("vulnscan.ai.engine")
+logger = logging.getLogger("v0cday.ai.engine")
 
 
 def _update_progress(db, analysis: models.AiAnalysis, progress: dict) -> None:

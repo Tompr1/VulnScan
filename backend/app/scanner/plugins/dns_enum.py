@@ -16,7 +16,7 @@ import time
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.dns_enum")
+logger = logging.getLogger("v0cday.dns_enum")
 
 META = PluginMeta(
     plugin_id="recon.dns.enum",

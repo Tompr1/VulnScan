@@ -16,7 +16,7 @@ import time
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.sqli")
+logger = logging.getLogger("v0cday.api_scanner.sqli")
 
 _TIME_DELAY = 5
 

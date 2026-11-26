@@ -23,7 +23,7 @@ import ssl
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.cloud_storage")
+logger = logging.getLogger("v0cday.cloud_storage")
 
 META = PluginMeta(
     plugin_id="cloud.storage.misconfig",
@@ -64,7 +64,7 @@ async def _http_get(host: str, port: int, path: str, scheme: str = "https",
 
         headers = {
             "Host": host,
-            "User-Agent": "VulnScan/2.1",
+            "User-Agent": "v0cday/2.1",
             "Accept": "*/*",
             "Connection": "close",
         }

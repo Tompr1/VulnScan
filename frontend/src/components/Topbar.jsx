@@ -15,7 +15,7 @@ export default function Topbar() {
   const [now, setNow] = useState(new Date());
   const location = useLocation();
   const email = localStorage.getItem("vs_email") || "admin@local";
-  const [section, sub] = TITLES[location.pathname] || ["VULNSCAN", ""];
+  const [section, sub] = TITLES[location.pathname] || ["V0CDAY", ""];
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);

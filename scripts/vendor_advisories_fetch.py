@@ -40,7 +40,7 @@ def _fetch_json(url: str, timeout: int = _TIMEOUT) -> Any:
     """Fetch URL with retries and backoff."""
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "VulnScan-Platform/2.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "v0cday-Platform/2.0"})
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read())
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
@@ -55,7 +55,7 @@ def _fetch_raw(url: str, timeout: int = _TIMEOUT) -> bytes:
     """Fetch raw bytes with retries."""
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "VulnScan-Platform/2.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "v0cday-Platform/2.0"})
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.read()
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:

@@ -70,7 +70,7 @@ export default function Sidebar({ onLogout }) {
     <nav className="sidebar" style={styles.sidebar}>
       <div style={styles.topBar} />
       <div className="sidebar-logo" style={styles.logo}>
-        <div className="sidebar-logo-text" style={styles.logoText}>VULNSCAN</div>
+        <div className="sidebar-logo-text" style={styles.logoText}>V0CDAY</div>
         <div className="sidebar-logo-sub" style={styles.logoSub}>// THREAT INTELLIGENCE</div>
         <div className="sidebar-logo-badge" style={styles.logoBadge}>ENTERPRISE</div>
       </div>

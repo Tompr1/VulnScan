@@ -107,7 +107,7 @@ async def _http_request(host: str, port: int, method: str, path: str,
 
         headers = {
             "Host": host,
-            "User-Agent": "VulnScan/2.1",
+            "User-Agent": "v0cday/2.1",
             "Accept": "*/*",
             "Content-Type": content_type,
             "Content-Length": str(len(body)),

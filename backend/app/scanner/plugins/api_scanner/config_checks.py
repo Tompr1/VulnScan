@@ -12,7 +12,7 @@ import time
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.config")
+logger = logging.getLogger("v0cday.api_scanner.config")
 
 # OWASP API Security Top 10 references
 _OWASP_API = {

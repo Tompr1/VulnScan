@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-logger = logging.getLogger("vulnscan.api_scanner.http")
+logger = logging.getLogger("v0cday.api_scanner.http")
 
 
 @dataclass
@@ -127,7 +127,7 @@ class ApiHttpClient:
                 verify=self.verify_ssl,
                 follow_redirects=False,
                 headers={
-                    "User-Agent": "VulnScan-APIScanner/2.1",
+                    "User-Agent": "v0cday-APIScanner/2.1",
                     "Accept": "application/json, text/html, */*",
                     **self._auth_headers,
                 },

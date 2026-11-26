@@ -20,7 +20,7 @@ import logging
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.type_confusion")
+logger = logging.getLogger("v0cday.api_scanner.type_confusion")
 
 _MAX_ENDPOINTS = 20
 _MAX_PARAMS = 4

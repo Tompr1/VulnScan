@@ -316,8 +316,8 @@ fi
 # ── Install one-click updater service ────────────────────────────────────────
 UPDATER_SCRIPT="${ROOT_DIR}/scripts/install-updater.sh"
 if [[ -f "$UPDATER_SCRIPT" ]] && command -v systemctl >/dev/null 2>&1; then
-  if systemctl is-active vulnscan-updater >/dev/null 2>&1; then
-    green " Updater: ✓ vulnscan-updater.service already active"
+  if systemctl is-active v0cday-updater >/dev/null 2>&1; then
+    green " Updater: ✓ v0cday-updater.service already active"
   else
     echo ""
     green "Installing one-click updater service..."

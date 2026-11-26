@@ -6,7 +6,7 @@ import json
 import logging
 import os
 
-logger = logging.getLogger("vulnscan.cve")
+logger = logging.getLogger("v0cday.cve")
 
 
 def load_json(path: str) -> list[dict]:

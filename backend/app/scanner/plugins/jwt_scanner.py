@@ -195,7 +195,7 @@ async def _fetch_url(url: str, method: str = "GET", body: str = "",
 
         req_headers = {
             "Host": host,
-            "User-Agent": "VulnScan/2.1",
+            "User-Agent": "v0cday/2.1",
             "Accept": "*/*",
             "Connection": "close",
         }

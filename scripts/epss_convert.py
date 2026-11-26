@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Convert EPSS CSV scores into JSON for the VulnScan platform.
+Convert EPSS CSV scores into JSON for the v0cday platform.
 
 The EPSS CSV file from https://epss.cyentia.com has a comment line at the top:
   #model_version:v2023.03.01,score_date:2026-02-26T00:00:00+0000

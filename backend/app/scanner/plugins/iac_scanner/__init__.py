@@ -23,7 +23,7 @@ from app.scanner.context import stable_fingerprint
 from .parser import parse_upload, decode_archive, ParsedFile
 from .rules import CHECKS, RuleHit
 
-logger = logging.getLogger("vulnscan.iac.orchestrator")
+logger = logging.getLogger("v0cday.iac.orchestrator")
 
 
 _KIND_LABELS = {

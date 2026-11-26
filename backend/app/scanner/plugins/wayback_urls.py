@@ -15,7 +15,7 @@ import httpx
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.plugin.wayback_urls")
+logger = logging.getLogger("v0cday.plugin.wayback_urls")
 
 META = PluginMeta(
     plugin_id="recon.wayback_urls",
@@ -135,7 +135,7 @@ class Check(Plugin):
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(25.0),
                 follow_redirects=True,
-                headers={"User-Agent": "VulnScan/2.1"},
+                headers={"User-Agent": "v0cday/2.1"},
             ) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()

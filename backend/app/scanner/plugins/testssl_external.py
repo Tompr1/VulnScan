@@ -16,7 +16,7 @@ import shutil
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.plugin.testssl")
+logger = logging.getLogger("v0cday.plugin.testssl")
 
 META = PluginMeta(
     plugin_id="ext.testssl",

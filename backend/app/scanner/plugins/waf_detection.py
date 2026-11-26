@@ -27,7 +27,7 @@ import ssl
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.waf_detection")
+logger = logging.getLogger("v0cday.waf_detection")
 
 META = PluginMeta(
     plugin_id="web.waf.detection",

@@ -26,7 +26,7 @@ from app.scan_jobs.submission import (
 from app.scanner.cancellation import CancellationSignal, RedisCancellationSignal
 from app.scanner.plugins.loader import builtin_registry
 
-logger = logging.getLogger("vulnscan.scan")
+logger = logging.getLogger("v0cday.scan")
 
 router = APIRouter(prefix="/scan", tags=["scan"])
 

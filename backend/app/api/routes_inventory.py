@@ -26,7 +26,7 @@ from app.inventory.intune.graph_client import GraphError
 from app.inventory.repository import SqlInventoryReadModel
 from app.scan_jobs.submission import ScanJobSubmission
 
-logger = logging.getLogger("vulnscan.inventory")
+logger = logging.getLogger("v0cday.inventory")
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 

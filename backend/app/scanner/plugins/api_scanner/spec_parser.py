@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-logger = logging.getLogger("vulnscan.api_scanner.parser")
+logger = logging.getLogger("v0cday.api_scanner.parser")
 
 try:
     import yaml

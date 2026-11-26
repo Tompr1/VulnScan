@@ -17,7 +17,7 @@ import httpx
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.plugin.subdomain_takeover")
+logger = logging.getLogger("v0cday.plugin.subdomain_takeover")
 
 META = PluginMeta(
     plugin_id="recon.subdomain_takeover",
@@ -308,7 +308,7 @@ async def _check_http_fingerprint(
                 timeout=httpx.Timeout(timeout),
                 follow_redirects=True,
                 verify=False,
-                headers={"User-Agent": "VulnScan/2.1"},
+                headers={"User-Agent": "v0cday/2.1"},
             ) as client:
                 resp = await client.get(f"{scheme}://{subdomain}/")
                 body = resp.text[:10000]

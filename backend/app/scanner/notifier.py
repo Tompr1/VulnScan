@@ -7,7 +7,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
-logger = logging.getLogger("vulnscan.notifier")
+logger = logging.getLogger("v0cday.notifier")
 
 
 def _get_session():
@@ -27,7 +27,7 @@ def send_slack_notification(config: dict, message) -> bool:
 
     if isinstance(message, dict):
         payload = message
-        payload.setdefault("text", "VulnScan notification")
+        payload.setdefault("text", "v0cday notification")
     else:
         payload = {"text": str(message)}
 
@@ -72,7 +72,7 @@ def send_teams_notification(config: dict, message) -> bool:
                             "type": "TextBlock",
                             "size": "Large",
                             "weight": "Bolder",
-                            "text": message.get("title", "VulnScan Notification"),
+                            "text": message.get("title", "v0cday Notification"),
                             "wrap": True,
                         },
                         {
@@ -142,7 +142,7 @@ def send_email_notification(config: dict, subject: str, body: str) -> bool:
     smtp_port = config.get("smtp_port", 587)
     smtp_user = config.get("smtp_user")
     smtp_pass = config.get("smtp_pass")
-    from_email = config.get("from_email", "vulnscan@noreply.local")
+    from_email = config.get("from_email", "v0cday@noreply.local")
     to_email = config.get("to_email")
 
     if not all([smtp_host, to_email]):
@@ -174,13 +174,13 @@ def send_email_notification(config: dict, subject: str, body: str) -> bool:
 
 def dispatch_test_notification(provider: str, config: dict) -> bool:
     if provider == "slack":
-        return send_slack_notification(config, "Test notification from VulnScan Platform!")
+        return send_slack_notification(config, "Test notification from v0cday Platform!")
     elif provider == "teams":
-        return send_teams_notification(config, "Test notification from VulnScan Platform!")
+        return send_teams_notification(config, "Test notification from v0cday Platform!")
     elif provider == "webhook":
-        return send_webhook_notification(config, {"event": "test", "message": "Test notification from VulnScan Platform!"})
+        return send_webhook_notification(config, {"event": "test", "message": "Test notification from v0cday Platform!"})
     elif provider == "email":
-        return send_email_notification(config, "VulnScan Test", "This is a test notification from the VulnScan Platform.")
+        return send_email_notification(config, "v0cday Test", "This is a test notification from the v0cday Platform.")
 
     logger.error("Unknown integration provider: %s", provider)
     return False

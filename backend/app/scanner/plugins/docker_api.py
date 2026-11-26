@@ -19,7 +19,7 @@ import ssl
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.docker_api")
+logger = logging.getLogger("v0cday.docker_api")
 
 META = PluginMeta(
     plugin_id="infra.docker.api",
@@ -60,7 +60,7 @@ async def _http_get(host: str, port: int, path: str, scheme: str = "http",
         request = (
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {host}\r\n"
-            f"User-Agent: VulnScan/2.1\r\n"
+            f"User-Agent: v0cday/2.1\r\n"
             f"Accept: application/json\r\n"
             f"Connection: close\r\n\r\n"
         )

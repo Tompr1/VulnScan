@@ -19,7 +19,7 @@ from fastapi import Request
 
 from app.core.config import settings
 
-logger = logging.getLogger("vulnscan.net")
+logger = logging.getLogger("v0cday.net")
 
 
 def _networks() -> list:

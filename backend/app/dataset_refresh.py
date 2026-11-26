@@ -1,5 +1,5 @@
 """
-Dataset refresh module — fetches and converts datasets for the VulnScan Platform.
+Dataset refresh module — fetches and converts datasets for the v0cday Platform.
 
 Adapted from scripts/fast_update_datasets.py for use inside the RQ worker container.
 Each refresh_* function returns (success: bool, output_path: str | None, error: str | None).
@@ -20,7 +20,7 @@ import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-logger = logging.getLogger("vulnscan.dataset_refresh")
+logger = logging.getLogger("v0cday.dataset_refresh")
 
 # ── Paths (inside Docker container) ─────────────────────────────────────────
 RAW_NVD = Path("/data/raw/nvd")
@@ -238,7 +238,7 @@ def _fetch_cveorg_single(cve_id: str):
         data = json.loads(
             _fetch_url(
                 f"{CVEORG_API}/{cve_id}",
-                {"Accept": "application/json", "User-Agent": "VulnScan/2.0"},
+                {"Accept": "application/json", "User-Agent": "v0cday/2.0"},
                 15,
             )
         )

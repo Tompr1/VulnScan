@@ -172,7 +172,7 @@ async def _http_request(host, port, method, path, body="",
         else:
             r, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
 
-        hdrs = f"Host: {host}\r\nUser-Agent: VulnScan/2.1\r\nAccept: */*\r\nConnection: close\r\n"
+        hdrs = f"Host: {host}\r\nUser-Agent: v0cday/2.1\r\nAccept: */*\r\nConnection: close\r\n"
         if method == "POST":
             hdrs += f"Content-Type: {content_type}\r\nContent-Length: {len(body)}\r\n"
         req = f"{method} {path} HTTP/1.1\r\n{hdrs}\r\n{body}"

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to VulnScan Platform are documented here.
+All notable changes to v0cday Platform are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Earlier versions (v1.0.0 – v2.1.3) are also documented in `README.md`.
 
@@ -548,7 +548,7 @@ mislabelled by the stale-analysis watchdog.
 
 - **No DB migration required** — bcrypt hashes are stored in the same `password_hash` column (bcrypt hashes start with `$2b$`, SHA256 are 64-char hex — the verifier auto-detects).
 - **Backward compatible** — users with old SHA256 hashes can still log in; their hash is silently upgraded to bcrypt on next login.
-- **CORS change** — if you access VulnScan from a non-localhost URL, add your origin to `CORS_ORIGINS` in `.env` (comma-separated). Set to `*` to restore the old behavior (not recommended).
+- **CORS change** — if you access v0cday from a non-localhost URL, add your origin to `CORS_ORIGINS` in `.env` (comma-separated). Set to `*` to restore the old behavior (not recommended).
 - Run `docker compose up -d --build` to apply.
 
 ---
@@ -624,7 +624,7 @@ Each tool accepts per-scan configuration via profile `options_json`:
 - The existing New Credential modal now supports edit mode: fields pre-filled, secret field shows "(leave blank to keep current)" and is optional, title and button text adapt automatically.
 
 **Automatic Updater Service Installation**
-- `bootstrap.sh` now automatically installs the `vulnscan-updater.service` systemd unit during first-time setup, enabling one-click platform updates from Settings → System without a separate manual step.
+- `bootstrap.sh` now automatically installs the `v0cday-updater.service` systemd unit during first-time setup, enabling one-click platform updates from Settings → System without a separate manual step.
 - Skips gracefully if the service is already active, if not running as root/sudo, or if systemd is not available.
 
 ### Changed
@@ -655,7 +655,7 @@ Added a pre-check pattern across 14 scanner plugins. Before running heuristic de
 - **`web.ldap_injection`** — Baseline LDAP error pattern check; skips payload loop if endpoint naturally contains LDAP error strings.
 
 **AI Analysis Prompts Overhaul**
-- Shared `_SCANNER_CONTEXT` block injected into all system prompts: explains VulnScan's data format (`plugin_id` namespaces, `key=value` evidence parsing, confidence calibration, `is_kev` meaning) and documents 6 common false-positive patterns.
+- Shared `_SCANNER_CONTEXT` block injected into all system prompts: explains v0cday's data format (`plugin_id` namespaces, `key=value` evidence parsing, confidence calibration, `is_kev` meaning) and documents 6 common false-positive patterns.
 - `_serialize_finding` — increased evidence (300→600), description (500→800), and remediation (200→500) character limits; added `references` field.
 - `_truncate_findings` — now sorts by severity then descending confidence; summary items include confidence scores.
 - **Validate mode** — new 6-step validation methodology (evidence audit → technology coherence → confidence calibration → cross-correlation → context plausibility → severity adjustment).

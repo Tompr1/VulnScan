@@ -15,7 +15,7 @@ import re
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.graphql")
+logger = logging.getLogger("v0cday.api_scanner.graphql")
 
 _GQL_PATHS = ["/graphql", "/api/graphql", "/v1/graphql", "/gql", "/query", "/graphiql"]
 

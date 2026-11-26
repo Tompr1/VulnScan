@@ -19,7 +19,7 @@ import urllib.parse
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.crlf_injection")
+logger = logging.getLogger("v0cday.crlf_injection")
 
 META = PluginMeta(
     plugin_id="web.crlf_injection",
@@ -33,7 +33,7 @@ META = PluginMeta(
     timeout_seconds=20.0,
 )
 
-_CANARY_HEADER = "X-VulnScan-CRLF"
+_CANARY_HEADER = "X-v0cday-CRLF"
 _CANARY_VALUE = "injected"
 
 # CRLF payloads — each tries to inject our canary header into the response
@@ -148,7 +148,7 @@ class Check(Plugin):
                     request = (
                         f"GET {full_path} HTTP/1.1\r\n"
                         f"Host: {host}\r\n"
-                        f"User-Agent: VulnScan/2.1\r\n"
+                        f"User-Agent: v0cday/2.1\r\n"
                         f"Connection: close\r\n\r\n"
                     )
 

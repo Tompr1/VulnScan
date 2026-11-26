@@ -2,7 +2,7 @@
   <img width="1918" height="987" alt="image" src="https://github.com/user-attachments/assets/e076ad85-3db1-46a3-9eb1-53fd6fe8d698" />
 </p>
 
-<h1 align="center">VulnScan Platform</h1>
+<h1 align="center">v0cday Platform</h1>
 <p align="center">
   <strong>Risk-Based Vulnerability Management — self-hosted, AI-augmented, MIT-licensed</strong>
 </p>
@@ -21,7 +21,7 @@
 
 ## Overview
 
-VulnScan is a self-hosted Risk-Based Vulnerability Management (RBVM) platform built for security teams. It combines automated scanning with multi-provider AI analysis to **find**, **validate**, **prioritize**, and **remediate** vulnerabilities across networks, web apps, APIs, IoT, cloud infrastructure, and infrastructure-as-code.
+v0cday is a self-hosted Risk-Based Vulnerability Management (RBVM) platform built for security teams. It combines automated scanning with multi-provider AI analysis to **find**, **validate**, **prioritize**, and **remediate** vulnerabilities across networks, web apps, APIs, IoT, cloud infrastructure, and infrastructure-as-code.
 
 **v3.2.1 highlights** *(2026-10-26)* — see [Changelog](#changelog) for full notes.
 
@@ -109,8 +109,8 @@ VulnScan is a self-hosted Risk-Based Vulnerability Management (RBVM) platform bu
 ### Installation
 
 ```bash
-git clone https://github.com/Gondrong/VulnScan-Platform.git
-cd VulnScan-Platform
+git clone https://github.com/Tompr1/VulnScan.git
+cd VulnScan
 ./bootstrap.sh
 ```
 > ⚠️ If your server/linux via VMWare you must change the value from "dev": "vite" to "dev": "node node_modules/vite/bin/vite.js" at frontend/package.json. if not, your frontend not visible
@@ -319,7 +319,7 @@ These run as separate scan types via dedicated endpoints, not as part of a norma
 
 ## Threat Intelligence
 
-VulnScan ships **two complementary threat-intel surfaces**:
+v0cday ships **two complementary threat-intel surfaces**:
 
 ### 1. Threat Intel page *(new in v3.0)*
 
@@ -428,7 +428,7 @@ GET  /scan/iac/kinds        # list supported formats
 
 ## AI Deep Analysis
 
-VulnScan integrates with multiple AI providers for intelligent vulnerability analysis:
+v0cday integrates with multiple AI providers for intelligent vulnerability analysis:
 
 | Provider | Model | Configuration |
 |----------|-------|---------------|
@@ -572,7 +572,7 @@ All integrations support **per-provider Test buttons** that send a real test mes
 
 ### Updating
 
-VulnScan ships a **one-click update** under **Settings → System**. The host-level updater service (install once via `scripts/install-updater.sh`) handles `git pull` + `docker compose build` + `up -d` while preserving `.env`.
+v0cday ships a **one-click update** under **Settings → System**. The host-level updater service (install once via `scripts/install-updater.sh`) handles `git pull` + `docker compose build` + `up -d` while preserving `.env`.
 
 For manual updates:
 
@@ -634,7 +634,7 @@ branch named by the `DEPLOY_BRANCH` repository variable (default `main`) on a
 VM through a **self-hosted runner** (label `vulnscan-vm`). The runner pulls its
 jobs from GitHub, so the VM needs no inbound port.
 
-The job calls `scripts/deploy.sh`, which syncs the commit to `~/vulnscan`,
+The job calls `scripts/deploy.sh`, which syncs the commit to `~/v0cday`,
 creates `.env` with random secrets on the first run, rebuilds the containers,
 waits for `/healthz` and runs `bootstrap.sh` once. `.env` and `data/` are never
 overwritten. To roll back, re-run the deploy job of an older commit in the
@@ -738,8 +738,3 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete history.
 
 This project is licensed under the [MIT License](LICENSE).
 
----
-
-<p align="center">
-  <sub>Built by <a href="https://github.com/Gondrong">Gondrong</a></sub>
-</p>

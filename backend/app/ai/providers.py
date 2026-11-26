@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-logger = logging.getLogger("vulnscan.ai")
+logger = logging.getLogger("v0cday.ai")
 
 # Prefix that addresses one specific ai_provider_configs row, so two providers
 # of the same type (two OpenRouter models, say) stay distinguishable.

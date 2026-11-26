@@ -176,7 +176,7 @@ async def _fetch_url(url: str, timeout: float = 8.0) -> tuple[int, str, dict]:
         request = (
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {host}\r\n"
-            f"User-Agent: VulnScan/2.1\r\n"
+            f"User-Agent: v0cday/2.1\r\n"
             f"Accept: */*\r\n"
             f"Connection: close\r\n\r\n"
         )

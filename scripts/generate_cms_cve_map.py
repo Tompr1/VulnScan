@@ -4,7 +4,7 @@ Generate a CMS CVE map from the flattened NVD data.
 
 Scans nvd_cpe_cve.json for entries that match known CMS products
 (WordPress, Joomla, Drupal, Magento, etc.) and outputs a simplified
-cms_cve_map.json for the VulnScan cms_match plugin.
+cms_cve_map.json for the v0cday cms_match plugin.
 
 Usage:
     python3 generate_cms_cve_map.py --nvd data/cve/nvd_cpe_cve.json --out data/cve/cms_cve_map.json

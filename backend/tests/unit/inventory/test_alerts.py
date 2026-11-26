@@ -149,21 +149,21 @@ def test_le_titre_d_une_alerte_retire_le_nom_de_l_appareil():
 def test_l_objet_resume_les_nouveaux_problemes_et_les_cve_exploitees():
     alert = InventoryAlert(12, "intune:Tenant", (item("a"), item("b", is_kev=True), item("c", device_id=8)), resolved=1, open_issues=40)
 
-    assert alert.subject == "VulnScan: 3 new device issues on 2 devices (1 actively exploited)"
+    assert alert.subject == "v0cday: 3 new device issues on 2 devices (1 actively exploited)"
     assert alert.footer == "Audit job #12 of intune:Tenant: 1 issue resolved since the previous audit, 40 open in total."
 
 
 def test_l_objet_du_bilan_initial_le_dit():
     alert = InventoryAlert(12, "intune:Tenant", (item("a"),), baseline=True)
 
-    assert alert.subject == "VulnScan: first device audit of intune:Tenant, 1 open issue on 1 device"
+    assert alert.subject == "v0cday: first device audit of intune:Tenant, 1 open issue on 1 device"
     assert "only new detections are alerted" in alert.footer
 
 
 @pytest.mark.parametrize(
     ("base", "device", "devices"),
     [
-        ("https://vulnscan.example.com/", "https://vulnscan.example.com/#/c/3/inventory/devices/7", "https://vulnscan.example.com/#/c/3/inventory"),
+        ("https://v0cday.example.com/", "https://v0cday.example.com/#/c/3/inventory/devices/7", "https://v0cday.example.com/#/c/3/inventory"),
         ("", None, None),
         (None, None, None),
     ],
@@ -206,17 +206,17 @@ def row(fingerprint, severity="high", device_id=7, is_kev=False):
 
 def test_l_alerteur_envoie_une_seule_alerte_avec_les_nouveaux_problemes_et_leurs_liens_chez_le_client():
     history, sender = FakeHistory(previous=[issue("old", device_id=7)]), SpyNotifier()
-    alerter = InventoryAlerter(history, sender, DeviceLinks("https://vulnscan.example.com"))
+    alerter = InventoryAlerter(history, sender, DeviceLinks("https://v0cday.example.com"))
 
     alert = alerter.announce(Job(workspace_id=4), [row("old"), row("new", device_id=7), row("new-2", device_id=9), row("quiet", severity="low")])
 
     [(workspace, sent)] = sender.alerts
     assert workspace == 4 and sent is alert
     assert [(i.issue.fingerprint, i.device_name, i.link) for i in sent.items] == [
-        ("new", "PC-COMPTA-04", "https://vulnscan.example.com/#/c/4/inventory/devices/7"),
-        ("new-2", "device #9", "https://vulnscan.example.com/#/c/4/inventory/devices/9"),  # name unknown: still alerted
+        ("new", "PC-COMPTA-04", "https://v0cday.example.com/#/c/4/inventory/devices/7"),
+        ("new-2", "device #9", "https://v0cday.example.com/#/c/4/inventory/devices/9"),  # name unknown: still alerted
     ]
-    assert (sent.baseline, sent.resolved, sent.open_issues, sent.devices_url) == (False, 0, 4, "https://vulnscan.example.com/#/c/4/inventory")
+    assert (sent.baseline, sent.resolved, sent.open_issues, sent.devices_url) == (False, 0, 4, "https://v0cday.example.com/#/c/4/inventory")
     assert history.asked_names == {7, 9}
 
 

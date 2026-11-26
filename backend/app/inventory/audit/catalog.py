@@ -51,7 +51,7 @@ class EndOfLifeCycle(BaseModel):
 
 class EndOfLifeDateCatalog:
     def __init__(self, http: httpx.Client | None = None, base_url: str = ENDOFLIFE_API) -> None:
-        self._http = http or httpx.Client(timeout=_TIMEOUT_SECONDS, headers={"User-Agent": "VulnScan"})
+        self._http = http or httpx.Client(timeout=_TIMEOUT_SECONDS, headers={"User-Agent": "v0cday"})
         self._base_url = base_url.rstrip("/")
         self._cache: dict[str, tuple[SupportCycle, ...] | CatalogUnavailableError] = {}
 

@@ -22,7 +22,7 @@ import paramiko
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.cis_benchmark")
+logger = logging.getLogger("v0cday.cis_benchmark")
 
 META = PluginMeta(
     plugin_id="audit.cis_benchmark",

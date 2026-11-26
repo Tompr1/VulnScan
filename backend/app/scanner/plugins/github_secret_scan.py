@@ -18,7 +18,7 @@ import httpx
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.plugin.github_secrets")
+logger = logging.getLogger("v0cday.plugin.github_secrets")
 
 META = PluginMeta(
     plugin_id="recon.github_secrets",
@@ -119,7 +119,7 @@ class Check(Plugin):
             timeout=httpx.Timeout(15.0),
             follow_redirects=True,
             headers={
-                "User-Agent": "VulnScan/2.1",
+                "User-Agent": "v0cday/2.1",
                 "Accept": "application/vnd.github.v3.text-match+json",
             },
         ) as client:

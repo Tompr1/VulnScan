@@ -893,7 +893,7 @@ export function NewScanModal({ close, preselectedAsset, onCreated }) {
                 )}
 
                 {apiSource === "none" && (
-                  <div className="form-help">No spec — VulnScan will discover endpoints by crawling and fuzzing common paths.</div>
+                  <div className="form-help">No spec — v0cday will discover endpoints by crawling and fuzzing common paths.</div>
                 )}
               </div>
 

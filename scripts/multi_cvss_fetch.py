@@ -114,7 +114,7 @@ def fetch_cve_org(cve_id):
     url = f"{CVEORG_API}/{cve_id}"
     headers = {
         "Accept": "application/json",
-        "User-Agent": "VulnScan-Platform/1.0",
+        "User-Agent": "v0cday-Platform/1.0",
     }
     
     try:

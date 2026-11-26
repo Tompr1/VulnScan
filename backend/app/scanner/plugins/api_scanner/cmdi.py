@@ -14,9 +14,9 @@ import time
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.cmdi")
+logger = logging.getLogger("v0cday.api_scanner.cmdi")
 
-_MARKER = "VULNSCAN_API_CMDI_8k2m"
+_MARKER = "V0CDAY_API_CMDI_8k2m"
 _TIME_DELAY = 5
 
 _INBAND_LINUX = [

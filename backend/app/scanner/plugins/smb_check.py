@@ -17,7 +17,7 @@ import struct
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.smb_check")
+logger = logging.getLogger("v0cday.smb_check")
 
 META = PluginMeta(
     plugin_id="infra.smb.check",

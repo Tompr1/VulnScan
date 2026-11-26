@@ -17,7 +17,7 @@ from app.api.deps import get_db, require_role
 from app.core.job_queue import QueueUnavailableError, get_job_queue
 from app.db import models
 
-logger = logging.getLogger("vulnscan.api.iac_scanner")
+logger = logging.getLogger("v0cday.api.iac_scanner")
 router = APIRouter(prefix="/scan/iac", tags=["iac-scanner"])
 
 _MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB

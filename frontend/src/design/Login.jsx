@@ -33,7 +33,7 @@ export function LoginPage({ onLogin, version = "" }) {
           <div className="nav-logo" style={{width: 36, height: 36, fontSize: 15}}>V</div>
           <div>
             <div style={{fontSize: 16, fontWeight: 600, color: "var(--text-0)", letterSpacing: "-0.01em"}}>
-              VulnScan <span style={{color: "var(--text-3)", fontWeight: 400, fontSize: 12, marginLeft: 4}}>{version ? `v${version}` : ""}</span>
+              v0cday <span style={{color: "var(--text-3)", fontWeight: 400, fontSize: 12, marginLeft: 4}}>{version ? `v${version}` : ""}</span>
             </div>
             <div style={{fontSize: 12, color: "var(--text-3)", marginTop: 1}}>Risk Based Vulnerability Management — Security operations console</div>
           </div>
@@ -176,7 +176,7 @@ export function LoginPage({ onLogin, version = "" }) {
 
         <div className="login-foot">
           <div className="login-foot-meta">
-            © 2026 VulnScan Platform by Gondrong
+            © 2026 v0cday
           </div>
         </div>
       </div>
@@ -205,7 +205,7 @@ function RequestAccessForm({ onBack, onSubmit }) {
         </button>
         <h1>Request access</h1>
         <div className="login-sub">
-          VulnScan is invite-only for security teams. Tell us about yourself and we'll route your request to the right admin.
+          v0cday is invite-only for security teams. Tell us about yourself and we'll route your request to the right admin.
         </div>
       </div>
 
@@ -267,7 +267,7 @@ function RequestAccessForm({ onBack, onSubmit }) {
         </div>
 
         <div>
-          <label className="form-label">What would you like to use VulnScan for?</label>
+          <label className="form-label">What would you like to use v0cday for?</label>
           <textarea className="ra-textarea" required rows={3}
                     placeholder="Briefly: what are you trying to scan, current pain points, timeline…"
                     value={data.useCase}

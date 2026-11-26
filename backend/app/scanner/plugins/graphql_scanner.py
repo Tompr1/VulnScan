@@ -111,7 +111,7 @@ async def _graphql_request(url: str, body: str, timeout: float = 8.0,
 
         headers = {
             "Host": host,
-            "User-Agent": "VulnScan/2.1",
+            "User-Agent": "v0cday/2.1",
             "Content-Type": "application/json",
             "Accept": "application/json",
             "Content-Length": str(len(body)),

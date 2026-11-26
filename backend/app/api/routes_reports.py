@@ -19,7 +19,7 @@ def _cvss_or_baseline(f: models.Finding) -> float | None:
     plugin findings without a CVE still get a representative score."""
     return f.cvss_base if f.cvss_base is not None else cvss_baseline_from_severity(f.severity)
 
-logger = logging.getLogger("vulnscan.reports")
+logger = logging.getLogger("v0cday.reports")
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -437,7 +437,7 @@ def download_report(
     if "ai_summary" in (template.get("sections") or []):
         ai = _latest_ai_analysis(db, user["ws"], job_id)
 
-    fname_base = f"vulnscan-report-{job.id}-{datetime.now(timezone.utc).strftime('%Y%m%d')}"
+    fname_base = f"v0cday-report-{job.id}-{datetime.now(timezone.utc).strftime('%Y%m%d')}"
 
     # Always fetch AI analysis for CSV/XLSX too (not just when template has ai_summary)
     if not ai:
@@ -589,7 +589,7 @@ def _as_sarif(job: models.ScanJob, findings: list[models.Finding]) -> str:
             "locations": [{
                 "physicalLocation": {"artifactLocation": {"uri": f.target or job.target}},
             }],
-            "fingerprints": {"vulnscan/v1": f.fingerprint or ""},
+            "fingerprints": {"v0cday/v1": f.fingerprint or ""},
         })
 
     sarif = {
@@ -597,8 +597,8 @@ def _as_sarif(job: models.ScanJob, findings: list[models.Finding]) -> str:
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "runs": [{
             "tool": {"driver": {
-                "name": "VulnScan",
-                "informationUri": "https://github.com/vulnscan/vulnscan",
+                "name": "v0cday",
+                "informationUri": "https://github.com/Tompr1/VulnScan",
                 "rules": list(rules.values()),
             }},
             "results": results,
@@ -621,7 +621,7 @@ def _as_markdown(job: models.ScanJob, findings: list[models.Finding], template: 
     ai_lookup = _ai_lookup(ai)
 
     lines = []
-    lines.append(f"# VulnScan Report — Job #{job.id}")
+    lines.append(f"# v0cday Report — Job #{job.id}")
     lines.append("")
     lines.append(f"**Target:** `{job.target}`  ")
     lines.append(f"**Template:** {template.get('name', 'Default')}  ")
@@ -827,7 +827,7 @@ def _as_pdf(job: models.ScanJob, findings: list[models.Finding], template: dict,
         buf, pagesize=A4,
         leftMargin=18 * mm, rightMargin=18 * mm,
         topMargin=18 * mm, bottomMargin=18 * mm,
-        title=f"VulnScan Report #{job.id}",
+        title=f"v0cday Report #{job.id}",
     )
 
     styles = getSampleStyleSheet()
@@ -841,7 +841,7 @@ def _as_pdf(job: models.ScanJob, findings: list[models.Finding], template: dict,
     flow = []
 
     # Cover
-    flow.append(Paragraph("VulnScan — Security Scan Report", H1))
+    flow.append(Paragraph("v0cday — Security Scan Report", H1))
     flow.append(Paragraph(f"Job <b>#{job.id}</b> · Target <font face='Courier'>{_esc(job.target)}</font>", Body))
     flow.append(Spacer(1, 6))
     meta_lines = [
@@ -1058,7 +1058,7 @@ def _as_docx(job: models.ScanJob, findings: list[models.Finding], template: dict
     ai_lookup = _ai_lookup(ai)
     doc = Document()
 
-    title = doc.add_heading(f"VulnScan Security Scan Report", level=0)
+    title = doc.add_heading(f"v0cday Security Scan Report", level=0)
 
     p = doc.add_paragraph()
     p.add_run(f"Job #{job.id} · Target: ").italic = True
@@ -1256,7 +1256,7 @@ def _as_xlsx(job: models.ScanJob, findings: list[models.Finding], ai_lookup: dic
     # Summary sheet
     ws = wb.active
     ws.title = "Summary"
-    ws["A1"] = f"VulnScan Report — Job #{job.id}"
+    ws["A1"] = f"v0cday Report — Job #{job.id}"
     ws["A1"].font = Font(bold=True, size=16)
     ws.merge_cells("A1:D1")
 

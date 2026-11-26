@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import paramiko
 from app.core.crypto import decrypt_str
 
-logger = logging.getLogger("vulnscan.ssh")
+logger = logging.getLogger("v0cday.ssh")
 
 
 def _load_pkey(key_text: str, passphrase: str | None = None) -> paramiko.PKey:

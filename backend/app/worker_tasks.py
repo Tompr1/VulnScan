@@ -47,7 +47,7 @@ from app.scanner.target import ScanType
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO)
 
-logger = logging.getLogger("vulnscan.worker")
+logger = logging.getLogger("v0cday.worker")
 
 _CVE_DATA_DIR = os.environ.get("CVE_DATA_DIR", "/app/data/cve")
 _CVE_SYNC_LOCK = "cve_catalog_sync_lock"
@@ -496,7 +496,7 @@ def _ds_refresh_cvedetails(nvd_path, on_progress=None):
 
     # Persistent session — reuses TCP connections (skips TLS handshake per request)
     session = _requests.Session()
-    session.headers.update({"Accept": "application/json", "User-Agent": "VulnScan/2.0"})
+    session.headers.update({"Accept": "application/json", "User-Agent": "v0cday/2.0"})
     adapter = _requests.adapters.HTTPAdapter(pool_connections=max_workers, pool_maxsize=max_workers)
     session.mount("https://", adapter)
 

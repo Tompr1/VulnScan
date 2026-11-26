@@ -25,7 +25,7 @@ import re
 from app.scanner.plugins.base import Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.api_scanner.bola")
+logger = logging.getLogger("v0cday.api_scanner.bola")
 
 # Parameter names that suggest a per-object identifier
 _ID_PARAM_RE = re.compile(

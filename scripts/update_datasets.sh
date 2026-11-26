@@ -32,7 +32,7 @@ EPSS_URL="${EPSS_URL:-https://epss.cyentia.com/epss_scores-current.csv.gz}"
 # FETCH NVD DATA
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Use a bash ARRAY to safely handle paths with spaces (e.g. "VulnScan Platform")
+# Use a bash ARRAY to safely handle paths with spaces (e.g. "v0cday Platform")
 NVD_INPUT_FILES=()
 
 if [[ -n "${NVD_LOCAL_FILES}" ]]; then

@@ -79,7 +79,7 @@ export function ContextWindow({ onPickClient, onPickRoot, onSignOut, onClose = n
             <div className="ctx-title">Select a client</div>
             <div className="ctx-sub">
               {user.email}{user.is_global_admin && <span className="tag root" style={{marginLeft: 8, height: 18}}>super admin</span>}
-              {version && <span style={{marginLeft: 8}}>· VulnScan v{version}</span>}
+              {version && <span style={{marginLeft: 8}}>· v0cday v{version}</span>}
             </div>
           </div>
           <div style={{marginLeft: "auto", display: "flex", gap: 6}}>

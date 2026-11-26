@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate a compliance framework mapping dataset for VulnScan.
+Generate a compliance framework mapping dataset for v0cday.
 
 Maps vulnerability categories and severities to compliance framework controls:
 - NIST SP 800-53

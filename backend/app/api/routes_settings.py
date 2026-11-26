@@ -33,7 +33,7 @@ from app.core.workspace_settings import (
 )
 from app.db import models
 
-logger = logging.getLogger("vulnscan.settings")
+logger = logging.getLogger("v0cday.settings")
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -356,7 +356,7 @@ def check_for_update(user=Depends(require_shared_reader("admin", "analyst", "vie
         url = f"https://api.github.com/repos/{repo}/releases/latest"
         req = urllib.request.Request(url, headers={
             "Accept": "application/vnd.github+json",
-            "User-Agent": "VulnScan-Platform",
+            "User-Agent": "v0cday-Platform",
         })
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode())

@@ -18,7 +18,7 @@ import logging
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.redis_noauth")
+logger = logging.getLogger("v0cday.redis_noauth")
 
 META = PluginMeta(
     plugin_id="infra.redis.deep",
@@ -108,7 +108,7 @@ async def _check_redis_port(host: str, port: int,
     # Step 4: Check dangerous commands
     dangerous = {}
     for cmd_name, cmd_str in [
-        ("CONFIG SET", "CONFIG SET __vulnscan_test__ test"),
+        ("CONFIG SET", "CONFIG SET __v0cday_test__ test"),
         ("SCRIPT", "SCRIPT EXISTS __dummy__"),
         ("CLIENT LIST", "CLIENT LIST"),
         ("DEBUG", "DEBUG SLEEP 0"),
@@ -122,7 +122,7 @@ async def _check_redis_port(host: str, port: int,
 
     # Clean up test key if CONFIG SET succeeded
     if dangerous.get("CONFIG SET"):
-        await _redis_cmd(host, port, "CONFIG SET __vulnscan_test__ \"\"")
+        await _redis_cmd(host, port, "CONFIG SET __v0cday_test__ \"\"")
 
     # Step 5: Check SLAVEOF/REPLICAOF availability
     slaveof_resp = await _redis_cmd(host, port, "COMMAND INFO SLAVEOF")

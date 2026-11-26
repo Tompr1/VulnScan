@@ -17,7 +17,7 @@ from urllib.parse import urljoin
 
 import httpx
 
-logger = logging.getLogger("vulnscan.auth_session")
+logger = logging.getLogger("v0cday.auth_session")
 
 _CSRF_INPUT_RE = re.compile(
     r'<input[^>]+name=["\']([^"\']*(?:csrf|xsrf|_token|authenticity_token|__RequestVerificationToken|csrfmiddlewaretoken)[^"\']*)["\']'

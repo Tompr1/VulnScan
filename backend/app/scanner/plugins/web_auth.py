@@ -27,7 +27,7 @@ from app.core.crypto import decrypt_str
 from app.db.session import SessionLocal
 from app.db import models
 
-logger = logging.getLogger("vulnscan.plugin.web_auth")
+logger = logging.getLogger("v0cday.plugin.web_auth")
 
 META = PluginMeta(
     plugin_id="web.auth",

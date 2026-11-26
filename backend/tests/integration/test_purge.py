@@ -98,7 +98,7 @@ def test_sans_admin_par_defaut_la_purge_laisse_le_demarrage_le_recreer(db, plate
 
 
 def test_les_rapports_generes_sont_supprimes(tmp_path):
-    (tmp_path / "vulnscan-auto-1.pdf").write_bytes(b"%PDF")
+    (tmp_path / "v0cday-auto-1.pdf").write_bytes(b"%PDF")
     (tmp_path / "client-b").mkdir()
     (tmp_path / "client-b" / "r.pdf").write_bytes(b"%PDF")
 

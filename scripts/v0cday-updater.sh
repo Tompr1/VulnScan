@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════
-# VulnScan Platform — Auto-Updater Service
+# v0cday Platform — Auto-Updater Service
 # Watches for update-trigger.json and runs git pull + docker rebuild.
 # Auto-detects project directory from script location.
 # ═══════════════════════════════════════════════════════════════════════
@@ -10,14 +10,21 @@ PROJECT="$(dirname "$SCRIPT_DIR")"
 WATCH_DIR="$PROJECT/data"
 TRIGGER="$WATCH_DIR/update-trigger.json"
 RESULT="$WATCH_DIR/update-result.json"
-LOG="/var/log/vulnscan-update.log"
+LOG="/var/log/v0cday-update.log"
+
+# Updates come from this GitHub repository (owner/name), not from whatever
+# remote the install was cloned from. Override with GITHUB_REPO in .env.
+GITHUB_REPO="$(grep -E '^GITHUB_REPO=' "$PROJECT/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+GITHUB_REPO="${GITHUB_REPO:-Tompr1/VulnScan}"
+REPO_URL="https://github.com/${GITHUB_REPO}.git"
 
 # Ensure data directory exists
 mkdir -p "$WATCH_DIR"
 
-echo "[$(date)] VulnScan updater started" >> "$LOG"
+echo "[$(date)] v0cday updater started" >> "$LOG"
 echo "[$(date)] Project directory: $PROJECT" >> "$LOG"
 echo "[$(date)] Watching: $TRIGGER" >> "$LOG"
+echo "[$(date)] Update source: $REPO_URL" >> "$LOG"
 
 write_status() {
     local status="$1"
@@ -45,10 +52,10 @@ while true; do
         # Backup .env before reset (user config must survive)
         cp -f "$PROJECT/.env" "$PROJECT/.env.bak" 2>/dev/null
 
-        # Step 1: Fetch latest from remote
-        $GIT fetch origin main >> "$LOG" 2>&1
+        # Step 1: Fetch latest from the update repository
+        $GIT fetch "$REPO_URL" main >> "$LOG" 2>&1
         FETCH_RC=$?
-        echo "[$(date)] git fetch origin main (rc=$FETCH_RC)" >> "$LOG"
+        echo "[$(date)] git fetch $REPO_URL main (rc=$FETCH_RC)" >> "$LOG"
         if [ $FETCH_RC -ne 0 ]; then
             echo "[$(date)] ERROR: git fetch failed (rc=$FETCH_RC)" >> "$LOG"
             [ -f "$PROJECT/.env.bak" ] && cp -f "$PROJECT/.env.bak" "$PROJECT/.env" && rm -f "$PROJECT/.env.bak"
@@ -56,10 +63,10 @@ while true; do
             continue
         fi
 
-        # Step 2: Hard reset to match remote exactly
-        $GIT reset --hard origin/main >> "$LOG" 2>&1
+        # Step 2: Hard reset to match the fetched commit exactly
+        $GIT reset --hard FETCH_HEAD >> "$LOG" 2>&1
         RESET_RC=$?
-        echo "[$(date)] git reset --hard origin/main (rc=$RESET_RC)" >> "$LOG"
+        echo "[$(date)] git reset --hard FETCH_HEAD (rc=$RESET_RC)" >> "$LOG"
         if [ $RESET_RC -ne 0 ]; then
             echo "[$(date)] ERROR: git reset failed (rc=$RESET_RC)" >> "$LOG"
             [ -f "$PROJECT/.env.bak" ] && cp -f "$PROJECT/.env.bak" "$PROJECT/.env" && rm -f "$PROJECT/.env.bak"

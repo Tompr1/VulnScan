@@ -22,7 +22,7 @@ from fastapi import Depends, HTTPException, Request
 from app.core.config import settings
 from app.core.net import client_ip
 
-logger = logging.getLogger("vulnscan.ratelimit")
+logger = logging.getLogger("v0cday.ratelimit")
 
 
 _client = None

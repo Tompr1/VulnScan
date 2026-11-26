@@ -16,7 +16,7 @@ import paho.mqtt.client as mqtt
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.mqtt")
+logger = logging.getLogger("v0cday.mqtt")
 
 META = PluginMeta(
     plugin_id="iot.mqtt_scanner",
@@ -84,7 +84,7 @@ _INJECTION_TOPICS = [
     "config/update",
     "firmware/push",
     "alert/trigger",
-    "$SYS/broker/connection/vulnscan/state",
+    "$SYS/broker/connection/v0cday/state",
 ]
 
 # ── CONNACK return codes ────────────────────────────────────────────────
@@ -120,7 +120,7 @@ class MQTTProbe:
         self.publish_acks: list[str] = []
 
         self.client = mqtt.Client(
-            client_id=f"vulnscan_{port}_{int(time.time()) % 10000}",
+            client_id=f"v0cday_{port}_{int(time.time()) % 10000}",
             clean_session=True,
         )
 
@@ -213,7 +213,7 @@ class MQTTProbe:
             return []
 
         injection_results = []
-        payload = "VULNSCAN_INJECTION_TEST"
+        payload = "V0CDAY_INJECTION_TEST"
 
         for topic in _INJECTION_TOPICS:
             try:

@@ -1,5 +1,5 @@
 """
-Plugin contract for the VulnScan scanner framework.
+Plugin contract for the v0cday scanner framework.
 
 A plugin module exposes a module-level ``META`` (:class:`PluginMeta`) and a
 ``Check`` class deriving from :class:`Plugin`. The registry instantiates

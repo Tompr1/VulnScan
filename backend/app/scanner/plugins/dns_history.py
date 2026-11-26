@@ -17,7 +17,7 @@ import httpx
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint
 
-logger = logging.getLogger("vulnscan.plugin.dns_history")
+logger = logging.getLogger("v0cday.plugin.dns_history")
 
 META = PluginMeta(
     plugin_id="recon.dns_history",
@@ -299,7 +299,7 @@ class Check(Plugin):
                 timeout=httpx.Timeout(20.0),
                 follow_redirects=True,
                 verify=True,
-                headers={"User-Agent": "VulnScan/2.1"},
+                headers={"User-Agent": "v0cday/2.1"},
             ) as client:
                 resp = await client.get(ct_url)
                 resp.raise_for_status()

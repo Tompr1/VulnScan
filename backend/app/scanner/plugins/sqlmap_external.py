@@ -19,7 +19,7 @@ import tempfile
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.context import stable_fingerprint, web_base_url
 
-logger = logging.getLogger("vulnscan.plugin.sqlmap")
+logger = logging.getLogger("v0cday.plugin.sqlmap")
 
 META = PluginMeta(
     plugin_id="ext.sqlmap",

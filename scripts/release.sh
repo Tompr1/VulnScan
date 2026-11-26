@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════
-# VulnScan Platform — Release Script
+# v0cday Platform — Release Script
 # Automatically bumps version in ALL files, commits, tags, and pushes.
 #
 # Usage:
@@ -74,7 +74,7 @@ esac
 
 echo ""
 echo "╔═══════════════════════════════════════════════╗"
-echo "║  VulnScan Platform — Release                  ║"
+echo "║  v0cday Platform — Release                  ║"
 echo "╚═══════════════════════════════════════════════╝"
 echo ""
 echo "  Current version: v$CURRENT"
@@ -194,5 +194,5 @@ echo "  To publish:"
 echo "    git push origin main --tags"
 echo ""
 echo "  Then create a GitHub Release:"
-echo "    https://github.com/Gondrong/VulnScan-Platform/releases/new?tag=v$NEW"
+echo "    https://github.com/Tompr1/VulnScan/releases/new?tag=v$NEW"
 echo "═══════════════════════════════════════════════"

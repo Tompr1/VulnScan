@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>VulnScan Platform</title>
+  <title>v0cday Platform</title>
   <link
     href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Sora:wght@300;400;500;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap"
     rel="stylesheet" />
@@ -1349,7 +1349,7 @@
     <div class="login-card">
       <div class="login-top-bar"></div>
       <div class="login-head">
-        <div class="login-logo">VulnScan</div>
+        <div class="login-logo">v0cday</div>
         <div class="login-sub">// ENTERPRISE VULNERABILITY MANAGEMENT PLATFORM</div>
       </div>
       <div class="login-body">
@@ -1359,10 +1359,7 @@
         <div class="fg"><label class="fl">Password</label><input id="l-pass" class="fc" type="password"
             autocomplete="current-password" /></div>
         <button class="btn btn-primary btn-lg btn-full" id="login-btn" onclick="doLogin()"><span id="login-spin"
-            class="spinner" style="display:none"></span>Sign In</button>
-        <div style="margin-top:10px;font-family:var(--fm);font-size:.62rem;color:rgb(245,245,245);text-align:center;">
-          Powered by Gondrong
-        </div>
+            class="spinner" style="display:none"></span>Sign In</button>
       </div>
     </div>
   </div>
@@ -1384,7 +1381,7 @@
     <div class="sidebar-accent"></div>
     <div class="logo-wrap">
       <div class="logo-name">
-        <div class="logo-dot"></div>VulnScan
+        <div class="logo-dot"></div>v0cday
       </div>
       <div class="logo-tag">ENTERPRISE SECURITY PLATFORM v2.1.4</div>
     </div>
@@ -1422,10 +1419,7 @@
       <div class="online-pill">
         <div class="pulse"></div><span>System Online</span>
       </div>
-      <button class="sign-out-btn" onclick="doLogout()">Sign Out</button>
-      <div style="margin-top:10px;font-family:var(--fm);font-size:.62rem;color:rgb(245,245,245);text-align:center;">
-        Powered by Gondrong
-      </div>
+      <button class="sign-out-btn" onclick="doLogout()">Sign Out</button>
     </div>
   </nav>
 
@@ -3269,8 +3263,8 @@
                 <div id="sys-info-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                 </div>
                 <div style="margin-top:12px">
-                  <a href="https://github.com/Gondrong/VulnScan-Platform" target="_blank" style="color:var(--accent);font-size:.78rem;text-decoration:none">
-                    ⭐ GitHub Repository → github.com/Gondrong/VulnScan-Platform
+                  <a href="https://github.com/Tompr1/VulnScan" target="_blank" style="color:var(--accent);font-size:.78rem;text-decoration:none">
+                    ⭐ GitHub Repository → github.com/Tompr1/VulnScan
                   </a>
                 </div>
               </div>
@@ -3284,7 +3278,7 @@
 
   <script>
     const API_BASE = (() => {
-      if (window.VULNSCAN_API) return window.VULNSCAN_API.replace(/\/$/, '');
+      if (window.V0CDAY_API) return window.V0CDAY_API.replace(/\/$/, '');
       const p = window.location.protocol, h = window.location.hostname, port = window.location.port;
       // If served over HTTPS (likely behind a reverse proxy), use same origin (no :8888)
       if (p === 'https:') return `${p}//${h}`;
@@ -5117,7 +5111,7 @@ ${f.fingerprint ? `<button class="btn btn-ghost btn-sm" onclick="suppressFinding
       const csvEsc = v => { const s = String(v).replace(/"/g, '""'); return /[,"\n\r]/.test(s) ? '"' + s + '"' : s };
       let csv = cols.join(',') + '\n';
       data.forEach(r => { csv += cols.map(c => csvEsc(r[c])).join(',') + '\n' });
-      const fn = hostLabel ? 'vulnscan_' + sanitizeFn(hostLabel) + '_' + dateStamp() + '.csv' : 'vulnscan_all_findings_' + dateStamp() + '.csv';
+      const fn = hostLabel ? 'v0cday_' + sanitizeFn(hostLabel) + '_' + dateStamp() + '.csv' : 'v0cday_all_findings_' + dateStamp() + '.csv';
       downloadFile(csv, fn, 'text/csv')
     }
     function buildReportHTML(data, hostLabel) {
@@ -5126,7 +5120,7 @@ ${f.fingerprint ? `<button class="btn btn-ghost btn-sm" onclick="suppressFinding
       const title = hostLabel ? 'Security Report — ' + esc(hostLabel) : 'Security Report — All Hosts';
       const sevO = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
       data.sort((a, b) => ((sevO[a.Severity] ?? 4) - (sevO[b.Severity] ?? 4)));
-      let h = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>VulnScan ${esc(title)}</title>
+      let h = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>v0cday ${esc(title)}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',Arial,sans-serif;font-size:11px;color:#1a1a1a;padding:28px;max-width:1100px;margin:0 auto}
@@ -5162,7 +5156,7 @@ h2{font-size:14px;color:#0a1628;margin:20px 0 8px;padding:8px 12px;background:#f
 .footer{margin-top:24px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:9px;color:#94a3b8;text-align:center}
 @media print{body{padding:12px;font-size:10px}h1{font-size:16px}.sbox .num{font-size:18px}.finding{page-break-inside:avoid}}
 </style></head><body>
-<div class="hdr"><h1>🔒 VulnScan ${esc(title)}</h1><div class="hdr-right">Generated: ${now}<br>Hosts: ${hosts.length} | Findings: ${data.length}</div></div>
+<div class="hdr"><h1>🔒 v0cday ${esc(title)}</h1><div class="hdr-right">Generated: ${now}<br>Hosts: ${hosts.length} | Findings: ${data.length}</div></div>
 <div class="summary">
   <div class="sbox crit"><div class="num">${data.filter(r => r.Severity === 'CRITICAL').length}</div><div class="lbl">Critical</div></div>
   <div class="sbox high"><div class="num">${data.filter(r => r.Severity === 'HIGH').length}</div><div class="lbl">High</div></div>
@@ -5190,12 +5184,12 @@ h2{font-size:14px;color:#0a1628;margin:20px 0 8px;padding:8px 12px;background:#f
           h += `</div></div>`;
         });
       });
-      h += `<div class="footer">VulnScan Enterprise Security Platform — Confidential</div></body></html>`;
+      h += `<div class="footer">v0cday Enterprise Security Platform — Confidential</div></body></html>`;
       return h
     }
     function exportHTML(data, hostLabel) {
       const html = buildReportHTML(data, hostLabel);
-      const fn = hostLabel ? 'vulnscan_' + sanitizeFn(hostLabel) + '_' + dateStamp() + '.html' : 'vulnscan_all_findings_' + dateStamp() + '.html';
+      const fn = hostLabel ? 'v0cday_' + sanitizeFn(hostLabel) + '_' + dateStamp() + '.html' : 'v0cday_all_findings_' + dateStamp() + '.html';
       downloadFile(html, fn, 'text/html')
     }
     function exportPDF(data, hostLabel) {
@@ -5536,7 +5530,7 @@ h2{font-size:14px;color:#0a1628;margin:20px 0 8px;padding:8px 12px;background:#f
           smtp_port: parseInt(gi('integ-smtp-port').value) || 587,
           smtp_user: gi('integ-email-from').value.trim(),
           smtp_pass: gi('integ-email-pass').value,
-          from_email: gi('integ-email-from').value.trim() || 'vulnscan@noreply.local',
+          from_email: gi('integ-email-from').value.trim() || 'v0cday@noreply.local',
           to_email: gi('integ-email-to').value.trim(),
         };
       }
@@ -5564,7 +5558,7 @@ h2{font-size:14px;color:#0a1628;margin:20px 0 8px;padding:8px 12px;background:#f
         smtp_port: parseInt(gi('integ-smtp-port').value) || 587,
         smtp_user: gi('integ-email-from').value.trim(),
         smtp_pass: gi('integ-email-pass').value,
-        from_email: gi('integ-email-from').value.trim() || 'vulnscan@noreply.local',
+        from_email: gi('integ-email-from').value.trim() || 'v0cday@noreply.local',
         to_email: gi('integ-email-to').value.trim(),
       };
 

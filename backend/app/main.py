@@ -34,10 +34,10 @@ from app.api.routes_access import router as access_router
 from app.api.validation import install_validation_error_handler
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("vulnscan")
+logger = logging.getLogger("v0cday")
 
 app = FastAPI(
-    title="VulnScan Platform",
+    title="v0cday Platform",
     version=settings.PLATFORM_VERSION,
     description="Enterprise Risk-Based Vulnerability Management Platform",
 )
@@ -648,7 +648,7 @@ def _schedule_loop():
                             continue
                         report_dir = Path("/data/reports")
                         report_dir.mkdir(parents=True, exist_ok=True)
-                        report_path = report_dir / f"vulnscan-auto-{rj.id}.pdf"
+                        report_path = report_dir / f"v0cday-auto-{rj.id}.pdf"
                         if report_path.exists():
                             continue
                         # Gather findings for this job
@@ -740,7 +740,7 @@ def _schedule_loop():
                                             elif integ.provider == "teams":
                                                 send_teams_notification(cfg, {"title": "SLA Breach", "text": msg_text})
                                             elif integ.provider == "email":
-                                                send_email_notification(cfg, f"VulnScan SLA Breach — Finding #{f.id}", msg_text)
+                                                send_email_notification(cfg, f"v0cday SLA Breach — Finding #{f.id}", msg_text)
                                             elif integ.provider == "webhook":
                                                 send_webhook_notification(cfg, {
                                                     "event": "sla_breach", "finding_id": f.id,
@@ -810,7 +810,7 @@ def _schedule_loop():
                     backup_dir = Path("/data/backups")
                     backup_dir.mkdir(parents=True, exist_ok=True)
                     date_str = now_utc.strftime("%Y%m%d-%H%M%S")
-                    backup_file = backup_dir / f"vulnscan-{date_str}.sql.gz"
+                    backup_file = backup_dir / f"v0cday-{date_str}.sql.gz"
 
                     # Parse DATABASE_URL for pg_dump connection params
                     db_url = settings.DATABASE_URL
@@ -847,7 +847,7 @@ def _schedule_loop():
                         )
 
                     # Rotate: keep only the last 7 backups
-                    existing = sorted(backup_dir.glob("vulnscan-*.sql.gz"))
+                    existing = sorted(backup_dir.glob("v0cday-*.sql.gz"))
                     if len(existing) > 7:
                         for old in existing[:-7]:
                             try:
@@ -871,7 +871,7 @@ def _schedule_loop():
                         url = f"https://api.github.com/repos/{repo}/releases/latest"
                         req = urllib.request.Request(url, headers={
                             "Accept": "application/vnd.github+json",
-                            "User-Agent": "VulnScan-Platform",
+                            "User-Agent": "v0cday-Platform",
                         })
                         with urllib.request.urlopen(req, timeout=15) as resp:
                             release = _json.loads(resp.read().decode())
