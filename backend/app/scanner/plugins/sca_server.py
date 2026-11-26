@@ -201,16 +201,12 @@ class Check(Plugin):
             cred_id = auth.get("ssh_credential_id")
             if cred_id:
                 try:
-                    from app.db.session import SessionLocal
-                    from app.db import models
-                    from app.core.crypto import decrypt_str
-                    db = SessionLocal()
-                    cred = db.query(models.Credential).filter(models.Credential.id == cred_id).first()
+                    # Only the client's own credentials are reachable here.
+                    cred = ctx.resources.credentials.get(cred_id)
                     if cred:
                         ssh_user = cred.username
-                        ssh_password = decrypt_str(cred.secret_enc) if cred.secret_type == "password" else None
-                        ssh_key_text = decrypt_str(cred.secret_enc) if cred.secret_type == "ssh_key" else None
-                    db.close()
+                        ssh_password = cred.secret if cred.secret_type == "password" else None
+                        ssh_key_text = cred.secret if cred.secret_type == "ssh_key" else None
                 except Exception as e:
                     logger.warning("SCA Server: failed to load SSH credential: %s", e)
 

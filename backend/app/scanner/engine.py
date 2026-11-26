@@ -25,6 +25,7 @@ from app.scanner.plugins.base import Finding, Plugin
 from app.scanner.plugins.loader import PluginRegistry, builtin_registry
 from app.scanner.profile import ScanProfile
 from app.scanner.remediation import enrich_description, enrich_remediation
+from app.scanner.resources import ScanResources, ScanResourcesFactory
 from app.scanner.target import ScanTarget, ScanType
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ class ScanEngine:
         request_timeout_seconds: float,
         cancellation: CancellationSignal | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        resources: ScanResourcesFactory | None = None,
     ) -> None:
         self._registry = registry
         self._allowlist = allowlist
@@ -55,6 +57,7 @@ class ScanEngine:
         self._request_timeout_seconds = request_timeout_seconds
         self._cancellation = cancellation or NeverCancelled()
         self._monotonic = monotonic
+        self._resources = resources or (lambda _workspace_id: ScanResources.none())
 
     async def scan(
         self,
@@ -96,7 +99,10 @@ class ScanEngine:
     def _new_context(
         self, target: ScanTarget, profile: ScanProfile, workspace_id: int, scan_type: ScanType
     ) -> ScanContext:
-        ctx = ScanContext(policy=ScanPolicy(timeout_seconds=self._request_timeout_seconds))
+        ctx = ScanContext(
+            policy=ScanPolicy(timeout_seconds=self._request_timeout_seconds),
+            resources=self._resources(workspace_id),
+        )
         ctx.set("workspace_id", workspace_id)
         ctx.set("target_raw", target.raw)
         ctx.set("target_host", target.host)
@@ -313,6 +319,7 @@ def default_engine() -> ScanEngine:
     """Engine wired with the built-in plugins and the application settings."""
     from app.db.session import SessionLocal
     from app.scanner.client_allowlists import SqlClientAllowlists
+    from app.scanner.sql_resources import SqlScanResources
 
     return ScanEngine(
         registry=builtin_registry(),
@@ -320,4 +327,5 @@ def default_engine() -> ScanEngine:
         budget=ScanBudget(total_seconds=float(settings.SCAN_BUDGET_SECONDS)),
         request_timeout_seconds=float(settings.SCAN_TIMEOUT_SECONDS),
         cancellation=RedisCancellationSignal.from_url(settings.REDIS_URL),
+        resources=SqlScanResources(SessionLocal),
     )

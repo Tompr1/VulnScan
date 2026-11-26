@@ -10,10 +10,6 @@ This plugin bridges the gap between authenticated inventory and CVE detection.
 """
 import re
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
-from app.db.session import SessionLocal
-from app.cve.reference_datasets import enabled_dataset_paths
-from app.cve.dataset_loader import load_json
-from app.cve.catalogs import cve_catalog
 from app.cve.cpe import Cpe
 from app.cve.matcher import InMemoryCveCatalog, ProductCandidate, find_vulnerabilities
 from app.cve.version_cmp import match_expr, is_likely_patched
@@ -416,19 +412,15 @@ class Check(Plugin):
         host_identifier = os_info.get("host_identifier") or target
         scan_ts = os_info.get("scan_timestamp") or ctx.get("scan.started_at") or ""
 
-        db = SessionLocal()
+        reference = ctx.resources.reference
         all_hits = []
 
-        try:
-            # Mode 1: Match against OSV datasets (ecosystem-based)
-            for path in enabled_dataset_paths(db, "osv"):
-                all_hits += match_osv(pkgs, load_json(path))
-
-        finally:
-            db.close()
+        # Mode 1: Match against OSV datasets (ecosystem-based)
+        for data in reference.datasets("osv"):
+            all_hits += match_osv(pkgs, data)
 
         # Mode 2: Match against the NVD catalog (CPE-based)
-        all_hits += match_nvd(pkgs, cve_catalog(SessionLocal))
+        all_hits += match_nvd(pkgs, reference.cve_catalog())
 
         # Determine OS identifier for distro-patch checks
         os_id = (os_info.get("os_id") or os_info.get("id") or os_info.get("distro") or "").lower()

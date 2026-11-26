@@ -1,7 +1,4 @@
 from app.scanner.plugins.base import Plugin, PluginMeta, PluginResult, Finding
-from app.db.session import SessionLocal
-from app.cve.reference_datasets import enabled_dataset_paths
-from app.cve.dataset_loader import load_json
 from app.scanner.context import stable_fingerprint
 
 META = PluginMeta(
@@ -32,39 +29,34 @@ class Check(Plugin):
         if not cms:
             return PluginResult()
 
-        db = SessionLocal()
         findings=[]
-        try:
-            for path in enabled_dataset_paths(db, "cms_cve_map"):
-                data = load_json(path)
-                for row in data or []:
-                    if row.get("cms") in cms:
-                        cve = row.get("cve","CVE")
-                        cms_name = row.get("cms", "unknown")
-                        fp = stable_fingerprint(target, META.plugin_id, cve, cms_name)
-                        
-                        base_remediation = CMS_REMEDIATION.get(cms_name, f"Update {cms_name} to the latest version.")
-                        remediation = (
-                            f"[AFFECTED CMS] {cms_name.title()}\n\n"
-                            f"[REMEDIATION] {base_remediation}\n\n"
-                        )
-                        if cve.startswith("CVE-"):
-                            remediation += f"[CVE DETAILS] https://nvd.nist.gov/vuln/detail/{cve}"
+        for data in ctx.resources.reference.datasets("cms_cve_map"):
+            for row in data or []:
+                if row.get("cms") in cms:
+                    cve = row.get("cve","CVE")
+                    cms_name = row.get("cms", "unknown")
+                    fp = stable_fingerprint(target, META.plugin_id, cve, cms_name)
+                    
+                    base_remediation = CMS_REMEDIATION.get(cms_name, f"Update {cms_name} to the latest version.")
+                    remediation = (
+                        f"[AFFECTED CMS] {cms_name.title()}\n\n"
+                        f"[REMEDIATION] {base_remediation}\n\n"
+                    )
+                    if cve.startswith("CVE-"):
+                        remediation += f"[CVE DETAILS] https://nvd.nist.gov/vuln/detail/{cve}"
 
-                        findings.append(Finding(
-                            severity=row.get("severity","medium"),
-                            plugin_id=META.plugin_id,
-                            title=f"{cve}: {cms_name.title()} vulnerability",
-                            description=row.get("summary","") or f"CVE affecting {cms_name}",
-                            references=row.get("refs",[]),
-                            evidence=f"cms={cms_name} cve={cve}",
-                            affected=target,
-                            fingerprint=fp,
-                            cve=cve if cve.startswith("CVE-") else None,
-                            confidence=0.7,
-                            remediation=remediation,
-                        ))
-        finally:
-            db.close()
+                    findings.append(Finding(
+                        severity=row.get("severity","medium"),
+                        plugin_id=META.plugin_id,
+                        title=f"{cve}: {cms_name.title()} vulnerability",
+                        description=row.get("summary","") or f"CVE affecting {cms_name}",
+                        references=row.get("refs",[]),
+                        evidence=f"cms={cms_name} cve={cve}",
+                        affected=target,
+                        fingerprint=fp,
+                        cve=cve if cve.startswith("CVE-") else None,
+                        confidence=0.7,
+                        remediation=remediation,
+                    ))
 
         return PluginResult(findings=findings)

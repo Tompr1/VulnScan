@@ -6,7 +6,7 @@ from app.scanner.engine import ScanEngine
 from app.scanner.plugins.loader import PluginRegistry
 from app.scanner.profile import ScanProfile
 from app.scanner.target import InvalidTargetError, ScanType
-from tests.fakes import FakeClock, FakePlugin, SpyCancellationSignal, finding, meta
+from tests.fakes import FakeClock, FakePlugin, SpyCancellationSignal, credential, finding, meta, scan_resources
 
 TARGET = "http://10.0.0.5"
 
@@ -48,6 +48,36 @@ async def test_un_plugin_lit_les_artefacts_publies_par_ses_dependances():
 
     # Assert
     assert seen["ports"] == [80, 443]
+
+
+async def test_le_contexte_porte_les_ressources_du_client_scanne():
+    # Arrange
+    requested = []
+    resources = scan_resources(credential(3))
+    plugin = FakePlugin(meta("p"))
+    engine = ScanEngine(
+        registry=PluginRegistry([plugin]),
+        allowlist=AllowlistPolicy.from_setting(""),
+        budget=ScanBudget(total_seconds=900, kill_grace_seconds=0),
+        request_timeout_seconds=5,
+        resources=lambda workspace_id: requested.append(workspace_id) or resources,
+    )
+
+    # Act
+    await engine.scan(TARGET, ScanProfile(), workspace_id=7)
+
+    # Assert
+    assert requested == [7]
+    assert plugin.contexts[0].resources is resources
+
+
+async def test_sans_ressources_fournies_les_plugins_ne_trouvent_ni_identifiant_ni_donnees():
+    plugin = FakePlugin(meta("p"))
+
+    await scan(make_engine(plugin))
+
+    resources = plugin.contexts[0].resources
+    assert (resources.credentials.labels(), resources.reference.datasets("cisa_kev")) == ([], [])
 
 
 async def test_le_contexte_expose_la_cible_et_les_options_du_profil():

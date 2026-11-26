@@ -23,6 +23,14 @@ from app.scan_jobs.repository import JobCompletion, JobFailure, ScanJobSnapshot
 from app.scanner.context import ScanContext
 from app.scanner.plugins.base import Finding, Plugin, PluginMeta, PluginResult
 from app.scanner.profile import ScanProfile
+from app.scanner.resources import (
+    CredentialError,
+    CredentialLabel,
+    InMemoryCredentialVault,
+    InMemoryReferenceData,
+    ScanCredential,
+    ScanResources,
+)
 
 
 # ── Clock ─────────────────────────────────────────────────────────────────────
@@ -324,3 +332,41 @@ class StubAiTrigger:
         if self._error:
             raise self._error
         return self._queues
+
+
+# ── Scan resources (credentials, reference data) ─────────────────────────────
+
+def credential(credential_id: int = 1, **overrides: Any) -> ScanCredential:
+    values: dict[str, Any] = {
+        "id": credential_id, "name": f"cred-{credential_id}", "username": "audit",
+        "secret_type": "password", "secret": "s3cret",
+    }
+    values.update(overrides)
+    return ScanCredential(**values)
+
+
+def scan_resources(
+    *credentials: ScanCredential,
+    datasets: dict[str, list[list[Any]]] | None = None,
+    catalog=None,
+) -> ScanResources:
+    return ScanResources(InMemoryCredentialVault(credentials), InMemoryReferenceData(datasets, catalog))
+
+
+class UnreadableCredentialVault:
+    """Every credential exists but its secret cannot be decrypted."""
+
+    def get(self, credential_id: int) -> ScanCredential | None:
+        raise CredentialError(f"cannot decrypt #{credential_id}")
+
+    def labels(self) -> list[CredentialLabel]:
+        return []
+
+
+def plugin_context(resources: ScanResources | None = None, **artifacts: Any) -> ScanContext:
+    """Context of one plugin run; artifact keys use ``__`` for ``.``
+    (``net__open_ports`` sets ``net.open_ports``)."""
+    ctx = ScanContext(resources=resources)
+    for key, value in artifacts.items():
+        ctx.set(key.replace("__", "."), value)
+    return ctx

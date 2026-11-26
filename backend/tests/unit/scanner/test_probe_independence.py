@@ -1,0 +1,99 @@
+"""
+Les plugins doivent pouvoir tourner sur une sonde installée chez un client,
+sans base de données ni clé de chiffrement de la plateforme : ni eux ni les
+modules qu'ils importent (même à l'intérieur d'une fonction) ne touchent à
+la base, au chiffrement ou aux catalogues CVE stockés en base.
+
+Ils passent par ``ctx.resources`` (voir ``app.scanner.resources``).
+"""
+import ast
+from pathlib import Path
+
+import pytest
+
+from app.scanner.plugins.loader import BUILTIN_PLUGIN_MODULES
+
+APP_ROOT = Path(__file__).resolve().parents[3] / "app"
+
+FORBIDDEN = (
+    "sqlalchemy",
+    "app.db",
+    "app.core.crypto",
+    "app.cve.catalogs",
+    "app.cve.reference_datasets",
+    "app.cve.sql_catalog",
+)
+
+
+def _source_of(module: str, root: Path) -> Path | None:
+    parts = module.split(".")[1:]
+    if not parts:
+        return root / "__init__.py" if (root / "__init__.py").is_file() else None
+    relative = Path(*parts)
+    for candidate in (root / relative.with_suffix(".py"), root / relative / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _imports_of(module: str, path: Path) -> set[str]:
+    package = module if path.name == "__init__.py" else module.rpartition(".")[0]
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level:
+                parent = package.rsplit(".", node.level - 1)[0] if node.level > 1 else package
+                base = f"{parent}.{base}" if base else parent
+            names.add(base)
+            # "from app.scanner import x" may import the module app.scanner.x
+            names.update(f"{base}.{alias.name}" for alias in node.names)
+    return names
+
+
+def _import_chains(start: str, root: Path = APP_ROOT) -> dict[str, list[str]]:
+    """Every module reachable from ``start``, with the import chain to it."""
+    chains = {start: [start]}
+    pending = [start]
+    while pending:
+        module = pending.pop()
+        path = _source_of(module, root)
+        if path is None:
+            continue
+        for imported in _imports_of(module, path):
+            is_app_module = imported.startswith("app.") and _source_of(imported, root) is not None
+            if imported in chains or not (is_app_module or imported.startswith(FORBIDDEN)):
+                continue
+            chains[imported] = chains[module] + [imported]
+            if is_app_module:
+                pending.append(imported)
+    return chains
+
+
+def _forbidden(module: str) -> bool:
+    return any(module == f or module.startswith(f + ".") for f in FORBIDDEN)
+
+
+@pytest.mark.parametrize("plugin_module", BUILTIN_PLUGIN_MODULES)
+def test_un_plugin_ne_depend_ni_de_la_base_ni_du_chiffrement(plugin_module):
+    chains = _import_chains(f"app.scanner.plugins.{plugin_module}")
+
+    violations = [" -> ".join(chain) for module, chain in chains.items() if _forbidden(module)]
+
+    assert violations == []
+
+
+def test_le_controle_voit_un_import_de_la_base_fait_dans_une_fonction_d_un_module_importe(tmp_path):
+    # Garde-fou du test lui-même : la chaîne plugin -> helper -> import différé est suivie.
+    plugins = tmp_path / "scanner" / "plugins"
+    plugins.mkdir(parents=True)
+    (plugins / "fake.py").write_text("from app.scanner import helper\n")
+    (tmp_path / "scanner" / "helper.py").write_text("def f():\n    from app.db.session import SessionLocal\n")
+
+    chains = _import_chains("app.scanner.plugins.fake", root=tmp_path)
+
+    assert chains["app.db.session"] == [
+        "app.scanner.plugins.fake", "app.scanner.helper", "app.db.session",
+    ]
