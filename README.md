@@ -508,6 +508,10 @@ only connects out to the platform over HTTPS — the client opens no port.
   further by the client (`--local-allowlist`).
 - The probe API (`/probe/v1`) is refused over plain HTTP
   (`PROBE_REQUIRE_HTTPS`, see `.env.example`).
+- For clients, a ready-made VM — the **appliance** (OVA, VHDX, qcow2) —
+  enrolls itself at first boot from a configuration downloaded in Root, opens
+  no port, and updates its probe image only to images signed by the MSP:
+  [`deploy/appliance/README.md`](deploy/appliance/README.md).
 
 ---
 

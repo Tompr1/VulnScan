@@ -112,7 +112,9 @@ def heartbeat(
 ):
     gateway.heartbeat(probe, client_ip(request), body.hostname, body.version)
     return {"probe_id": probe.id, "workspace_id": probe.workspace_id,
-            "server_time": datetime.now(timezone.utc).isoformat()}
+            "server_time": datetime.now(timezone.utc).isoformat(),
+            # The image the appliance's updater should run (pinned by digest).
+            "desired_image": settings.PROBE_IMAGE.strip() or None}
 
 
 @router.get("/jobs/next")

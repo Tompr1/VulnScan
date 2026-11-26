@@ -1,0 +1,11 @@
+[Unit]
+Description=v0cday probe: check for a new probe image
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1h
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

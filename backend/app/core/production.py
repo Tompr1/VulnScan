@@ -9,6 +9,7 @@ below is fixed; elsewhere they are only logged.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -22,6 +23,11 @@ _DEFAULT_PASSWORDS = {"", "admin123", "changeme", "password", "app", "neo4j", "C
 
 class UnsafeConfigurationError(RuntimeError):
     pass
+
+
+def is_pinned_image(reference: str) -> bool:
+    """An image reference that names one exact image: ...@sha256:<64 hex>."""
+    return re.fullmatch(r"[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}", reference) is not None
 
 
 def production_problems(settings: Any) -> list[str]:
@@ -42,6 +48,10 @@ def production_problems(settings: Any) -> list[str]:
         problems.append("CORS_ORIGINS allows every origin ('*')")
     if not settings.PROBE_REQUIRE_HTTPS:
         problems.append("PROBE_REQUIRE_HTTPS is off: probes would receive credentials over plain HTTP")
+    image = (getattr(settings, "PROBE_IMAGE", "") or "").strip()
+    if image and not is_pinned_image(image):
+        problems.append("PROBE_IMAGE is not pinned by digest (registry/name@sha256:<64 hex>): "
+                        "probes would run whatever the tag points to")
     public_url = settings.public_url or ""
     if not public_url.startswith("https://"):
         problems.append("PUBLIC_URL (or the first CORS origin) is not an https:// address")

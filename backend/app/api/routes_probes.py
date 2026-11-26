@@ -67,6 +67,7 @@ def list_probes(db: Session = Depends(get_db)):
             for client in clients
         ],
         "delegable_scan_types": [t.value for t in DELEGABLE_SCAN_TYPES],
+        "desired_image": settings.PROBE_IMAGE.strip() or None,
     }
 
 

@@ -16,6 +16,7 @@ class Reglages:
     CORS_ORIGINS: str = "https://soc.example"
     PROBE_REQUIRE_HTTPS: bool = True
     PUBLIC_URL: str = "https://soc.example"
+    PROBE_IMAGE: str = ""
 
     def cors_origins_list(self):
         return ["*"] if self.CORS_ORIGINS == "*" else [o for o in self.CORS_ORIGINS.split(",") if o]
@@ -40,6 +41,8 @@ def test_des_reglages_sains_demarrent_en_production():
     ("CORS_ORIGINS", "*", "CORS_ORIGINS"),
     ("PROBE_REQUIRE_HTTPS", False, "PROBE_REQUIRE_HTTPS"),
     ("PUBLIC_URL", "http://192.168.2.11:5173", "PUBLIC_URL"),
+    ("PROBE_IMAGE", "ghcr.io/msp/v0cday-probe:latest", "PROBE_IMAGE"),
+    ("PROBE_IMAGE", "ghcr.io/msp/v0cday-probe@sha256:abc", "PROBE_IMAGE"),
 ])
 def test_chaque_reglage_dangereux_est_nomme(champ, valeur, attendu):
     reglages = Reglages(**{champ: valeur})
@@ -63,3 +66,7 @@ def test_hors_production_les_problemes_sont_seulement_signales(caplog):
 def test_sans_url_publique_la_premiere_origine_cors_en_tient_lieu():
     assert production_problems(Reglages(PUBLIC_URL="", CORS_ORIGINS="http://192.168.2.11:5173"))[0].startswith("PUBLIC_URL")
     assert production_problems(Reglages(PUBLIC_URL="", CORS_ORIGINS="https://soc.example")) == []
+
+
+def test_une_image_de_sonde_epinglee_par_empreinte_est_acceptee():
+    assert production_problems(Reglages(PROBE_IMAGE="ghcr.io/msp/v0cday-probe@sha256:" + "0" * 64)) == []

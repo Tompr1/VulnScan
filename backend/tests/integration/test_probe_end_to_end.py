@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.api import routes_probe_agent, routes_probes
 from app.api.deps import get_db
 from app.core.auth import require_auth
+from app.core.config import settings
 from app.core.crypto import encrypt_str
 from app.core.job_queue import ProbeAwareJobQueue
 from app.db import models
@@ -189,3 +190,43 @@ def test_l_enrolement_refuse_une_plateforme_en_http_sauf_en_labo(tmp_path):
 
     assert code == cli.EXIT_ERROR
     assert not (tmp_path / "p.json").exists()
+
+
+def test_la_sonde_lit_l_image_que_la_plateforme_lui_demande(plateforme, tmp_path, monkeypatch, capsys):
+    app, _ = plateforme
+    admin = TestClient(app, base_url=PLATFORM)
+    monkeypatch.setattr(cli, "open_http", lambda *args, **kwargs: TestClient(app, base_url=PLATFORM))
+    token = admin.post("/probes", json={"workspace_id": CLIENT, "name": "Paris"}).json()["enrollment"]["token"]
+    config_path = str(tmp_path / "probe.json")
+    cli.main(["--config", config_path, "enroll", "--platform", PLATFORM, "--token", token])
+    image = "ghcr.io/msp/v0cday-probe@sha256:" + "a" * 64
+    capsys.readouterr()
+
+    monkeypatch.setattr(settings, "PROBE_IMAGE", image)
+    assert cli.main(["--config", config_path, "desired-image"]) == 0
+    demandee = capsys.readouterr().out.strip()
+    monkeypatch.setattr(settings, "PROBE_IMAGE", "")
+    cli.main(["--config", config_path, "desired-image"])
+    aucune = capsys.readouterr().out.strip()
+
+    assert (demandee, aucune) == (image, "")
+    assert admin.get("/probes").json()["desired_image"] is None
+
+
+def test_le_jeton_peut_venir_de_l_environnement_pour_ne_pas_paraitre_dans_la_liste_des_processus(
+        plateforme, tmp_path, monkeypatch):
+    app, _ = plateforme
+    admin = TestClient(app, base_url=PLATFORM)
+    monkeypatch.setattr(cli, "open_http", lambda *args, **kwargs: TestClient(app, base_url=PLATFORM))
+    monkeypatch.setenv("V0CDAY_ENROLL_TOKEN",
+                       admin.post("/probes", json={"workspace_id": CLIENT, "name": "Paris"}).json()["enrollment"]["token"])
+
+    code = cli.main(["--config", str(tmp_path / "p.json"), "enroll", "--platform", PLATFORM])
+
+    assert code == 0 and (tmp_path / "p.json").exists()
+
+
+def test_sans_jeton_l_enrolement_le_dit(tmp_path, monkeypatch):
+    monkeypatch.delenv("V0CDAY_ENROLL_TOKEN", raising=False)
+
+    assert cli.main(["--config", str(tmp_path / "p.json"), "enroll", "--platform", PLATFORM]) == cli.EXIT_ERROR

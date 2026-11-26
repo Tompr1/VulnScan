@@ -1,0 +1,72 @@
+#!/bin/bash
+# v0cday-probe-firstboot — enrolls the appliance with the seed cloud-init wrote,
+# then starts the probe. Run by v0cday-probe-firstboot.service at every boot:
+# once enrolled, it only makes sure the probe runs.
+#
+# Seed: /etc/v0cday-probe/seed.env (0600), KEY=VALUE lines, never sourced:
+#   V0CDAY_PLATFORM=https://soc.example
+#   V0CDAY_TOKEN=<one-time enrollment token>
+#   V0CDAY_LOCAL_ALLOWLIST=10.0.0.0/8      (optional: the client's own limit)
+#   V0CDAY_ALLOW_HTTP=1                     (optional, lab only)
+# and optionally /etc/v0cday-probe/ca.pem, the CA the platform's certificate
+# chains to (a platform using Caddy's internal CA).
+#
+# Exit codes: 0 enrolled and started; 1 enrollment failed (retried by the
+# unit: the platform may be unreachable yet); 3 no usable seed (not retried).
+set -euo pipefail
+
+CONFIG_DIR="${V0CDAY_CONFIG_DIR:-/etc/v0cday-probe}"
+COMPOSE_DIR="${V0CDAY_COMPOSE_DIR:-/opt/v0cday-probe}"
+SEED="$CONFIG_DIR/seed.env"
+# Where CONFIG_DIR is mounted inside the probe container.
+CONTAINER_CONFIG_DIR=/etc/v0cday-probe
+
+log() { echo "v0cday-probe-firstboot: $*"; }
+compose() { docker compose --project-directory "$COMPOSE_DIR" -f "$COMPOSE_DIR/docker-compose.yml" "$@"; }
+seed_value() { sed -n "s/^$1=//p" "$SEED" | tail -n 1; }
+
+if [ -f "$CONFIG_DIR/probe.json" ]; then
+  log "enrolled: starting the probe"
+  compose up -d
+  exit 0
+fi
+
+if [ ! -f "$SEED" ]; then
+  log "not enrolled and no seed at $SEED. Create the probe in Root > Scan probes,"
+  log "download its first-boot configuration and give it to this VM (see README)."
+  exit 3
+fi
+
+platform=$(seed_value V0CDAY_PLATFORM)
+V0CDAY_ENROLL_TOKEN=$(seed_value V0CDAY_TOKEN)
+export V0CDAY_ENROLL_TOKEN
+if [ -z "$platform" ] || [ -z "$V0CDAY_ENROLL_TOKEN" ]; then
+  log "$SEED must set V0CDAY_PLATFORM and V0CDAY_TOKEN"
+  exit 3
+fi
+
+# The token goes through the environment, not the command line (ps).
+args=(run --rm -T -e V0CDAY_ENROLL_TOKEN probe enroll --platform "$platform")
+if [ "$(seed_value V0CDAY_ALLOW_HTTP)" = "1" ]; then
+  args+=(--allow-http)
+fi
+local_allowlist=$(seed_value V0CDAY_LOCAL_ALLOWLIST)
+if [ -n "$local_allowlist" ]; then
+  args+=(--local-allowlist "$local_allowlist")
+fi
+if [ -s "$CONFIG_DIR/ca.pem" ]; then
+  args+=(--ca-bundle "$CONTAINER_CONFIG_DIR/ca.pem")
+fi
+
+log "enrolling with $platform"
+if ! compose "${args[@]}" </dev/null; then
+  log "enrollment failed. A token works once and expires: if it was used or is"
+  log "too old, renew it in Root > Scan probes and give the VM a new seed."
+  exit 1
+fi
+
+# The token is spent: do not keep it, on disk or in the environment.
+unset V0CDAY_ENROLL_TOKEN
+rm -f "$SEED"
+log "enrolled: starting the probe"
+compose up -d

@@ -4,6 +4,7 @@ The ``v0cday-probe`` command.
     v0cday-probe enroll --platform https://soc.example --token <token>
     v0cday-probe run
     v0cday-probe status
+    v0cday-probe desired-image    (for the appliance's updater)
 
 Exit codes: 0 ok, 1 error, 2 the platform rejects this probe (revoked, or
 enrolled again elsewhere): enroll it again with a new token from Root.
@@ -13,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import socket
 import sys
@@ -62,7 +64,8 @@ def main(argv: list[str] | None = None) -> int:
 
     enroll = commands.add_parser("enroll", help="enroll this probe with a one-time token from Root > Scan probes")
     enroll.add_argument("--platform", required=True, help="platform URL, e.g. https://soc.example")
-    enroll.add_argument("--token", required=True)
+    enroll.add_argument("--token", default=os.environ.get("V0CDAY_ENROLL_TOKEN"),
+                        help="one-time token (or V0CDAY_ENROLL_TOKEN, which keeps it out of the process list)")
     enroll.add_argument("--ca-bundle", help="CA certificate(s) to trust the platform with")
     enroll.add_argument("--allow-http", action="store_true", help="lab only: platform over plain HTTP")
     enroll.add_argument("--local-allowlist", help="the client's own limit on what this probe scans (ALLOWLIST syntax)")
@@ -70,12 +73,13 @@ def main(argv: list[str] | None = None) -> int:
     run = commands.add_parser("run", help="take and run the client's scans until stopped")
     run.add_argument("--once", action="store_true", help="run at most one job, then exit")
     commands.add_parser("status", help="check the configuration and the connection to the platform")
+    commands.add_parser("desired-image", help="print the probe image the platform asks for (empty: keep the current one)")
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     try:
-        return {"enroll": _enroll, "run": _run, "status": _status}[args.command](args)
+        return {"enroll": _enroll, "run": _run, "status": _status, "desired-image": _desired_image}[args.command](args)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -89,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _enroll(args: argparse.Namespace) -> int:
+    if not args.token:
+        raise ConfigError("No enrollment token: pass --token or set V0CDAY_ENROLL_TOKEN")
     check_platform_url(args.platform, args.allow_http)
     if args.local_allowlist:
         AllowlistPolicy.from_setting(args.local_allowlist)  # invalid entries are logged here
@@ -142,6 +148,15 @@ def _status(args: argparse.Namespace) -> int:
     print(f"Probe #{answer['probe_id']} '{config.name}' of client #{answer['workspace_id']}: "
           f"connected to {config.platform_url} (platform time {answer['server_time']})."
           + (f" Local scope: {config.local_allowlist}." if config.local_allowlist else ""))
+    return EXIT_OK
+
+
+def _desired_image(args: argparse.Namespace) -> int:
+    """Prints only the image reference (or nothing), for scripts."""
+    config = ProbeConfig.load(args.config)
+    with _http(config) as http:
+        answer = PlatformClient(http, config.authorization, settings.PLATFORM_VERSION).heartbeat(socket.gethostname())
+    print(answer.get("desired_image") or "")
     return EXIT_OK
 
 

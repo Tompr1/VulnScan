@@ -2,7 +2,10 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Icons } from "./icons.jsx";
 import { probesApi } from "../api.js";
 import { Modal, useSubmit } from "./Access.jsx";
-import { SCAN_TYPE_LABELS, clientsWithoutProbe, enrollCommand, probeStatus, seenText, toggledScanTypes } from "./probesModel.js";
+import {
+  SCAN_TYPE_LABELS, applianceHostname, clientsWithoutProbe, cloudInitUserData, enrollCommand, probeStatus, seenText,
+  toggledScanTypes,
+} from "./probesModel.js";
 
 // Root > Scan probes: the VMs installed on clients' networks. A probe only
 // connects out to the platform; it takes the client's scans routed to it.
@@ -66,7 +69,14 @@ export function Probes() {
       )}
 
       <div className="card">
-        <div className="toolbar"><div className="left"><span className="card-title">Probes</span></div></div>
+        <div className="toolbar">
+          <div className="left"><span className="card-title">Probes</span></div>
+          <div className="right muted" style={{fontSize: 12}} title="PROBE_IMAGE in the platform's .env">
+            {data?.desired_image
+              ? <>Image rolled out: <span className="mono">{data.desired_image.replace(/@sha256:([0-9a-f]{12})[0-9a-f]+$/, "@sha256:$1…")}</span></>
+              : "Probes keep their image (no PROBE_IMAGE)"}
+          </div>
+        </div>
         <div className="card-body flush">
           {data === null ? <div className="empty">Loading…</div> : !probes.length ? (
             <div className="empty"><div className="empty-body" style={{margin: "0 auto"}}>No probe yet. Create one for a client, then enroll the VM with its token.</div></div>
@@ -192,24 +202,66 @@ function CreateProbeModal({ clients, close, onCreated }) {
 
 function TokenModal({ probe, enrollment, close }) {
   const [copied, setCopied] = useState(false);
-  const command = enrollCommand(window.location.origin, enrollment.token);
+  const [localAllowlist, setLocalAllowlist] = useState("");
+  const [caPem, setCaPem] = useState("");
+  const [seedError, setSeedError] = useState("");
+  const platformUrl = window.location.origin;
+  const command = enrollCommand(platformUrl, enrollment.token);
   const copy = async () => {
     try { await navigator.clipboard.writeText(command); setCopied(true); } catch { setCopied(false); }
   };
+  const downloadSeed = () => {
+    try {
+      const userData = cloudInitUserData({
+        platformUrl, token: enrollment.token, probeName: probe.name, localAllowlist, caPem,
+        allowHttp: platformUrl.startsWith("http://"),
+      });
+      const url = URL.createObjectURL(new Blob([userData], { type: "text/cloud-config" }));
+      const link = Object.assign(document.createElement("a"), { href: url, download: `${applianceHostname(probe.name)}.user-data` });
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setSeedError("");
+    } catch (e) { setSeedError(e.message); }
+  };
+  const codeStyle = {whiteSpace: "pre-wrap", wordBreak: "break-all", background: "var(--surface-1)", border: "1px solid var(--line)",
+                     borderRadius: 6, padding: 12, fontSize: 12, margin: 0};
   return (
     <Modal title={`Enroll ${probe.name}`} icon={Icons.Key} close={close} onSubmit={(e) => { e.preventDefault(); close(); }}
-           submitLabel="Done" width={560}>
+           submitLabel="Done" width={600}>
       <div style={{fontSize: 13, color: "var(--text-1)"}}>
-        On the probe VM, in <span className="mono">deploy/probe</span> (see its README), run the command below.
         The token works <b>once</b> and expires
         {enrollment.expires_at ? ` on ${new Date(enrollment.expires_at).toLocaleString()}` : " soon"}. It is shown only now.
       </div>
-      <pre className="mono" style={{whiteSpace: "pre-wrap", wordBreak: "break-all", background: "var(--surface-1)", border: "1px solid var(--line)",
-                                    borderRadius: 6, padding: 12, fontSize: 12, margin: 0}}>{command}</pre>
+
       <div>
-        <button type="button" className="btn btn-sm" onClick={copy}>
-          {copied ? <><Icons.Check size={12}/> Copied</> : <><Icons.Copy size={12}/> Copy</>}
-        </button>
+        <div className="card-title" style={{fontSize: 13}}>Appliance (VM image)</div>
+        <div className="form-help" style={{marginBottom: 8}}>
+          Its first-boot configuration (cloud-init): give it to the VM as its user-data, or as a seed ISO
+          (<span className="mono">deploy/appliance/tools/make-seed-iso.sh</span>). The VM enrolls and starts by itself.
+        </div>
+        <label className="form-label">Client's own scope limit (optional)</label>
+        <input className="form-input mono" value={localAllowlist} onChange={e => setLocalAllowlist(e.target.value)}
+               placeholder="10.0.0.0/8,.corp.local"/>
+        <label className="form-label" style={{marginTop: 8}}>Platform CA certificate (optional, for Caddy's internal CA)</label>
+        <textarea className="form-input mono" rows={3} value={caPem} onChange={e => setCaPem(e.target.value)}
+                  placeholder="-----BEGIN CERTIFICATE-----" style={{fontSize: 11}}/>
+        {seedError && <div style={{color: "var(--err)", fontSize: 12.5, marginTop: 6}}><Icons.AlertTriangle size={12}/> {seedError}</div>}
+        <div style={{marginTop: 8}}>
+          <button type="button" className="btn btn-sm" onClick={downloadSeed}><Icons.Download size={12}/> Download first-boot configuration</button>
+        </div>
+      </div>
+
+      <div>
+        <div className="card-title" style={{fontSize: 13}}>Docker on an existing VM</div>
+        <div className="form-help" style={{marginBottom: 8}}>
+          In <span className="mono">deploy/probe</span> (see its README), run:
+        </div>
+        <pre className="mono" style={codeStyle}>{command}</pre>
+        <div style={{marginTop: 8}}>
+          <button type="button" className="btn btn-sm" onClick={copy}>
+            {copied ? <><Icons.Check size={12}/> Copied</> : <><Icons.Copy size={12}/> Copy</>}
+          </button>
+        </div>
       </div>
     </Modal>
   );

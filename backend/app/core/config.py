@@ -79,6 +79,11 @@ class Settings(BaseModel):
     PROBE_ENROLLMENT_TTL_HOURS: int = int(os.getenv("PROBE_ENROLLMENT_TTL_HOURS", "24"))
     # A probe not heard from for longer is shown offline.
     PROBE_ONLINE_SECONDS: int = int(os.getenv("PROBE_ONLINE_SECONDS", "120"))
+    # The probe image every probe should run, pinned by digest
+    # (registry/v0cday-probe@sha256:...). Probes read it in their heartbeat;
+    # each appliance's updater pulls it, checks its signature, and switches.
+    # Empty: probes keep their image.
+    PROBE_IMAGE: str = os.getenv("PROBE_IMAGE", "")
 
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")
