@@ -104,7 +104,7 @@ export function Access() {
           {tab === "clients" && (
             <ClientsTable data={data}
                           onRename={(c) => setModal({ kind: "client", client: c })}
-                          onDelete={(c) => confirm(`Delete the client ${c.name}? Only a client without data can be deleted.`) && run(() => accessApi.deleteClient(c.id), afterClientChange)}/>
+                          onDelete={(c) => setModal({ kind: "delete-client", client: c })}/>
           )}
           {tab === "client-groups" && (
             <GroupsTable rows={data.clientGroups} memberKey="client_ids" members={data.clients} memberLabel="name"
@@ -124,6 +124,7 @@ export function Access() {
       {modal?.kind === "user" && <UserModal close={close} onSaved={saved()}/>}
       {modal?.kind === "password" && <PasswordModal user={modal.user} close={close} onSaved={saved()}/>}
       {modal?.kind === "client" && <ClientModal client={modal.client} close={close} onSaved={saved(afterClientChange)}/>}
+      {modal?.kind === "delete-client" && <DeleteClientModal client={modal.client} close={close} onSaved={saved(afterClientChange)}/>}
       {modal?.kind === "user-group" && (
         <GroupModal title="user group" group={modal.group} memberKey="user_ids" members={data.users} memberLabel="email"
                     save={(body) => modal.group ? accessApi.updateUserGroup(modal.group.id, body) : accessApi.createUserGroup(body)}
@@ -391,13 +392,14 @@ function EffectiveAccessDrawer({ userId, close, onGrant }) {
 
 // ── Modals ──────────────────────────────────────────────────────────────────
 
-function Modal({ title, icon: I = Icons.Settings, close, onSubmit, submitting, error, submitLabel, children, width = 460 }) {
+function Modal({ title, icon: I = Icons.Settings, close, onSubmit, submitting, error, submitLabel, children, width = 460,
+                 danger = false, canSubmit = true, submittingLabel = "Saving…" }) {
   return (
     <>
       <div className="drawer-backdrop" onClick={close}/>
       <div className="modal" style={{maxWidth: width}} role="dialog" aria-label={title}>
         <div className="drawer-head">
-          <I size={16} color="var(--brand)"/>
+          <I size={16} color={danger ? "var(--sev-critical)" : "var(--brand)"}/>
           <span style={{fontSize: 14, fontWeight: 600, color: "var(--text-0)"}}>{title}</span>
           <button className="btn btn-ghost btn-icon btn-sm" onClick={close} style={{marginLeft: "auto"}} aria-label="Close"><Icons.X size={14}/></button>
         </div>
@@ -406,8 +408,8 @@ function Modal({ title, icon: I = Icons.Settings, close, onSubmit, submitting, e
           {error && <div style={{color: "var(--err)", fontSize: 12.5}}><Icons.AlertTriangle size={12}/> {error}</div>}
           <div style={{display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 6}}>
             <button type="button" className="btn" onClick={close} disabled={submitting}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? <><Icons.Refresh size={12} className="spin"/> Saving…</> : submitLabel}
+            <button type="submit" className={`btn ${danger ? "btn-danger" : "btn-primary"}`} disabled={submitting || !canSubmit}>
+              {submitting ? <><Icons.Refresh size={12} className="spin"/> {submittingLabel}</> : submitLabel}
             </button>
           </div>
         </form>
@@ -479,6 +481,72 @@ function ClientModal({ client, close, onSaved }) {
         <input className="form-input" required autoFocus maxLength={255} value={name} onChange={e => setName(e.target.value)} placeholder="Acme Corp"/>
         {!client && <div className="form-help">Super admins open it at once; grant access to the others.</div>}
       </div>
+    </Modal>
+  );
+}
+
+// What a client's rows are, in the confirmation window.
+const DATA_LABELS = {
+  assets: "assets", scan_jobs: "scans", findings: "findings", suppressed_findings: "suppressed findings",
+  scan_schedules: "scan schedules", profiles: "scan profiles", credentials: "credentials",
+  report_templates: "report templates", ai_analyses: "AI analyses", ai_provider_configs: "AI settings",
+  integrations: "integrations", inventory_connections: "inventory connections", inventory_devices: "devices",
+  inventory_device_apps: "device apps", inventory_device_changes: "device changes",
+  inventory_audit_runs: "inventory audits", access_grants: "access grants", client_group_members: "client group memberships",
+  workspace_settings: "settings", audit_logs: "audit log entries",
+};
+
+/** Deleting a client: shows everything that goes with it, then asks for its name. */
+function DeleteClientModal({ client, close, onSaved }) {
+  const [data, setData] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const [typed, setTyped] = useState("");
+  const { submit, submitting, error } = useSubmit(() => accessApi.deleteClient(client.id, typed.trim()), onSaved);
+
+  useEffect(() => {
+    accessApi.clientData(client.id).then(setData).catch(e => setLoadError(e.message));
+  }, [client.id]);
+
+  const rows = Object.entries(data?.rows || {}).sort((a, b) => b[1] - a[1]);
+  const matches = typed.trim() === client.name;
+  return (
+    <Modal title={`Delete client — ${client.name}`} icon={Icons.Trash} close={close} onSubmit={submit} danger
+           submitting={submitting} error={error || loadError} submitLabel="Delete permanently" submittingLabel="Deleting…"
+           canSubmit={!!data && matches && !data.last_client} width={500}>
+      <div className="cp-notice error" style={{margin: 0}}>
+        <Icons.AlertTriangle size={13}/>
+        <span>The client <b>{client.name}</b> and <b>all its data</b> will be deleted permanently. This cannot be undone.</span>
+      </div>
+      {!data ? (
+        !loadError && <div className="muted" style={{fontSize: 13}}><Icons.Refresh size={12} className="spin"/> Counting the client's data…</div>
+      ) : data.last_client ? (
+        <div style={{fontSize: 13, color: "var(--text-2)"}}>This is the last client: create another client before deleting it.</div>
+      ) : (
+        <>
+          <div>
+            <div className="form-label">What will be deleted</div>
+            {rows.length ? (
+              <div style={{display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 16px", fontSize: 13, maxHeight: 200, overflowY: "auto"}}>
+                {rows.map(([table, count]) => (
+                  <React.Fragment key={table}>
+                    <span style={{color: "var(--text-2)"}}>{DATA_LABELS[table] || table.replaceAll("_", " ")}</span>
+                    <span className="num mono" style={{color: "var(--text-0)"}}>{count}</span>
+                  </React.Fragment>
+                ))}
+              </div>
+            ) : <div className="muted" style={{fontSize: 13}}>The client has no data: only the client goes.</div>}
+            <div className="form-help" style={{marginTop: 8}}>
+              Its attack graph goes too. The accounts stay: they only lose their access to this client.
+              {data.running_scans > 0 && ` ${data.running_scans} scan(s) in progress will be stopped.`}
+            </div>
+          </div>
+          <div>
+            <label className="form-label">Type <b className="mono">{client.name}</b> to confirm</label>
+            <input className="form-input mono" autoFocus value={typed} onChange={e => setTyped(e.target.value)}
+                   placeholder={client.name} aria-label="Client name to confirm" autoComplete="off"/>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }

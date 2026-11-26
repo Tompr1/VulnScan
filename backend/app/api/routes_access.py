@@ -19,20 +19,18 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.access.client_deletion import client_rows, delete_client_rows
 from app.access.domain import Grant, Role
 from app.access.repository import SqlAccessRepository
 from app.api.deps import get_db, require_global_admin, require_user
+from app.api.routes_scan import get_cancellation_signal
 from app.core.password import PASSWORD_MIN_LENGTH, hash_password
 from app.db import models
-from app.db.session import Base
+from app.scanner.cancellation import CancellationSignal
 
 logger = logging.getLogger("vulnscan.access")
 
 router = APIRouter(prefix="/access", tags=["access"], dependencies=[Depends(require_global_admin)])
-
-# Rows of these tables describe a client's access or settings, not its data:
-# deleting the client deletes them with it.
-_CLIENT_ACCESS_TABLES = {"access_grants", "client_group_members", "workspace_settings", "audit_logs"}
 
 
 class NameBody(BaseModel):
@@ -73,35 +71,67 @@ def rename_client(client_id: int, body: NameBody, db: Session = Depends(get_db))
     return {"id": client.id, "name": client.name}
 
 
-@router.delete("/clients/{client_id}")
-def delete_client(client_id: int, db: Session = Depends(get_db)):
-    """Delete an empty client. A client with data (assets, scans, findings,
-    devices…) is kept: its data would be lost for good."""
+def get_client_graph():
+    """The attack graph, where the client's nodes are deleted too."""
+    from app.api.routes_graph import _get_neo4j
+
+    return _get_neo4j()
+
+
+def _running_scans(db: Session, client_id: int):
+    return db.query(models.ScanJob).filter(
+        models.ScanJob.workspace_id == client_id, models.ScanJob.status.in_(("queued", "running")))
+
+
+@router.get("/clients/{client_id}/data")
+def client_data(client_id: int, db: Session = Depends(get_db)):
+    """What deleting the client would delete, for the confirmation window."""
     client = _get(db, models.Workspace, client_id, "Client")
+    rows = client_rows(db, client_id)
+    return {
+        "id": client.id,
+        "name": client.name,
+        "rows": rows,
+        "total": sum(rows.values()),
+        "running_scans": _running_scans(db, client_id).count(),
+        "last_client": db.query(models.Workspace).count() == 1,
+    }
+
+
+@router.delete("/clients/{client_id}")
+def delete_client(
+    client_id: int,
+    confirm: str = "",
+    db: Session = Depends(get_db),
+    cancellation: CancellationSignal = Depends(get_cancellation_signal),
+    graph=Depends(get_client_graph),
+):
+    """Delete the client and all its data for good: assets, scans, findings,
+    reports, devices, settings, access. `confirm` must repeat the client's
+    name. Running scans are told to stop; the accounts stay."""
+    client = _get(db, models.Workspace, client_id, "Client")
+    if confirm.strip() != client.name:
+        raise HTTPException(400, f"Type the client's name ('{client.name}') to confirm the deletion")
     if db.query(models.Workspace).count() == 1:
-        raise HTTPException(409, "The last client cannot be deleted")
-    data = _client_data(db, client_id)
-    if data:
-        summary = ", ".join(f"{count} {table}" for table, count in data.items())
-        raise HTTPException(409, f"Client '{client.name}' still has data ({summary}): it cannot be deleted")
-    for model in (models.AccessGrant, models.ClientGroupMember, models.WorkspaceSetting):
-        db.query(model).filter(model.workspace_id == client_id).delete(synchronize_session=False)
-    db.delete(client)
+        raise HTTPException(409, "The last client cannot be deleted: create another client first")
+    name = client.name
+    running = [job_id for (job_id,) in _running_scans(db, client_id).with_entities(models.ScanJob.id)]
+    db.expunge(client)
+    deleted = delete_client_rows(db, client_id)
     db.commit()
-    logger.info("Client deleted: #%d %s", client_id, client.name)
-    return {"ok": True}
-
-
-def _client_data(db: Session, client_id: int) -> dict[str, int]:
-    """Rows of the client's own data, by table (empty when there is none)."""
-    found = {}
-    for table in Base.metadata.sorted_tables:
-        if table.name in _CLIENT_ACCESS_TABLES or "workspace_id" not in table.c:
-            continue
-        count = db.query(func.count()).select_from(table).filter(table.c.workspace_id == client_id).scalar()
-        if count:
-            found[table.name] = count
-    return found
+    for job_id in running:
+        try:
+            cancellation.request(job_id)
+        except Exception as exc:  # the job's rows are gone: it fails on its own
+            logger.warning("Could not signal scan #%d to stop: %s", job_id, exc)
+    try:
+        graph.delete_workspace(client_id)
+    except Exception as exc:  # optional service: ids are never reused
+        logger.warning("Graph of client #%d not deleted: %s", client_id, exc)
+    total = sum(deleted.values())
+    logger.info("Client deleted: #%d %s with %d rows (%s)", client_id, name, total,
+                ", ".join(f"{count} {table}" for table, count in sorted(deleted.items())) or "no data")
+    return {"ok": True, "deleted": deleted, "total": total}
 
 
 # ─── Client groups ────────────────────────────────────────────────────────────

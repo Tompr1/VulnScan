@@ -161,7 +161,9 @@ export const accessApi = {
   clients:           ()         => api("/access/clients"),
   createClient:      (body)     => api("/access/clients", { method: "POST", body }),
   updateClient:      (id, body) => api(`/access/clients/${id}`, { method: "PATCH", body }),
-  deleteClient:      (id)       => api(`/access/clients/${id}`, { method: "DELETE" }),
+  clientData:        (id)       => api(`/access/clients/${id}/data`),
+  // Deletes the client and all its data for good; `name` confirms it.
+  deleteClient:      (id, name) => api(`/access/clients/${id}?confirm=${encodeURIComponent(name)}`, { method: "DELETE" }),
 
   clientGroups:      ()         => api("/access/client-groups"),
   createClientGroup: (body)     => api("/access/client-groups", { method: "POST", body }),

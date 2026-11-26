@@ -3,14 +3,18 @@ Administration des accès du MSP par un admin global : clients, groupes de
 clients, comptes, groupes d'utilisateurs, attributions, et l'explication des
 droits effectifs d'un compte.
 """
+from datetime import datetime, timezone
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.access.client_deletion import client_rows
 from app.access.domain import Role
 from app.access.repository import SqlAccessRepository
 from app.api import routes_access
 from app.api.deps import get_db
+from app.api.routes_scan import get_cancellation_signal
 from app.api.validation import install_validation_error_handler
 from app.core.auth import require_auth
 from app.core.password import verify_password
@@ -60,6 +64,18 @@ def client(session_factory, msp):
             yield s
 
     app.dependency_overrides[get_db] = test_db
+    app.state.arrets, app.state.graphes_effaces = [], []
+
+    class Arret:
+        def request(self, job_id):
+            app.state.arrets.append(job_id)
+
+    class Graphe:
+        def delete_workspace(self, workspace_id):
+            app.state.graphes_effaces.append(workspace_id)
+
+    app.dependency_overrides[get_cancellation_signal] = Arret
+    app.dependency_overrides[routes_access.get_client_graph] = Graphe
     connecte(app, ADMIN_GLOBAL)
     return TestClient(app)
 
@@ -127,43 +143,133 @@ def test_un_client_se_renomme(client, db):
     assert db.get(models.Workspace, GLOBEX).name == "Globex Corp"
 
 
-def test_un_client_vide_se_supprime_avec_ses_acces_et_ses_reglages(client, db):
+def supprime(client, client_id, nom):
+    return client.delete(f"/access/clients/{client_id}", params={"confirm": nom})
+
+
+def remplit(db, client_id, base):
+    """Un client complet : actif, scan, résultat, modèle de rapport, appareil
+    Intune avec ses applications et son historique, audit d'inventaire."""
     db.add_all([
-        models.AccessGrant(user_id=LEA, workspace_id=GLOBEX, role="viewer"),
-        models.ClientGroupMember(client_group_id=SANTE, workspace_id=GLOBEX),
-        models.WorkspaceSetting(workspace_id=GLOBEX, key="scan_allowlist", value_json='{"entries": []}'),
+        models.Asset(id=base, workspace_id=client_id, name=f"srv-{base}"),
+        models.Asset(id=base + 1, workspace_id=client_id, name=f"vm-{base}", parent_id=base),
+        models.Profile(id=base, workspace_id=client_id, name="Standard"),
+        models.ScanJob(id=base, workspace_id=client_id, target="10.0.0.1", status="done", asset_id=base),
+        models.ReportTemplate(id=base, workspace_id=client_id, name="Mensuel"),
+        models.InventoryConnection(id=base, workspace_id=client_id, name="Intune", tenant_id="t",
+                                   client_id="c", client_secret_enc="s"),
+        models.WorkspaceSetting(workspace_id=client_id, key="scan_allowlist", value_json='{"entries": []}'),
+        models.AuditLog(workspace_id=client_id, action="GET /assets"),
+    ])
+    db.flush()
+    db.add_all([
+        models.Finding(workspace_id=client_id, job_id=base, target="10.0.0.1", plugin_id="p", title="Vuln",
+                       severity="high", fingerprint=f"f{base}"),
+        models.InventoryDevice(id=base, workspace_id=client_id, connection_id=base, external_id=f"d{base}",
+                               name="PC-01", platform="windows"),
+        models.InventoryAuditRun(connection_id=base, job_id=base, audited_at=datetime.now(timezone.utc)),
+    ])
+    db.flush()
+    db.add_all([
+        models.InventoryDeviceApp(device_id=base, name="Chrome"),
+        models.InventoryDeviceChange(device_id=base, kind="app_added", subject="Chrome",
+                                     detected_at=datetime.now(timezone.utc)),
     ])
     db.commit()
 
-    reponse = client.delete(f"/access/clients/{GLOBEX}")
 
-    assert reponse.status_code == 200
+def lignes(db, client_id):
+    db.expire_all()
+    return client_rows(db, client_id)
+
+
+def test_supprimer_un_client_supprime_toutes_ses_donnees_definitivement(client, db):
+    remplit(db, GLOBEX, 100)
+    db.add_all([
+        models.AccessGrant(user_id=LEA, workspace_id=GLOBEX, role="viewer"),
+        models.ClientGroupMember(client_group_id=SANTE, workspace_id=GLOBEX),
+    ])
+    db.commit()
+
+    reponse = supprime(client, GLOBEX, "Globex")
+
+    assert reponse.status_code == 200, reponse.text
+    assert reponse.json()["deleted"]["findings"] == 1 and reponse.json()["deleted"]["inventory_device_apps"] == 1
     db.expire_all()
     assert db.get(models.Workspace, GLOBEX) is None
-    assert db.query(models.AccessGrant).filter_by(workspace_id=GLOBEX).count() == 0
-    assert db.query(models.ClientGroupMember).filter_by(workspace_id=GLOBEX).count() == 0
-    assert db.query(models.WorkspaceSetting).filter_by(workspace_id=GLOBEX).count() == 0
+    assert lignes(db, GLOBEX) == {}
+    for modele in (models.InventoryDeviceApp, models.InventoryDeviceChange, models.InventoryAuditRun, models.Finding):
+        assert db.query(modele).count() == 0, modele
     assert acces(db, LEA) == {ACME: Role.ADMIN}
 
 
-def test_un_client_qui_a_des_donnees_n_est_pas_supprime(client, db):
-    db.add_all([models.Asset(workspace_id=GLOBEX, name="srv-1"), models.Asset(workspace_id=GLOBEX, name="srv-2")])
-    db.add(models.ScanJob(workspace_id=GLOBEX, target="10.0.0.1", status="done"))
+def test_supprimer_un_client_ne_touche_ni_aux_autres_clients_ni_au_referentiel_ni_aux_comptes(client, db):
+    remplit(db, GLOBEX, 100)
+    remplit(db, ACME, 200)
+    db.add(models.CveDataset(name="CISA KEV", kind="cisa_kev", path="/tmp/kev.json", enabled=True))
+    db.commit()
+    avant = lignes(db, ACME)
+
+    assert supprime(client, GLOBEX, "Globex").status_code == 200
+
+    assert lignes(db, ACME) == avant
+    assert db.query(models.CveDataset).count() == 1
+    assert db.query(models.User).count() == 3
+    assert db.get(models.Workspace, ACME) is not None
+
+
+def test_la_fenetre_de_confirmation_montre_ce_qui_sera_supprime(client, db):
+    remplit(db, GLOBEX, 100)
+    db.add(models.ScanJob(workspace_id=GLOBEX, target="10.0.0.2", status="running"))
     db.commit()
 
-    reponse = client.delete(f"/access/clients/{GLOBEX}")
+    reponse = client.get(f"/access/clients/{GLOBEX}/data")
 
-    assert reponse.status_code == 409
-    assert "2 assets" in reponse.json()["detail"] and "1 scan_jobs" in reponse.json()["detail"]
+    assert reponse.status_code == 200
+    corps = reponse.json()
+    assert corps["name"] == "Globex" and corps["running_scans"] == 1 and corps["last_client"] is False
+    assert corps["rows"]["assets"] == 2 and corps["rows"]["scan_jobs"] == 2 and corps["rows"]["inventory_device_changes"] == 1
+    assert corps["total"] == sum(corps["rows"].values())
+
+
+@pytest.mark.parametrize("confirmation", ["", "globex", "Acme"])
+def test_sans_le_nom_exact_du_client_rien_n_est_supprime(client, db, confirmation):
+    remplit(db, GLOBEX, 100)
+
+    reponse = supprime(client, GLOBEX, confirmation)
+
+    assert reponse.status_code == 400
+    assert db.get(models.Workspace, GLOBEX) is not None and lignes(db, GLOBEX)["assets"] == 2
+
+
+def test_les_scans_en_cours_du_client_sont_arretes_et_son_graphe_efface(client, db):
+    db.add_all([models.ScanJob(id=7, workspace_id=GLOBEX, target="10.0.0.1", status="running"),
+                models.ScanJob(id=8, workspace_id=GLOBEX, target="10.0.0.2", status="done"),
+                models.ScanJob(id=9, workspace_id=ACME, target="10.0.0.3", status="running")])
+    db.commit()
+
+    assert supprime(client, GLOBEX, "Globex").status_code == 200
+
+    assert client.app.state.arrets == [7]
+    assert client.app.state.graphes_effaces == [GLOBEX]
+
+
+def test_un_graphe_injoignable_n_empeche_pas_la_suppression(client, db):
+    class GrapheEnPanne:
+        def delete_workspace(self, workspace_id):
+            raise ConnectionError("neo4j down")
+    client.app.dependency_overrides[routes_access.get_client_graph] = GrapheEnPanne
+
+    assert supprime(client, GLOBEX, "Globex").status_code == 200
     db.expire_all()
-    assert db.get(models.Workspace, GLOBEX) is not None
+    assert db.get(models.Workspace, GLOBEX) is None
 
 
 def test_le_dernier_client_n_est_pas_supprime(client, db):
-    for client_id in (GLOBEX, HOPITAL):
-        assert client.delete(f"/access/clients/{client_id}").status_code == 200
+    for client_id, nom in ((GLOBEX, "Globex"), (HOPITAL, "Hôpital")):
+        assert supprime(client, client_id, nom).status_code == 200
 
-    assert client.delete(f"/access/clients/{ACME}").status_code == 409
+    assert supprime(client, ACME, "Acme").status_code == 409
     db.expire_all()
     assert db.get(models.Workspace, ACME) is not None
 
