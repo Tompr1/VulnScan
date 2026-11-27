@@ -70,9 +70,9 @@ class Env:
         reponse = self.https.post("/probe/v1/enroll", json={"token": creee["enrollment"]["token"], "hostname": "probe-01"})
         return creee["id"], {"Authorization": f"Probe {reponse.json()['credential']}", "X-Probe-Version": "0.1.0"}
 
-    def job_soumis(self, job_id, workspace_id=CLIENT):
+    def job_soumis(self, job_id, workspace_id=CLIENT, scan_type="internal"):
         self.db.add(models.ScanJob(id=job_id, workspace_id=workspace_id, target="10.0.0.5", profile_id=5,
-                                   status="queued", scan_type="internal"))
+                                   status="queued", scan_type=scan_type))
         self.db.commit()
         ProbeAwareJobQueue(self.session_factory, self.file).enqueue_scan(job_id)
 
@@ -341,6 +341,41 @@ def test_le_client_voit_sur_quelle_sonde_ses_scans_ont_tourne(env):
     assert (detail["runs_on"], detail["probe_name"]) == ("probe", "site-paris")
 
 
+# ── Placement par défaut : un client équipé d'une sonde l'utilise ─────────────
+
+def test_avec_une_sonde_active_les_scans_internes_et_api_y_vont_par_defaut(env):
+    env.sonde_enrolee()
+
+    env.job_soumis(20, scan_type="internal")
+    env.job_soumis(21, scan_type="api")
+    env.job_soumis(22, scan_type="external")
+
+    env.db.expire_all()
+    assert [env.db.get(models.ScanJob, i).runs_on for i in (20, 21, 22)] == ["probe", "probe", "platform"]
+    assert env.file.scans == [22]
+
+
+def test_une_sonde_creee_mais_pas_encore_enrolee_ne_change_rien(env):
+    env.https.post("/probes", json={"workspace_id": CLIENT, "name": "a-installer"})
+
+    env.job_soumis(20)
+
+    assert env.file.scans == [20]
+
+
+def test_root_voit_le_choix_par_defaut_et_peut_le_remplacer(env):
+    env.sonde_enrolee()
+    avant = {c["id"]: c for c in env.https.get("/probes").json()["clients"]}
+
+    env.https.put(f"/probes/clients/{CLIENT}/execution", json={"scan_types": []})
+    apres = {c["id"]: c for c in env.https.get("/probes").json()["clients"]}
+    env.job_soumis(20)
+
+    assert (avant[CLIENT]["probe_scan_types"], avant[CLIENT]["probe_scan_types_default"]) == (["internal", "api"], True)
+    assert (apres[CLIENT]["probe_scan_types"], apres[CLIENT]["probe_scan_types_default"]) == ([], False)
+    assert env.file.scans == [20], "tout ramené sur la plateforme par Root"
+
+
 # ── Découverte d'hôtes sur la sonde ───────────────────────────────────────────
 
 AVEC_DECOUVERTE = {"wait": 0, "kinds": "scan,discovery"}
@@ -397,7 +432,6 @@ def test_une_sonde_d_avant_la_decouverte_ne_la_recoit_pas(env):
 
 def test_la_decouverte_passe_avant_les_scans_en_attente(env):
     _, sonde = env.sonde_enrolee()
-    env.https.put(f"/probes/clients/{CLIENT}/execution", json={"scan_types": ["internal"]})
     env.job_soumis(20)
     decouverte = _decouverte_en_attente(env)
 

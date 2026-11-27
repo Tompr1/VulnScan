@@ -61,6 +61,11 @@ docker compose run --rm probe enroll --platform https://<PUBLIC_HOST> \
   --token <token> --ca-bundle /etc/v0cday-probe/ca.pem
 ```
 
+Once a client has an enrolled probe, its internal and API scans and its host
+discoveries run there; the platform never probes a client's network for a
+discovery itself (see `deploy/probe/README.md`). Settings: `DISCOVERY_BUDGET_SECONDS`
+and `DISCOVERY_UNCLAIMED_AFTER_SECONDS` in `.env`.
+
 ## Firewall
 
 Open 443 (and 80 for Let's Encrypt and the HTTP → HTTPS redirect). Nothing

@@ -134,7 +134,7 @@ export function Probes() {
         <div className="card-head">
           <div>
             <div className="card-title">Where each client's scans run</div>
-            <div className="card-sub">Ticked scan types go to the client's probe; the others run on the platform. IaC and device inventory always run on the platform.</div>
+            <div className="card-sub">Ticked scan types go to the client's probe; the others run on the platform. With an active probe, internal and API scans go to it by default ("default" below) until you change the list. Host discovery always runs on the probe, and is refused for a client without one. IaC and device inventory always run on the platform.</div>
           </div>
         </div>
         <div className="card-body flush">
@@ -144,7 +144,12 @@ export function Probes() {
               <tbody>
                 {clients.map(c => (
                   <tr key={c.id}>
-                    <td style={{color: "var(--text-0)", fontWeight: 500}}>{c.name}</td>
+                    <td style={{color: "var(--text-0)", fontWeight: 500}}>
+                      {c.name}
+                      {c.probe_scan_types_default && (c.probe_scan_types || []).length > 0 && (
+                        <span className="muted" style={{fontSize: 11, fontWeight: 400, marginLeft: 8}} title="Not chosen yet: the default for a client with an active probe">default</span>
+                      )}
+                    </td>
                     {(data.delegable_scan_types || []).map(t => (
                       <td key={t}>
                         <label style={{display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer"}}>

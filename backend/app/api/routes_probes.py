@@ -16,7 +16,9 @@ from app.api.deps import get_db, require_global_admin
 from app.core.config import settings
 from app.db import models
 from app.probes import events
-from app.probes.placement import DELEGABLE_SCAN_TYPES, PROBE, NotDelegableError, probe_scan_types, set_probe_scan_types
+from app.probes.placement import (
+    DELEGABLE_SCAN_TYPES, PROBE, NotDelegableError, probe_execution_is_default, probe_scan_types, set_probe_scan_types,
+)
 from app.probes.registry import Enrollment, ProbeRegistry, ProbeStateError, display_status
 from app.scan_jobs.outcome import JobStatus
 
@@ -63,6 +65,9 @@ def list_probes(db: Session = Depends(get_db)):
                 "id": client.id,
                 "name": client.name,
                 "probe_scan_types": probe_scan_types(db, client.id),
+                # Not chosen by Root yet: the default list (internal + API
+                # with an active probe, nothing without).
+                "probe_scan_types_default": probe_execution_is_default(db, client.id),
                 "waiting_jobs": waiting.get(client.id, 0),
             }
             for client in clients
@@ -133,7 +138,7 @@ def set_client_execution(workspace_id: int, body: ExecutionBody, db: Session = D
         chosen = set_probe_scan_types(db, workspace_id, body.scan_types)
     except NotDelegableError as exc:
         raise HTTPException(422, str(exc)) from None
-    return {"workspace_id": workspace_id, "probe_scan_types": chosen}
+    return {"workspace_id": workspace_id, "probe_scan_types": chosen, "probe_scan_types_default": False}
 
 
 def _close_discoveries(db: Session, probe: models.Probe, reason: str) -> None:
