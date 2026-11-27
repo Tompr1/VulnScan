@@ -23,7 +23,9 @@ export function toggledScanTypes(current, scanType, on, delegable) {
 
 /** What to run on the probe VM, in deploy/probe, to enroll it (deploy/probe/README.md). */
 export function enrollCommand(platformUrl, token) {
-  return `docker compose run --rm probe enroll --platform ${platformUrl.replace(/\/+$/, "")} --token ${token}`;
+  // "--token=…": a value starting with "-" stays a value (tokens from older
+  // platforms could).
+  return `docker compose run --rm probe enroll --platform ${platformUrl.replace(/\/+$/, "")} --token=${token}`;
 }
 
 /** Clients that have scan types on a probe but no probe able to run them. */

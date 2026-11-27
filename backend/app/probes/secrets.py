@@ -16,7 +16,12 @@ SCHEME = "Probe"
 
 
 def new_secret() -> str:
-    return secrets.token_urlsafe(32)
+    """Never starts with "-": a command line would take "--token -abc…" for
+    two options (one draw in 64 did, and broke enrollment)."""
+    while True:
+        value = secrets.token_urlsafe(32)
+        if not value.startswith("-"):
+            return value
 
 
 def digest(value: str) -> str:

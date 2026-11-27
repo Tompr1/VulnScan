@@ -22,7 +22,8 @@ test("cocher un type de scan l'ajoute dans l'ordre de l'API", () => {
 
 test("la commande d'enrôlement nomme la plateforme sans barre finale", () => {
   assert.equal(enrollCommand("https://soc.example/", "tok"),
-               "docker compose run --rm probe enroll --platform https://soc.example --token tok");
+               "docker compose run --rm probe enroll --platform https://soc.example --token=tok");
+  assert.match(enrollCommand("https://soc.example", "-abc"), / --token=-abc$/);
 });
 
 test("un client qui confie des scans sans sonde enrôlée est signalé", () => {

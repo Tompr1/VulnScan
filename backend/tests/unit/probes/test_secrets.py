@@ -29,3 +29,11 @@ def test_l_identifiant_d_une_sonde_se_relit_depuis_l_en_tete():
                                     "probe 12.abc", "Bearer 12.abc"])
 def test_un_en_tete_mal_forme_n_est_pas_lu(header):
     assert secrets.parse_authorization(header) is None
+
+
+def test_un_secret_ne_commence_jamais_par_un_tiret(monkeypatch):
+    # Un tirage sur 64 commençait par « - » : « --token -abc… » cassait l'enrôlement.
+    tirages = iter(["-premier-tirage", "second-tirage"])
+    monkeypatch.setattr(secrets.secrets, "token_urlsafe", lambda n: next(tirages))
+
+    assert secrets.new_secret() == "second-tirage"

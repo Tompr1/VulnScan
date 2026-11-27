@@ -23,6 +23,7 @@ from app.probe_agent.agent import FixedAllowlist, ProbeAgent, ReportOutbox
 from app.probe_agent.config import ProbeConfig
 from app.probe_agent.platform import PlatformClient
 from app.probe_agent.reference import RemoteReferenceData
+from app.probes import secrets as probe_secrets
 from app.probes.gateway import ProbeGateway
 from app.scan_jobs.assigner import JobAssigner
 from app.scan_jobs.assignment import ScanReport
@@ -247,3 +248,15 @@ def test_la_sonde_declare_l_image_et_la_version_d_appliance_qu_elle_fait_tourner
     db.expire_all()
     probe = db.query(models.Probe).one()
     assert (probe.image, probe.appliance_version) == ("ghcr.io/msp/v0cday-probe@sha256:" + "c" * 64, "1.2.0")
+
+
+def test_un_jeton_qui_commence_par_un_tiret_s_enrole_avec_la_commande_affichee(plateforme, db, tmp_path, monkeypatch):
+    # Jeton d'une plateforme antérieure au correctif : la forme --token=… l'accepte.
+    app, _ = plateforme
+    monkeypatch.setattr(probe_secrets, "new_secret", lambda: "-" + "A" * 42)
+    monkeypatch.setattr(cli, "open_http", lambda *args, **kwargs: TestClient(app, base_url=PLATFORM))
+    token = TestClient(app, base_url=PLATFORM).post("/probes", json={"workspace_id": CLIENT, "name": "Paris"}).json()["enrollment"]["token"]
+
+    code = cli.main(["--config", str(tmp_path / "p.json"), "enroll", "--platform", PLATFORM, f"--token={token}"])
+
+    assert token.startswith("-") and code == 0
