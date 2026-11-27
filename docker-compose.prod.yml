@@ -138,8 +138,12 @@ services:
       CADDY_TLS: ${CADDY_TLS:-internal}
       BACKEND_UPSTREAM: backend:8888
     ports: ["80:80", "443:443", "443:443/udp"]
+    # The folder, not the file: a deploy replaces the Caddyfile by a new file
+    # (rsync), and a single-file mount would keep showing the old one.
+    # --watch reloads it when it changes (the admin API is off).
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
     volumes:
-      - ./deploy/master/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/master:/etc/caddy:ro
       - caddy_data:/data        # certificates, and the internal CA's root
       - caddy_config:/config
     logging: *logging
