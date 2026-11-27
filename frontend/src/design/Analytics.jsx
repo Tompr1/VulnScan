@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Icons } from "./icons.jsx";
 import { analyticsApi, scanApi, assetsApi, credentialsApi } from "../api.js";
 import { SevBadge, Spinner, EmptyState, Panel } from "../components/ui.jsx";
+import { folderChoices } from "./assetsModel.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────
 const SEV_COLORS = {
@@ -472,9 +473,9 @@ function CompareTab() {
 // ======================================================================
 // Tab 4: Asset Discovery
 // ======================================================================
-// Register discovered hosts as assets: one asset per host, its IP registered
-// as the target. Name is pre-filled with the reverse DNS name (or the IP) and
-// stays editable; folder and credential are optional.
+// Add discovered hosts to the assets. In a folder, a host becomes a target of
+// that folder, under its name (an alias of its IP: pre-filled with the reverse
+// DNS name, editable); without a folder, it gets an asset of its own.
 function AddHostsModal({ hosts, close, onDone }) {
   const [rows, setRows] = useState(() => hosts.map(h => ({
     ip: h.ip,
@@ -541,6 +542,8 @@ function AddHostsModal({ hosts, close, onDone }) {
 
   const update = (i, field, value) =>
     setRows(rs => rs.map((r, j) => (j === i ? { ...r, [field]: value } : r)));
+  const updateAll = (field, value) => setRows(rs => rs.map(r => ({ ...r, [field]: value })));
+  const choices = folderChoices(folders);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -559,7 +562,7 @@ function AddHostsModal({ hosts, close, onDone }) {
       });
       onDone(rows.length);
     } catch (err) {
-      setError(err.message || "Could not create the assets");
+      setError(err.message || "Could not add the hosts");
       setSubmitting(false);
     }
   };
@@ -650,22 +653,38 @@ function AddHostsModal({ hosts, close, onDone }) {
             </div>
           )}
 
+          {rows.length > 1 && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, color: "var(--text-2)" }}>
+              <span>Put all in</span>
+              <select className="form-input" style={{ maxWidth: 260 }} value=""
+                onChange={e => e.target.value && updateAll("parent_id", e.target.value === "none" ? "" : e.target.value)}>
+                <option value="">Choose a folder…</option>
+                <option value="none">No folder</option>
+                {choices.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: "var(--text-3)" }}>
+            In a folder, a host is added as a target of that folder, the name being its alias.
+            Without a folder, it gets an asset of its own.
+          </div>
+
           {rows.map((r, i) => (
             <div key={r.ip} style={{
               display: "grid", gridTemplateColumns: "minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr)", gap: 10,
               alignItems: "end", paddingBottom: 12, borderBottom: "1px solid var(--line)",
             }}>
               <div>
-                <label className="form-label">Name <span className="mono muted">({r.ip})</span></label>
+                <label className="form-label">Name / alias <span className="mono muted">({r.ip})</span></label>
                 <input className="form-input" value={r.name} required
                   onChange={e => update(i, "name", e.target.value)}/>
               </div>
               <div>
                 <label className="form-label">Folder (optional)</label>
                 <select className="form-input" value={r.parent_id} onChange={e => update(i, "parent_id", e.target.value)}>
-                  <option value="">No folder</option>
-                  {folders.filter(f => !f.parent_id).map(f => (
-                    <option key={f.id} value={f.id}>{f.name}</option>
+                  <option value="">No folder (own asset)</option>
+                  {choices.map(f => (
+                    <option key={f.id} value={f.id}>{f.label}</option>
                   ))}
                 </select>
               </div>
@@ -684,7 +703,7 @@ function AddHostsModal({ hosts, close, onDone }) {
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button type="button" className="btn" onClick={close} disabled={submitting}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={submitting || rows.length === 0}>
-              {submitting ? "Creating…" : <><Icons.Check size={12}/> Create {rows.length} asset{rows.length > 1 ? "s" : ""}</>}
+              {submitting ? "Adding…" : <><Icons.Check size={12}/> Add {rows.length} host{rows.length > 1 ? "s" : ""}</>}
             </button>
           </div>
         </form>
@@ -893,7 +912,7 @@ function DiscoverTab() {
           )}
           {addedCount > 0 && (
             <div style={{ marginTop: 12, fontSize: 13, color: "var(--text-1)" }}>
-              {addedCount} asset(s) created. They are listed in Assets.
+              {addedCount} host{addedCount > 1 ? "s" : ""} added. They are listed in Assets.
             </div>
           )}
           {showAdd && (
