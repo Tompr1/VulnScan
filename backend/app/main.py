@@ -245,6 +245,17 @@ def _run_migrations(db: Session) -> None:
             END IF;
         END $$;
         """,
+        # Each refresh used to add a record for the same canonical file and
+        # disable the previous one: keep one record per file (an enabled one
+        # if any).
+        """
+        DELETE FROM cve_datasets d USING (
+            SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY path, kind ORDER BY enabled DESC, id DESC
+            ) AS rank FROM cve_datasets
+        ) ranked
+        WHERE d.id = ranked.id AND ranked.rank > 1;
+        """,
         # The dataset refresh schedule becomes a platform setting: keep an
         # enabled workspace schedule if there is one.
         """
@@ -486,14 +497,12 @@ def _schedule_loop():
     _sla_check_counter = 0       # run every 60 ticks  (60 min)
     _backup_counter = 0          # run every 1440 ticks (24 hours)
     _update_check_counter = 0    # run every 1440 ticks (24 hours)
-    _dataset_counter = 0         # interval comes from the per-workspace setting
 
     while True:
         time.sleep(60)
         _sla_check_counter += 1
         _backup_counter += 1
         _update_check_counter += 1
-        _dataset_counter += 1
 
         db = None
         try:
@@ -861,17 +870,21 @@ def _schedule_loop():
             # The datasets are shared by every client: one schedule, one refresh.
             try:
                 from app.core.platform_settings import (
-                    DATASET_REFRESH_KEY, DEFAULT_DATASET_REFRESH, get_platform_setting,
+                    DATASET_REFRESH_KEY, DEFAULT_DATASET_REFRESH, dataset_refresh_due,
+                    get_platform_setting, mark_dataset_refresh_queued,
                 )
-                cfg = get_platform_setting(db, DATASET_REFRESH_KEY, DEFAULT_DATASET_REFRESH)
-                interval_ticks = max(1, int(cfg.get("interval_hours", 24)) * 60)
-                if cfg.get("enabled") and _dataset_counter % interval_ticks == 0:
+                # Timed from the last queued refresh, stored in the database:
+                # a tick counter restarted with the API, so a platform
+                # redeployed more often than the interval never refreshed.
+                if dataset_refresh_due(db, now_utc):
                     # run_dataset_refresh holds a Redis lock, so a trigger that
                     # lands while one is still running is a no-op, not a clash.
                     from app.worker_tasks import run_dataset_refresh
                     Queue("datasets", connection=Redis.from_url(settings.REDIS_URL)).enqueue(
                         run_dataset_refresh, None, job_timeout=7200,
                     )
+                    mark_dataset_refresh_queued(db, now_utc)
+                    cfg = get_platform_setting(db, DATASET_REFRESH_KEY, DEFAULT_DATASET_REFRESH)
                     logger.info("Scheduled dataset refresh queued (every %sh)", cfg.get("interval_hours", 24))
                     from app.core.job_queue import get_job_queue
                     get_job_queue().enqueue_cve_catalog_sync()
