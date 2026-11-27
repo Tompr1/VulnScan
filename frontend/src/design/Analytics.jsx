@@ -799,7 +799,7 @@ function DiscoverTab() {
                             color: "var(--ok)", background: "var(--ok-soft)", border: "1px solid var(--ok-line)",
                             borderRadius: 999, padding: "2px 10px",
                           }}>
-                            Déjà présent dans les assets · {h.asset_name}
+                            Already in assets · {h.asset_name}
                           </span>
                         )}
                       </label>

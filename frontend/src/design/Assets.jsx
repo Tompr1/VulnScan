@@ -103,7 +103,7 @@ export function Assets({ openAsset }) {
                     <div style={{display: "flex", gap: 14, marginTop: 14, fontSize: 12, color: "var(--text-3)"}}>
                       <span><Icons.Target size={11} style={{marginRight: 4, verticalAlign: "-1px"}}/><span className="mono" style={{color: "var(--text-1)", fontWeight: 600}}>{a.targets || 0}</span> targets</span>
                       {subs.length > 0 && (subs.every(isHost)
-                        ? <span><Icons.Server size={11} style={{marginRight: 4, verticalAlign: "-1px"}}/><span className="mono" style={{color: "var(--text-1)", fontWeight: 600}}>{subs.length}</span> {subs.length > 1 ? "hôtes" : "hôte"}</span>
+                        ? <span><Icons.Server size={11} style={{marginRight: 4, verticalAlign: "-1px"}}/><span className="mono" style={{color: "var(--text-1)", fontWeight: 600}}>{subs.length}</span> {subs.length > 1 ? "hosts" : "host"}</span>
                         : <span><Icons.Folder size={11} style={{marginRight: 4, verticalAlign: "-1px"}}/><span className="mono" style={{color: "var(--text-1)", fontWeight: 600}}>{subs.length}</span> sub</span>)}
                       <span style={{marginLeft: "auto"}}><Icons.Clock size={11} style={{marginRight: 4, verticalAlign: "-1px"}}/>{a.last_scan_at ? new Date(a.last_scan_at).toLocaleDateString() : "never"}</span>
                     </div>
@@ -199,6 +199,7 @@ export function Assets({ openAsset }) {
 export function AssetDetail({ asset: initialAsset, back }) {
   const [tab, setTab] = useState("targets");
   const [showCreate, setShowCreate] = useState(false);
+  const [scanTarget, setScanTarget] = useState(null); // target to scan from a row, if any
   const [asset, setAsset] = useState(initialAsset);
   const [targets, setTargets] = useState([]);
   const [jobs, setJobs] = useState([]);
@@ -259,7 +260,7 @@ export function AssetDetail({ asset: initialAsset, back }) {
           <div className="left">
             <div className="tabs">
               <button className={`tab ${tab === "targets" ? "active" : ""}`} onClick={() => setTab("targets")}>Targets <span className="badge">{targets.length}</span></button>
-              {subs.length > 0 && <button className={`tab ${tab === "subs" ? "active" : ""}`} onClick={() => setTab("subs")}>{subs.every(isHost) ? "Hôtes" : "Sub-folders"} <span className="badge">{subs.length}</span></button>}
+              {subs.length > 0 && <button className={`tab ${tab === "subs" ? "active" : ""}`} onClick={() => setTab("subs")}>{subs.every(isHost) ? "Hosts" : "Sub-folders"} <span className="badge">{subs.length}</span></button>}
               <button className={`tab ${tab === "scans" ? "active" : ""}`} onClick={() => setTab("scans")}>Scan history</button>
               <button className={`tab ${tab === "settings" ? "active" : ""}`} onClick={() => setTab("settings")}>Settings</button>
             </div>
@@ -273,7 +274,7 @@ export function AssetDetail({ asset: initialAsset, back }) {
               </div>
             ) : (
               <table className="tbl">
-                <thead><tr><th>Target</th><th style={{width: 100}}>Findings</th><th style={{width: 100}}>Scans</th><th style={{width: 160}}>Last scan</th></tr></thead>
+                <thead><tr><th>Target</th><th style={{width: 100}}>Findings</th><th style={{width: 100}}>Scans</th><th style={{width: 160}}>Last scan</th><th style={{width: 120}}></th></tr></thead>
                 <tbody>
                   {targets.map(t => (
                     <tr key={t.target} className="clickable">
@@ -281,6 +282,11 @@ export function AssetDetail({ asset: initialAsset, back }) {
                       <td className="num"><span style={{color: "var(--text-0)", fontWeight: 600}}>{t.findings}</span></td>
                       <td className="num">{t.scans}</td>
                       <td className="muted" style={{fontSize: 12}}>{t.last_scan_at ? new Date(t.last_scan_at).toLocaleString("en-US", {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "—"}</td>
+                      <td>
+                        <button className="btn btn-sm" onClick={e => { e.stopPropagation(); setScanTarget(t.target); }}>
+                          <Icons.Play size={11}/> Scan
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -289,7 +295,7 @@ export function AssetDetail({ asset: initialAsset, back }) {
           )}
           {tab === "subs" && (
             <table className="tbl">
-              <thead><tr><th>{subs.every(isHost) ? "Hôte" : "Sub-folder"}</th><th style={{width: 180}}>{subs.every(isHost) ? "IP" : "Targets"}</th><th style={{width: 100}}>Risk</th></tr></thead>
+              <thead><tr><th>{subs.every(isHost) ? "Host" : "Sub-folder"}</th><th style={{width: 180}}>{subs.every(isHost) ? "IP" : "Targets"}</th><th style={{width: 100}}>Risk</th></tr></thead>
               <tbody>
                 {subs.map(s => (
                   <tr key={s.id} className="clickable">
@@ -344,6 +350,7 @@ export function AssetDetail({ asset: initialAsset, back }) {
       </div>
 
       {showCreate && <NewScanModal close={() => setShowCreate(false)} preselectedAsset={asset} onCreated={() => { setShowCreate(false); refresh(); }}/>}
+      {scanTarget && <NewScanModal close={() => setScanTarget(null)} preselectedAsset={asset} initialTarget={scanTarget} onCreated={() => { setScanTarget(null); refresh(); }}/>}
     </>
   );
 }
@@ -408,9 +415,12 @@ function NewFolderModal({ assets, close, onCreated }) {
   );
 }
 
-export function NewScanModal({ close, preselectedAsset, onCreated }) {
+export function NewScanModal({ close, preselectedAsset, initialTarget, onCreated }) {
   const [scanKind, setScanKind] = useState("network");
-  const [target, setTarget] = useState("");
+  // Opened from an asset with a single target (a discovered host): pre-fill it.
+  const [target, setTarget] = useState(
+    initialTarget || (preselectedAsset?.target_list?.length === 1 ? preselectedAsset.target_list[0] : "")
+  );
   const [profiles, setProfiles] = useState([]);
   const [profileId, setProfileId] = useState(null);
   const [assets, setAssets] = useState([]);
