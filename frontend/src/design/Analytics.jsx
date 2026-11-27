@@ -731,8 +731,11 @@ function DiscoverTab() {
     if (next.has(ip)) next.delete(ip); else next.add(ip);
     return next;
   });
+  // Hosts already on an asset are shown but cannot be added twice.
+  const newHosts = targets.filter(h => !h.asset_id);
+  const allNewSelected = newHosts.length > 0 && newHosts.every(h => selected.has(h.ip));
   const toggleAll = () => setSelected(
-    selected.size === targets.length ? new Set() : new Set(targets.map(h => h.ip))
+    allNewSelected ? new Set() : new Set(newHosts.map(h => h.ip))
   );
 
   return (
@@ -769,7 +772,7 @@ function DiscoverTab() {
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
                     <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", color: "var(--text-1)", cursor: "pointer" }}>
-                      <input type="checkbox" checked={selected.size === targets.length} onChange={toggleAll}/>
+                      <input type="checkbox" checked={allNewSelected} disabled={newHosts.length === 0} onChange={toggleAll}/>
                       Select all
                     </label>
                     <button className="btn btn-primary" disabled={selected.size === 0} onClick={() => setShowAdd(true)}>
@@ -780,14 +783,25 @@ function DiscoverTab() {
                     {targets.map(h => (
                       <label key={h.ip} style={{
                         padding: "8px 12px", background: "var(--surface-1)", borderRadius: 6,
-                        display: "flex", gap: 14, alignItems: "center", cursor: "pointer",
+                        display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap",
+                        cursor: h.asset_id ? "default" : "pointer",
                         fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text-1)",
                       }}>
-                        <input type="checkbox" checked={selected.has(h.ip)} onChange={() => toggleOne(h.ip)}/>
+                        <input type="checkbox" checked={!h.asset_id && selected.has(h.ip)}
+                          disabled={!!h.asset_id} onChange={() => toggleOne(h.ip)}/>
                         <span style={{ minWidth: 130 }}>{h.ip}</span>
                         <span style={{ color: h.hostname ? "var(--text-1)" : "var(--text-3)" }}>
                           {h.hostname || "no reverse DNS name"}
                         </span>
+                        {h.asset_id && (
+                          <span style={{
+                            marginLeft: "auto", fontFamily: "var(--font-sans, inherit)", fontSize: 12,
+                            color: "var(--ok)", background: "var(--ok-soft)", border: "1px solid var(--ok-line)",
+                            borderRadius: 999, padding: "2px 10px",
+                          }}>
+                            Déjà présent dans les assets · {h.asset_name}
+                          </span>
+                        )}
                       </label>
                     ))}
                   </div>
