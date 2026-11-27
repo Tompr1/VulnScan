@@ -5,6 +5,297 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Earlier versions (v1.0.0 – v2.1.3) are also documented in `README.md`.
 
 ---
+## v4.0.0 — 2026-11-27
+
+The platform becomes **v0cday** and turns into an MSP platform. One
+installation now serves several clients, each isolated from the others. A
+scan **probe** runs inside each client's network and only connects out. A
+**Root** console lets super admins manage everything the clients share.
+Devices managed by **Microsoft Intune** are inventoried and audited through
+an Entra ID application.
+
+> ⚠️ **Breaking:** moving to the MSP model purges existing data
+> (`python -m app.purge`). Read *Upgrade notes* before deploying.
+
+### Added
+
+**Multi-client (MSP)**
+
+- A client is an isolated tenant: assets, scans, findings, reports, attack
+  graph, devices, credentials, profiles, schedules, settings and integrations
+  all belong to one client.
+- Access goes through **grants**. A grant gives a role (`viewer`, `analyst`
+  or `admin`) to a user or a user group, on a client or a client group. When
+  several grants reach the same client, the highest role wins. Emails are
+  unique across the platform.
+- **Super admins** (`is_global_admin`) are admin of every client.
+- The role is read from the database **on every request**. A token only
+  carries the user and the open client, so removing a grant takes effect at
+  the next call.
+- `/access` API and **Root › Clients & access** page manage clients, client
+  groups, users, user groups and grants. A *Why?* drawer
+  (`GET /access/users/{id}/access`) shows which grant gives which role.
+- **Client deletion**: a window lists everything that goes with the client.
+  Typing its name deletes all its rows and its attack graph, and stops its
+  running scans. The last client cannot be deleted.
+- **Per-client scan allowlist** (`GET`/`PUT /settings/allowlist`). The scan
+  worker reads it when a scan starts. A client without one gets the
+  `ALLOWLIST` value from the environment.
+- The **audit log** records the account, the open client and the response
+  status, taken from a verified token only.
+
+**Context window and Root**
+
+- After sign-in, a window inspired by FortiManager ADOMs lists the clients
+  as tiles: role, open critical and high findings, open KEV findings, and
+  last scan. Super admins also see **Root**. The same window opens from the
+  top bar. An account with one client and no Root goes straight in.
+- URLs carry the context: `#/c/<client id>/<page>` or `#/root/<page>`.
+- **Root** has its own colour and these pages: Overview (every client, worst
+  first), Clients & access, Scan probes, Reference data, Threat Intel, and
+  Updates & system. Updates & system includes the scheduled refresh of the
+  shared databases, which had no UI before.
+- API: `GET /auth/clients`, `POST /auth/select-client/{id}`,
+  `POST /auth/select-root`.
+
+**Scan probes**
+
+- A probe is a VM in the client's network. It runs the **same engine,
+  plugins and external tools** as the platform. It only connects out, over
+  HTTPS 443, and the client opens no port.
+- **Enrollment**: Root creates the probe with a one-time token (24 h). The
+  probe trades it for a secret. Only SHA-256 digests are stored. The probe
+  signs in with `Authorization: Probe <id>.<secret>`.
+- **Probe API** `/probe/v1`, refused over plain HTTP:
+  - `enroll` and `heartbeat`;
+  - `jobs/next`, long polling up to 25 s, for the client's own jobs only;
+  - progress with cancellation, and the report, accepted once;
+  - reference data, cached on the probe by ETag, and CVE lookups by product.
+- **Placement**: each client's internal and API scans run on its probe by
+  default as soon as one is enrolled. External scans stay on the platform.
+  Root can change this per client. IaC, Intune inventory, AI analysis and
+  reports always run on the platform.
+- **Agent** `v0cday-probe enroll|run|status`:
+  - runs one job at a time;
+  - refuses a target outside the client's allowlist or outside its own
+    `--local-allowlist`;
+  - keeps each report in an on-disk outbox until the platform accepts it;
+  - backs off while the platform is unreachable.
+- **Appliance** (`deploy/appliance`): a Debian 12 VM built with Packer, in
+  qcow2, OVA and VHDX formats.
+  - It enrolls itself at first boot from a cloud-init configuration that
+    Root downloads.
+  - It opens no port (no SSH, nftables drops inbound traffic) and installs
+    security updates by itself.
+  - It runs only the digest-pinned, **cosign-signed** `PROBE_IMAGE`, and
+    rolls back if the new image does not come up.
+- **Operations**:
+  - a probe silent for `PROBE_OFFLINE_ALERT_MINUTES` is reported to its
+    client's integrations, and again when it is back (new event
+    `probe_status`);
+  - Root shows agent, appliance and image versions, and a history
+    (`probe_events`);
+  - a job's page says which probe ran it.
+- **Updates from Root**: *Check for updates* compares each probe's commit
+  (`V0CDAY_BUILD`, sent as `X-Probe-Build`) with the platform's
+  (`data/platform-build`). *Update* or *Update N* asks the probes to move to
+  it. The host updater (`deploy/probe/updater`, a systemd timer) builds only
+  commits on the branch it follows, health-checks the result and rolls back
+  on failure.
+
+**Host discovery on the probe**
+
+- *Analytics › Asset Discovery* scans a private range from the **client's
+  probe**, as a job (`POST /analytics/discover`).
+- It is refused without an enrolled probe, outside the client's allowlist,
+  or while another discovery of the client is open.
+- The probe tries a TCP connection on 6 common ports, 256 addresses per
+  wave, and posts the hosts found after each wave. The page follows it,
+  resumes it when reopened, and can cancel it.
+- Limits: `DISCOVERY_BUDGET_SECONDS` (1 h) for a running discovery,
+  `DISCOVERY_UNCLAIMED_AFTER_SECONDS` (30 min) for one no probe takes.
+- Found hosts go into a chosen folder as **named targets**
+  (`asset_targets`, `POST /assets/from-hosts`, `PATCH /assets/{id}/targets`),
+  or each into its own asset. Hosts already on an asset are flagged and
+  refused (409). Folders and credentials can be created from the same
+  dialog. Each target has a *Scan* button.
+
+**Device inventory (Microsoft Intune via Entra ID)**
+
+- Read-only connection to Microsoft Graph as an **Entra ID application**
+  (client credentials, application permission
+  `DeviceManagementManagedDevices.Read.All`).
+  The client secret is stored encrypted. Sync runs daily, weekly or on
+  demand.
+- Devices (Windows, macOS, iOS/iPadOS, Android, Linux) and their installed
+  applications are stored, with a journal of what changed.
+- An **audit** runs after each sync:
+  - OS out of support or soon out of support, outdated OS, outdated Android
+    patch level;
+  - unsupported or outdated applications (support data from endoflife.date);
+  - known CVEs of the OS build and of common applications, with CISA KEV.
+    The result is one finding per device and product.
+- **Alerts on new issues only** (`device_vulnerability`, `device_os_issue`,
+  `device_software_issue`), with a link to the device page. The threshold
+  is set in `/inventory/alert-settings`.
+- *Devices* page: the fleet sorted most exposed first, Intune connections
+  (add, test, sync now, delete), and a page per device.
+
+**CVE data**
+
+- The **full NVD history** (~300k+ CVEs) is imported into a database-backed
+  catalog (`cve_catalog`, `cve_cpe_matches`). The import is resumable, and
+  the catalog is then updated incrementally at each dataset refresh. Scans
+  read only the CVEs of the products they find.
+- **Reference datasets are shared** across all clients (one copy, one
+  Threat Intel cache). Only super admins edit or refresh them.
+
+**Production and deployment**
+
+- `docker-compose.prod.yml`:
+  - **Caddy** is the only entry point, on 80 and 443, with a Let's Encrypt
+    certificate or Caddy's internal CA, plus HSTS and CSP;
+  - Postgres, Redis and Neo4j publish no port, and Redis needs a password;
+  - the API listens on `127.0.0.1` only.
+- `APP_ENV=production`: the API refuses to start with a default or short
+  `SECRET_KEY`, default passwords, `CORS_ORIGINS=*`, a non-HTTPS
+  `PUBLIC_URL`, `PROBE_REQUIRE_HTTPS=false` or a `PROBE_IMAGE` that is not
+  pinned by digest.
+- **Automated deployment** (`.github/workflows/deploy.yml`): a self-hosted
+  runner runs the tests, then `scripts/deploy.sh`. `DEPLOY_STACK=dev|prod`
+  picks the stack. The script creates `.env` with random secrets and writes
+  `data/platform-build`.
+- `python -m app.purge [--yes]`: a one-off purge for the switch to the MSP
+  model. It keeps the default admin (made super admin) and the shared
+  reference data.
+
+**Tests**
+
+- A pytest suite of about 1,530 tests: unit tests for risk, scanner, scan
+  jobs, access, probes, probe agent, appliance scripts, inventory and CVE;
+  integration tests on SQLite or PostgreSQL
+  (`VULNSCAN_TEST_DATABASE_URL`).
+- An **isolation test** tries every API route against another client's
+  data.
+- An architecture test checks that no plugin reaches the database.
+- Frontend model tests: `cd frontend && npm test`.
+
+### Changed
+
+- **Renamed VulnScan → v0cday** everywhere: UI, reports, User-Agent, logs,
+  compose project `v0cday-platform`, deploy directory `~/v0cday`. The
+  GitHub repository keeps its name.
+- **Scan pipeline refactored**:
+  - `run_scan_job` is split into `app/scan_jobs`;
+  - a scan is now an assignment, then a database-free execution, then a
+    finalization, so the same code runs on a probe;
+  - plugins get credentials and reference data through `ctx.resources`;
+  - requests are validated by Pydantic at the HTTP boundary, and invalid
+    input returns 422 with every error listed.
+- New job status **`processing`**, between `running` and `done`.
+- **Client settings are for client admins only**: allowlist, SLA,
+  notifications, auto AI, SLA alerts and auto reports. Analysts and viewers
+  no longer see *Settings*.
+- **Datasets** and **Access** left the client menu and are now in Root.
+  The platform update, `/settings/info` and the dataset refresh schedule
+  require a super admin.
+- Platform update notices are no longer sent to every client's
+  integrations.
+- The backend image is built once and shared by the three workers.
+
+### Fixed
+
+- **Cross-client references**: an asset or a schedule could point to
+  another workspace's profile, credential or parent asset, and so use that
+  workspace's SSH secret.
+- `sca_server` could load a credential of any client. The credential vault
+  now returns only the scanned client's credentials.
+- **CVE matching**:
+  - a CVE listing an exact version without a range was reported for every
+    version of the product;
+  - Oracle and Sun CPEs never matched each other;
+  - OpenSSH (`9.6p1`) and OpenSSL (`1.1.1w`) versions could not be parsed,
+    so their range-based CVEs were missed.
+- Editing the allowlist changed only the API process's memory, and the
+  worker never saw the change.
+- MSP migrations failed on PostgreSQL: duplicate emails, duplicated
+  datasets, and `scan_jobs.created_by_user_id` without `ON DELETE SET NULL`.
+- **Deployment**:
+  - the Neo4j healthcheck always failed (the image has no `curl`);
+  - a failed nuclei download was hidden by `|| true`;
+  - deploy now stops early on a Docker MTU mismatch and on stale volumes
+    from a previous install.
+- **Caddy**:
+  - clients that send no SNI (a platform reached by IP) got a TLS error,
+    fixed with `default_sni`;
+  - a redeployed Caddyfile was never picked up (the folder is now mounted
+    and Caddy runs with `--watch`);
+  - `/assets/*` API routes answered 404.
+- About 1 enrollment token in 64 started with `-` and broke the enrollment
+  command. Root now shows `--token=<token>`.
+
+### Security
+
+- The probe API is HTTPS-only. Probe secrets and tokens are stored as
+  digests. A probe only ever sees its own client's jobs. A revoked probe
+  cannot re-enroll.
+- Appliance images must be pinned by digest, come from the registry fixed
+  at build time, and be signed with the MSP's cosign key.
+- Probe updates from Root build only commits on the branch the probe
+  follows, so a compromised platform cannot make a probe build anything
+  else.
+- The production stack exposes no database, and requires secrets that are
+  not defaults.
+
+### Upgrade notes
+
+- **Back up the database first** (`pg_dump`). On startup, the migrations:
+  - turn existing users into grants;
+  - drop `users.workspace_id` and `users.role`;
+  - merge duplicate accounts and datasets;
+  - remove the workspace from reference datasets.
+- Then stop the backend and workers and run
+  `docker compose run --rm backend python -m app.purge` to see what would be
+  deleted, then again with `--yes`. Only the default admin (now a super
+  admin) and the shared reference data are kept.
+- Rebuild every backend-based image: `backend`, `worker-scan`,
+  `worker-ai`, `worker-data`.
+- The deploy directory moves to `~/v0cday`, and the compose project is now
+  `v0cday-platform` (new volume names).
+- For production, set `DEPLOY_STACK=prod`, `PUBLIC_HOST` and `CADDY_TLS`,
+  then follow `deploy/master/README.md`. With the internal CA, give
+  `caddy-root.crt` to the probes.
+- Probes need outbound HTTPS 443 to the platform only. Lab without TLS:
+  `PROBE_REQUIRE_HTTPS=false`, refused in production.
+- Host discovery needs a probe built from this version.
+- The full NVD import starts with the next dataset refresh (Root ›
+  Reference data). An `NVD_API_KEY` makes it about 10× faster.
+- New settings, all with defaults (see `.env.example`):
+  - `PROBE_ENROLLMENT_TTL_HOURS`, `PROBE_ONLINE_SECONDS`,
+    `PROBE_OFFLINE_ALERT_MINUTES`;
+  - `PROBE_IMAGE`, `PLATFORM_BUILD`, `PROBE_UPDATE_PICKUP_SECONDS`,
+    `PROBE_UPDATE_RUN_SECONDS`;
+  - `DISCOVERY_BUDGET_SECONDS`, `DISCOVERY_UNCLAIMED_AFTER_SECONDS`;
+  - `PUBLIC_HOST`, `CADDY_TLS`, `REDIS_PASSWORD`, `PUBLIC_URL`.
+
+### Known limitations
+
+- Users sign in with a local email and password. There is no SSO
+  (Entra ID / OIDC) for users. Entra ID is only used for the Intune
+  connection.
+- The per-client scan allowlist and the audit log can be used through the
+  API only, with no screen yet.
+- Probes authenticate with a secret over TLS. Client certificates (mTLS)
+  are not done.
+- Host discovery has no limit on range size.
+- Schema changes are startup migrations in `main.py`. There is no Alembic.
+- `cveorg_match` never matches, because the dataset is loaded as a list.
+  Fixing it turns on a fuzzy matcher that needs reviewing for false
+  positives.
+- The automatic database backups in `data/backups` are empty files.
+- The Packer appliance build has not been run end to end in CI.
+
+---
 ## v3.2.1 — 2026-10-26
 
 Dataset refresh had stopped completing, and when it did finish it produced a
