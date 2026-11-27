@@ -31,10 +31,13 @@
 		-Server
 	}
 
-	@ui path / /index.html /assets/*
+	# Only the entry point and the hashed files Vite emits under /assets are
+	# static. The rest of /assets is API: /assets/from-hosts, /assets/12,
+	# /assets/12/targets must reach the backend, not the file server.
+	@ui path_regexp ui ^(/|/index\.html|/assets/[^/]+\.(js|css|map|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|eot|json))$
 	handle @ui {
 		root * {$WEB_ROOT:/srv}
-		@immutable path /assets/*
+		@immutable path_regexp immutable ^/assets/[^/]+\.(js|css|map|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|eot|json)$
 		header @immutable Cache-Control "public, max-age=31536000, immutable"
 		header /index.html Cache-Control "no-cache"
 		header / Cache-Control "no-cache"
