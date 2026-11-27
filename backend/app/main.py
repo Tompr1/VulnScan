@@ -677,6 +677,21 @@ def _schedule_loop():
                     logger.warning("Failed to clean stale AI #%d: %s", sa.id, e2)
                     db.rollback()
 
+            # ── Stale discovery detection ──────────────────────────────
+            # A probe stops a discovery by itself at its budget: one still
+            # open well after that lost its probe; one no probe took for a
+            # while waits for a probe that is offline or too old.
+            try:
+                from app.discovery.jobs import close_stale_discoveries
+                close_stale_discoveries(
+                    db, now_utc,
+                    running_after=timedelta(seconds=settings.DISCOVERY_STALE_AFTER_SECONDS),
+                    unclaimed_after=timedelta(seconds=settings.DISCOVERY_UNCLAIMED_AFTER_SECONDS),
+                )
+            except Exception as e_disc:
+                logger.warning("Failed to clean stale discoveries: %s", e_disc)
+                db.rollback()
+
             # ── Feature 1: Auto Report Generation ─────────────────────────
             # Generate PDF reports for scan jobs that finished in the last 5 min
             # when the workspace has auto_report enabled.

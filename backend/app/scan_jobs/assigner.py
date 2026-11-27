@@ -71,8 +71,12 @@ class JobAssigner:
             ))
         return profile.with_web_auth(job.web_auth)
 
+    def allowlist_for(self, workspace_id: int) -> str | None:
+        """The client's allowlist as sent to an executor (None: no source)."""
+        return str(self._allowlists.policy_for(workspace_id)) if self._allowlists else None
+
     def assignment_for(self, job: ScanJobSnapshot, profile: ScanProfile) -> ScanAssignment:
-        allowlist = str(self._allowlists.policy_for(job.workspace_id)) if self._allowlists else None
+        allowlist = self.allowlist_for(job.workspace_id)
         return assign(
             job.id, job.workspace_id, job.target, job.scan_type, profile, job.meta,
             self._credentials(job.workspace_id), allowlist,

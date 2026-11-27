@@ -5,21 +5,33 @@ Each client lists the scan types its probe runs (none by default). Only
 scans that reach the client's network can go to a probe; IaC scans read an
 uploaded file and inventory jobs read a cloud service, so they always run on
 the platform.
+
+Host discovery is not a scan type: it only ever runs on the client's probe
+(``app.discovery.jobs``).
 """
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
 from app.core.workspace_settings import get_workspace_setting, set_workspace_setting
+from app.db import models
 from app.scanner.target import ScanType
 
 PROBE_EXECUTION_KEY = "probe_execution"
 PLATFORM, PROBE = "platform", "probe"
 DELEGABLE_SCAN_TYPES = (ScanType.INTERNAL, ScanType.EXTERNAL, ScanType.API)
+ACTIVE_PROBE = "active"
 
 
 class NotDelegableError(ValueError):
     pass
+
+
+def has_active_probe(db: Session, workspace_id: int) -> bool:
+    """An enrolled, not revoked, probe of the client (online or not)."""
+    return db.query(models.Probe.id).filter(
+        models.Probe.workspace_id == workspace_id, models.Probe.status == ACTIVE_PROBE,
+    ).first() is not None
 
 
 def probe_scan_types(db: Session, workspace_id: int) -> list[str]:

@@ -104,3 +104,39 @@ def test_credential_of_another_workspace_is_refused(client, db):
     reponse = client.post("/assets/from-hosts", json={"assets": [_hote("10.0.0.8", default_credential_id=70)]})
 
     assert reponse.status_code == 400
+
+
+def test_adding_the_same_host_twice_is_refused_and_creates_nothing(client, db):
+    assert client.post("/assets/from-hosts", json={"assets": [_hote("10.0.0.9", "nas")]}).status_code == 200
+
+    reponse = client.post("/assets/from-hosts", json={"assets": [_hote("10.0.0.10"), _hote("10.0.0.9", "nas-bis")]})
+
+    assert reponse.status_code == 409
+    assert '10.0.0.9 (asset "nas")' in reponse.json()["detail"]
+    assert db.scalars(select(models.Asset.name).where(models.Asset.name.in_(["10.0.0.10", "nas-bis"]))).all() == []
+
+
+def test_a_host_already_scanned_under_an_asset_is_refused(client, db):
+    db.add(models.ScanJob(id=90, workspace_id=1, target="10.0.0.11", profile_id=5, asset_id=60))
+    db.commit()
+
+    reponse = client.post("/assets/from-hosts", json={"assets": [_hote("10.0.0.11")]})
+
+    assert reponse.status_code == 409
+
+
+def test_the_same_host_on_another_client_does_not_block(client, db):
+    db.add(models.Asset(id=61, workspace_id=2, name="voisin"))
+    db.add(models.AssetTarget(workspace_id=2, asset_id=61, target="10.0.0.12"))
+    db.commit()
+
+    assert client.post("/assets/from-hosts", json={"assets": [_hote("10.0.0.12")]}).status_code == 200
+
+
+def test_targets_are_stored_normalized_and_deduplicated(client, db):
+    doublon = client.post("/assets/from-hosts", json={"assets": [_hote(" 10.0.0.13"), _hote("10.0.0.13 ")]})
+    cree = client.post("/assets/from-hosts", json={"assets": [_hote(" 10.0.0.14 ", "poste")]})
+
+    assert doublon.status_code == 400
+    assert cree.status_code == 200
+    assert db.scalars(select(models.AssetTarget.target).where(models.AssetTarget.asset_id == cree.json()[0]["id"])).all() == ["10.0.0.14"]

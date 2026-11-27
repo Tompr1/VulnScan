@@ -68,6 +68,7 @@ class Ids:
     dataset: int = 903
     asset: int = 904
     cible_asset: int = 914
+    decouverte: int = 915
     job: int = 905
     finding: int = 906
     planification: int = 907
@@ -109,6 +110,7 @@ VALEURS_DE_CHEMIN = {
     "grant_id": V.attribution,
     "probe_id": V.sonde,
     "workspace_id": VOISIN,
+    "discovery_id": V.decouverte,
 }
 
 # Paramètres de requête → objet du voisin visé.
@@ -132,6 +134,7 @@ CORPS = {
     ("PATCH", "/access/grants/{grant_id}"): {"role": "viewer"},
     ("PUT", "/probes/clients/{workspace_id}/execution"): {"scan_types": ["internal"]},
     ("POST", "/probes"): {"workspace_id": VOISIN, "name": "pirate"},
+    ("POST", "/analytics/discover"): {"network_range": "10.0.0.0/30"},
     # Sans corps, le test d'intégration relit la configuration enregistrée.
     ("POST", "/integrations/{provider}/test"): None,
 }
@@ -151,7 +154,6 @@ HORS_PERIMETRE = {
     ("GET", "/scan/api-scanner/checks"): "catalogue des contrôles, commun",
     ("GET", "/scan/iac/kinds"): "catalogue des formats, commun",
     ("GET", "/reports/templates/sections"): "catalogue des sections, commun",
-    ("POST", "/analytics/discover"): "résolution DNS d'une cible fournie, rien n'est lu en base",
     ("GET", "/threat-intel/cves/{cve_id}"): "référentiel CVE, commun",
 }
 
@@ -293,6 +295,9 @@ def donnees(db, workspace, tmp_path):
         models.InventoryDeviceApp(device_id=V.appareil, name="logiciel-voisin", version="1.0"),
         models.ProbeEvent(probe_id=V.sonde, workspace_id=VOISIN, kind="job_claimed", job_id=V.job,
                           detail="scan de srv.voisin.example", at=maintenant),
+        models.DiscoveryJob(id=V.decouverte, workspace_id=VOISIN, network_range="10.10.0.0/24", status="running",
+                            total=254, probe_id=V.sonde,
+                            hosts_json=json.dumps([{"ip": "10.10.0.5", "hostname": "nas.voisin.example"}])),
         models.InventoryDeviceChange(device_id=V.appareil, kind="app_added", subject="logiciel-voisin",
                                      detected_at=maintenant),
     ])

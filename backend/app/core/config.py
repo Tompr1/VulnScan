@@ -69,6 +69,12 @@ class Settings(BaseModel):
         (int(os.getenv("SCAN_JOB_TIMEOUT", "0")) or
          int(os.getenv("SCAN_BUDGET_SECONDS", "900")) + 600) + 300
     )
+    # Host discovery, run by the client's probe: the probe stops by itself at
+    # this budget and keeps the hosts found so far. The watchdog closes a run
+    # still open well after it (probe gone), and a discovery no probe took.
+    DISCOVERY_BUDGET_SECONDS: int = int(os.getenv("DISCOVERY_BUDGET_SECONDS", "3600"))
+    DISCOVERY_STALE_AFTER_SECONDS: int = int(os.getenv("DISCOVERY_BUDGET_SECONDS", "3600")) + 600
+    DISCOVERY_UNCLAIMED_AFTER_SECONDS: int = int(os.getenv("DISCOVERY_UNCLAIMED_AFTER_SECONDS", "1800"))
     REPORTS_DIR: str = os.getenv("REPORTS_DIR", "/data/reports")
 
     # Scan probes. A probe receives the credentials of its scans in clear:

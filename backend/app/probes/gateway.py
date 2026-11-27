@@ -3,11 +3,14 @@ ProbeGateway — what a probe may do on the platform, and nothing more.
 
     enroll (one-time token) -> probe id + secret
     authenticate             -> the probe, bound to ONE client
-    next_assignment          -> claim the oldest of the client's jobs routed
-                                to probes, and its assignment
+    next_assignment          -> claim the client's oldest discovery (when the
+                                probe runs them), else its oldest scan job
+                                routed to probes, and its assignment
     progress                 -> store the progress; tells the probe to stop
                                 when a user cancelled the job
     report                   -> queue the report for finalization by a worker
+    discovery_progress/report-> the same for a host discovery (saved at once:
+                                no finalization to queue)
     reference data           -> datasets and CVE records the plugins read
 
 Every job operation checks that the job belongs to the probe's client AND
@@ -34,6 +37,8 @@ from app.cve.dataset_loader import load_json
 from app.cve.reference_datasets import enabled_dataset_paths
 from app.cve.sql_catalog import SqlCveCatalog, SqlSyncStateStore
 from app.db import models
+from app.discovery import jobs as discoveries
+from app.discovery.assignment import DiscoveryAssignment
 from app.probes import events
 from app.probes.placement import PROBE
 from app.probes.registry import ProbeRegistry
@@ -54,6 +59,9 @@ MAX_PROGRESS_BYTES = 64 * 1024
 MAX_REPORT_FINDINGS = 50_000
 # Jobs looked at per claim attempt: another probe of the client may take some.
 _CLAIM_CANDIDATES = 5
+# What a probe asks for on /jobs/next. Probes older than discovery ask for
+# nothing and get scans only: they could not read a discovery.
+SCAN, DISCOVERY = "scan", "discovery"
 
 
 class UnknownJob(LookupError):
@@ -91,6 +99,7 @@ class ProbeGateway:
         clock: Callable[[], datetime],
         enrollment_ttl: timedelta,
         load_dataset: Callable[[str], Any] = load_json,
+        discovery_budget_seconds: int = 3600,
     ) -> None:
         self._session_factory = session_factory
         self._assigner = assigner
@@ -99,6 +108,7 @@ class ProbeGateway:
         self._clock = clock
         self._enrollment_ttl = enrollment_ttl
         self._load_dataset = load_dataset
+        self._discovery_budget_seconds = discovery_budget_seconds
         self._jobs = SqlScanJobRepository(session_factory)
 
     # ── Identity ─────────────────────────────────────────────────────────
@@ -128,10 +138,20 @@ class ProbeGateway:
 
     # ── Jobs ─────────────────────────────────────────────────────────────
 
-    def next_assignment(self, probe: ProbeIdentity) -> ScanAssignment | None:
-        """Claims the client's oldest job waiting for a probe. A job that
-        cannot run (profile deleted…) is failed through a report and the
-        next one is tried."""
+    def next_assignment(
+        self, probe: ProbeIdentity, kinds: Iterable[str] = (SCAN,),
+    ) -> ScanAssignment | DiscoveryAssignment | None:
+        """Claims the client's oldest discovery (a user waits on the page)
+        if the probe runs discoveries, else its oldest scan job waiting for a
+        probe. A scan job that cannot run (profile deleted…) is failed
+        through a report and the next one is tried."""
+        kinds = set(kinds)
+        if DISCOVERY in kinds:
+            discovery = self._claim_discovery(probe)
+            if discovery is not None:
+                return discovery
+        if SCAN not in kinds:
+            return None
         while (job_id := self._claim(probe)) is not None:
             job = self._jobs.load_job(job_id)
             if job is None:
@@ -170,6 +190,52 @@ class ProbeGateway:
         logger.info("Report of job #%d from probe #%d queued (%d findings)", job_id, probe.id, len(report.findings))
         outcome = f"failed: {report.failure.error}" if report.failure else f"{len(report.findings)} findings"
         self._record(probe, events.REPORT_RECEIVED, outcome, job_id)
+
+    # ── Host discovery ───────────────────────────────────────────────────
+
+    def discovery_progress(self, probe: ProbeIdentity, discovery_id: int, document: Any) -> bool:
+        """Stores the hosts found so far; True when the probe must stop."""
+        with self._session_factory() as db:
+            job = self._own_discovery(db, probe, discovery_id)
+            try:
+                return discoveries.save_progress(db, job, document)
+            except ValueError as exc:
+                raise InvalidMessage(str(exc)) from exc
+
+    def discovery_report(self, probe: ProbeIdentity, discovery_id: int, data: Any) -> None:
+        with self._session_factory() as db:
+            job = self._own_discovery(db, probe, discovery_id)
+            try:
+                report = discoveries.finish(db, job, data)
+            except ValueError as exc:
+                raise InvalidMessage(str(exc)) from exc
+            detail = f"discovery #{discovery_id} of {job.network_range}: {report.status}, {job.probed} probed"
+            events.record(db, db.get(models.Probe, probe.id), events.REPORT_RECEIVED, self._clock(),
+                          detail + (f" ({report.error})" if report.error else ""))
+            db.commit()
+
+    def _claim_discovery(self, probe: ProbeIdentity) -> DiscoveryAssignment | None:
+        with self._session_factory() as db:
+            job = discoveries.claim(db, probe.workspace_id, probe.id, self._clock)
+            if job is None:
+                return None
+            events.record(db, db.get(models.Probe, probe.id), events.JOB_CLAIMED, self._clock(),
+                          f"discovery #{job.id} of {job.network_range}")
+            db.commit()
+            logger.info("Probe #%d claimed discovery #%d", probe.id, job.id)
+            return DiscoveryAssignment(
+                discovery_id=job.id,
+                workspace_id=job.workspace_id,
+                network_range=job.network_range,
+                allowlist=self._assigner.allowlist_for(job.workspace_id),
+                budget_seconds=self._discovery_budget_seconds,
+            )
+
+    def _own_discovery(self, db: Session, probe: ProbeIdentity, discovery_id: int) -> models.DiscoveryJob:
+        job = discoveries.own_running(db, probe.workspace_id, probe.id, discovery_id)
+        if job is None:
+            raise UnknownJob(discovery_id)
+        return job
 
     # ── Reference data ───────────────────────────────────────────────────
 

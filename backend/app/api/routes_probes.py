@@ -97,6 +97,7 @@ def renew_enrollment(probe_id: int, db: Session = Depends(get_db)):
 def revoke_probe(probe_id: int, db: Session = Depends(get_db)):
     probe = _get(db, probe_id)
     _registry(db).revoke(probe, _now())
+    _close_discoveries(db, probe, f"The probe {probe.name} was revoked")
     client = db.get(models.Workspace, probe.workspace_id)
     return _probe(probe, {probe.workspace_id: client.name if client else ""}, _now(), 0)
 
@@ -104,7 +105,9 @@ def revoke_probe(probe_id: int, db: Session = Depends(get_db)):
 @router.delete("/{probe_id}")
 def delete_probe(probe_id: int, db: Session = Depends(get_db)):
     probe = _get(db, probe_id)
+    _close_discoveries(db, probe, f"The probe {probe.name} was deleted")
     db.query(models.ScanJob).filter(models.ScanJob.probe_id == probe.id).update({"probe_id": None})
+    db.query(models.DiscoveryJob).filter(models.DiscoveryJob.probe_id == probe.id).update({"probe_id": None})
     db.delete(probe)
     db.commit()
     return {"deleted": probe_id}
@@ -131,6 +134,16 @@ def set_client_execution(workspace_id: int, body: ExecutionBody, db: Session = D
     except NotDelegableError as exc:
         raise HTTPException(422, str(exc)) from None
     return {"workspace_id": workspace_id, "probe_scan_types": chosen}
+
+
+def _close_discoveries(db: Session, probe: models.Probe, reason: str) -> None:
+    """The probe's running discoveries can no longer report: close them,
+    keeping the hosts it already sent."""
+    db.query(models.DiscoveryJob).filter(
+        models.DiscoveryJob.probe_id == probe.id, models.DiscoveryJob.status == "running",
+    ).update({"status": "failed", "error": f"{reason} during the discovery. The hosts found so far are kept.",
+              "finished_at": _now()})
+    db.commit()
 
 
 def _get(db: Session, probe_id: int) -> models.Probe:

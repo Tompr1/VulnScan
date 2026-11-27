@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 
+from app.discovery.assignment import KIND as DISCOVERY, DiscoveryAssignment, DiscoveryReport
 from app.scan_jobs.assignment import ScanAssignment, ScanReport
 
 API = "/probe/v1"
@@ -26,6 +27,8 @@ VERSION_HEADER = "X-Probe-Version"
 # Above the longest wait the platform allows on /jobs/next (30 s).
 _LONG_POLL_MARGIN = 15.0
 _PRODUCTS_PER_LOOKUP = 5000
+# What this probe runs: the platform hands it nothing else.
+JOB_KINDS = "scan,discovery"
 
 
 class PlatformError(Exception):
@@ -94,11 +97,18 @@ class PlatformClient:
 
     # ── Jobs ─────────────────────────────────────────────────────────────
 
-    def next_job(self, wait: int = 25) -> ScanAssignment | None:
-        response = self._send("GET", "/jobs/next", params={"wait": wait}, timeout=wait + _LONG_POLL_MARGIN)
+    def next_job(self, wait: int = 25) -> ScanAssignment | DiscoveryAssignment | None:
+        response = self._send("GET", "/jobs/next", params={"wait": wait, "kinds": JOB_KINDS},
+                              timeout=wait + _LONG_POLL_MARGIN)
         if response.status_code == 204:
             return None
-        return ScanAssignment.from_dict(self._json(response))
+        data = self._json(response)
+        try:
+            if data.get("kind") == DISCOVERY:
+                return DiscoveryAssignment.from_dict(data)
+            return ScanAssignment.from_dict(data)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise PlatformUnavailable(f"Unreadable job from the platform: {exc}") from exc
 
     def progress(self, job_id: int, document: dict[str, Any]) -> bool:
         """Sends the scan progress; True when the platform says to stop."""
@@ -106,6 +116,14 @@ class PlatformClient:
 
     def report(self, job_id: int, report: ScanReport) -> None:
         self._call("POST", f"/jobs/{job_id}/report", json=report.to_dict())
+
+    def discovery_progress(self, discovery_id: int, probed: int, hosts: list[dict[str, Any]]) -> bool:
+        """Sends the hosts found so far; True when the platform says to stop."""
+        answer = self._call("POST", f"/discoveries/{discovery_id}/progress", json={"probed": probed, "hosts": hosts})
+        return bool(answer.get("cancel"))
+
+    def discovery_report(self, report: DiscoveryReport) -> None:
+        self._call("POST", f"/discoveries/{report.discovery_id}/report", json=report.to_dict())
 
     # ── Reference data ───────────────────────────────────────────────────
 

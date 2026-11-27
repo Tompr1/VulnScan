@@ -693,56 +693,143 @@ function AddHostsModal({ hosts, close, onDone }) {
   );
 }
 
+const DISCOVERY_ACTIVE = ["queued", "running"];
+const DISCOVERY_POLL_MS = 2000;
+
+function DiscoveryStatus({ job, onCancel, cancelling }) {
+  const active = DISCOVERY_ACTIVE.includes(job.status);
+  const pct = job.total ? Math.floor((job.probed / job.total) * 100) : 0;
+  const label = {
+    queued: "Waiting for the client's probe…",
+    running: job.cancel_requested ? "Stopping after the current wave…" : "The probe is discovering…",
+    done: "Finished",
+    cancelled: "Cancelled — the hosts found before the stop are kept",
+    failed: "Stopped",
+  }[job.status] || job.status;
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center", fontSize: 13, color: "var(--text-2)" }}>
+        <span>Range <strong style={{ color: "var(--text-0)" }}>{job.network_range}</strong></span>
+        <span>Probed <strong className="mono" style={{ color: "var(--text-0)" }}>{job.probed}/{job.total}</strong></span>
+        <span>Hosts found <strong style={{ color: "var(--text-0)" }}>{job.count}</strong></span>
+        <span style={{ color: job.status === "failed" ? "var(--err)" : "var(--text-2)" }}>{label}</span>
+        {active && (
+          <button className="btn btn-sm" style={{ marginLeft: "auto" }} onClick={onCancel}
+            disabled={cancelling || job.cancel_requested}>
+            <Icons.X size={11}/> Cancel
+          </button>
+        )}
+      </div>
+      {active && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+          <div style={{ flex: 1, height: 4, background: "var(--surface-2)", borderRadius: 2, overflow: "hidden" }}>
+            <div style={{ width: `${pct}%`, height: "100%", background: "var(--brand)", transition: "width 0.4s" }}/>
+          </div>
+          <span className="mono muted" style={{ fontSize: 11 }}>{pct}%</span>
+        </div>
+      )}
+      {job.error && <div className="alert alert-error" style={{ marginTop: 10 }}>{job.error}</div>}
+    </div>
+  );
+}
+
 function DiscoverTab() {
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
-  const [results, setResults] = useState(null);
+  // A CIDR discovery is a job followed by polling; a domain lookup answers at once.
+  const [job, setJob] = useState(null);
+  const [domainResult, setDomainResult] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [showAdd, setShowAdd] = useState(false);
   const [addedCount, setAddedCount] = useState(0);
+  const [cancelling, setCancelling] = useState(false);
+
+  const active = !!job && DISCOVERY_ACTIVE.includes(job.status);
+
+  // Resume the latest discovery: it keeps running while the page is closed.
+  useEffect(() => {
+    let gone = false;
+    analyticsApi.discoveries(1)
+      .then(list => { if (!gone && list.length) setJob(j => j || list[0]); })
+      .catch(() => {});
+    return () => { gone = true; };
+  }, []);
+
+  // Follow a running discovery until it ends.
+  useEffect(() => {
+    if (!job || !active) return;
+    let gone = false;
+    const timer = setTimeout(() => {
+      analyticsApi.discovery(job.id)
+        .then(j => { if (!gone) setJob(j); })
+        .catch(e => { if (!gone) setError(e.message || "Could not follow the discovery"); });
+    }, DISCOVERY_POLL_MS);
+    return () => { gone = true; clearTimeout(timer); };
+  }, [job, active]);
 
   const run = async () => {
-    if (!input.trim()) return;
-    setLoading(true);
+    const val = input.trim();
+    if (!val || active) return;
+    setStarting(true);
     setError("");
-    setResults(null);
     setSelected(new Set());
     setAddedCount(0);
     try {
-      // Detect if input is CIDR (contains /) or domain
-      const val = input.trim();
-      const body = val.includes("/") ? { network_range: val } : { domain: val };
-      const r = await analyticsApi.discover(body);
-      setResults(r);
+      if (val.includes("/")) {
+        setDomainResult(null);
+        setJob(await analyticsApi.discover({ network_range: val }));
+      } else {
+        setDomainResult(await analyticsApi.discover({ domain: val }));
+        setJob(null);
+      }
     } catch (e) {
       setError(e.message || "Discovery failed");
+      // Started from another tab or by a colleague: show that one.
+      if (val.includes("/")) {
+        analyticsApi.discoveries(1)
+          .then(list => { if (list.length && DISCOVERY_ACTIVE.includes(list[0].status)) setJob(list[0]); })
+          .catch(() => {});
+      }
     } finally {
-      setLoading(false);
+      setStarting(false);
     }
   };
 
-  // Domain response has 'discovered' array, CIDR response has network metadata
-  const targets = results?.discovered || results?.targets || results?.hosts || [];
-  const isCidr = results?.type === "network";
+  const cancel = async () => {
+    setCancelling(true);
+    try {
+      setJob(await analyticsApi.cancelDiscovery(job.id));
+    } catch (e) {
+      setError(e.message || "Could not cancel the discovery");
+    } finally {
+      setCancelling(false);
+    }
+  };
 
+  // Re-read the job after adding hosts: they now show as already in assets.
+  const reload = () => analyticsApi.discovery(job.id).then(setJob).catch(() => {});
+
+  const hosts = job?.hosts || [];
   const toggleOne = ip => setSelected(prev => {
     const next = new Set(prev);
     if (next.has(ip)) next.delete(ip); else next.add(ip);
     return next;
   });
   // Hosts already on an asset are shown but cannot be added twice.
-  const newHosts = targets.filter(h => !h.asset_id);
-  const allNewSelected = newHosts.length > 0 && newHosts.every(h => selected.has(h.ip));
+  const newHosts = hosts.filter(h => !h.asset_id);
+  const chosen = newHosts.filter(h => selected.has(h.ip));
+  const allNewSelected = newHosts.length > 0 && chosen.length === newHosts.length;
   const toggleAll = () => setSelected(
     allNewSelected ? new Set() : new Set(newHosts.map(h => h.ip))
   );
+  const domainTargets = domainResult?.discovered || [];
 
   return (
     <>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 20, flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 300px" }}>
-          <label className="form-label">Domain or CIDR range</label>
+          <label className="form-label">Domain or CIDR range <span className="muted" style={{ fontWeight: 400 }}>(a range is discovered by the client's probe)</span></label>
           <input className="form-input"
             placeholder="e.g. example.com or 192.168.1.0/24"
             value={input}
@@ -750,93 +837,89 @@ function DiscoverTab() {
             onKeyDown={e => { if (e.key === "Enter") run(); }}
           />
         </div>
-        <button className="btn btn-primary" onClick={run} disabled={!input.trim() || loading}>
-          {loading ? "Discovering..." : "Discover"}
+        <button className="btn btn-primary" onClick={run} disabled={!input.trim() || starting || active}
+          title={active ? "A discovery is already running" : undefined}>
+          {starting ? "Starting..." : active ? "Discovering..." : "Discover"}
         </button>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      {loading && <Spinner/>}
+      {starting && <Spinner/>}
 
-      {!loading && results && (
-        <Panel title={isCidr ? `Network: ${results.network_range}` : `Discovered Targets (${targets.length})`}>
-          {isCidr ? (
+      {!starting && job && !domainResult && (
+        <Panel title={`Network: ${job.network_range}`}>
+          <DiscoveryStatus job={job} onCancel={cancel} cancelling={cancelling}/>
+          {hosts.length === 0 ? (
+            <EmptyState text={active ? "No live host found yet" : "No live host found on this network"}/>
+          ) : (
             <>
-              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 13, color: "var(--text-2)", marginBottom: 14 }}>
-                <span>Range <strong style={{ color: "var(--text-0)" }}>{results.network_range}</strong></span>
-                <span>Addresses <strong style={{ color: "var(--text-0)" }}>{results.num_addresses}</strong></span>
-                <span>Hosts found <strong style={{ color: "var(--text-0)" }}>{targets.length}</strong></span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
+                <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", color: "var(--text-1)", cursor: "pointer" }}>
+                  <input type="checkbox" checked={allNewSelected} disabled={newHosts.length === 0} onChange={toggleAll}/>
+                  Select all
+                </label>
+                <button className="btn btn-primary" disabled={chosen.length === 0} onClick={() => setShowAdd(true)}>
+                  <Icons.Plus size={14}/> Add {chosen.length} to assets
+                </button>
               </div>
-              {targets.length === 0 ? <EmptyState text="No live host found on this network"/> : (
-                <>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
-                    <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", color: "var(--text-1)", cursor: "pointer" }}>
-                      <input type="checkbox" checked={allNewSelected} disabled={newHosts.length === 0} onChange={toggleAll}/>
-                      Select all
-                    </label>
-                    <button className="btn btn-primary" disabled={selected.size === 0} onClick={() => setShowAdd(true)}>
-                      <Icons.Plus size={14}/> Add {selected.size} to assets
-                    </button>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {targets.map(h => (
-                      <label key={h.ip} style={{
-                        padding: "8px 12px", background: "var(--surface-1)", borderRadius: 6,
-                        display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap",
-                        cursor: h.asset_id ? "default" : "pointer",
-                        fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text-1)",
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {hosts.map(h => (
+                  <label key={h.ip} style={{
+                    padding: "8px 12px", background: "var(--surface-1)", borderRadius: 6,
+                    display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap",
+                    cursor: h.asset_id ? "default" : "pointer",
+                    fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text-1)",
+                  }}>
+                    <input type="checkbox" checked={!h.asset_id && selected.has(h.ip)}
+                      disabled={!!h.asset_id} onChange={() => toggleOne(h.ip)}/>
+                    <span style={{ minWidth: 130 }}>{h.ip}</span>
+                    <span style={{ color: h.hostname ? "var(--text-1)" : "var(--text-3)" }}>
+                      {h.hostname || "no reverse DNS name"}
+                    </span>
+                    {h.asset_id && (
+                      <span style={{
+                        marginLeft: "auto", fontFamily: "var(--font-sans, inherit)", fontSize: 12,
+                        color: "var(--ok)", background: "var(--ok-soft)", border: "1px solid var(--ok-line)",
+                        borderRadius: 999, padding: "2px 10px",
                       }}>
-                        <input type="checkbox" checked={!h.asset_id && selected.has(h.ip)}
-                          disabled={!!h.asset_id} onChange={() => toggleOne(h.ip)}/>
-                        <span style={{ minWidth: 130 }}>{h.ip}</span>
-                        <span style={{ color: h.hostname ? "var(--text-1)" : "var(--text-3)" }}>
-                          {h.hostname || "no reverse DNS name"}
-                        </span>
-                        {h.asset_id && (
-                          <span style={{
-                            marginLeft: "auto", fontFamily: "var(--font-sans, inherit)", fontSize: 12,
-                            color: "var(--ok)", background: "var(--ok-soft)", border: "1px solid var(--ok-line)",
-                            borderRadius: 999, padding: "2px 10px",
-                          }}>
-                            Already in assets · {h.asset_name}
-                          </span>
-                        )}
-                      </label>
-                    ))}
-                  </div>
-                </>
-              )}
-              {addedCount > 0 && (
-                <div style={{ marginTop: 12, fontSize: 13, color: "var(--text-1)" }}>
-                  {addedCount} asset(s) created. They are listed in Assets.
-                </div>
-              )}
-              {showAdd && (
-                <AddHostsModal
-                  hosts={targets.filter(h => selected.has(h.ip))}
-                  close={() => setShowAdd(false)}
-                  onDone={n => { setShowAdd(false); setSelected(new Set()); setAddedCount(n); }}
-                />
-              )}
+                        Already in assets · {h.asset_name}
+                      </span>
+                    )}
+                  </label>
+                ))}
+              </div>
             </>
-          ) : targets.length === 0
+          )}
+          {addedCount > 0 && (
+            <div style={{ marginTop: 12, fontSize: 13, color: "var(--text-1)" }}>
+              {addedCount} asset(s) created. They are listed in Assets.
+            </div>
+          )}
+          {showAdd && (
+            <AddHostsModal
+              hosts={chosen}
+              close={() => setShowAdd(false)}
+              onDone={n => { setShowAdd(false); setSelected(new Set()); setAddedCount(n); reload(); }}
+            />
+          )}
+        </Panel>
+      )}
+
+      {!starting && domainResult && (
+        <Panel title={`Discovered Targets (${domainTargets.length})`}>
+          {domainTargets.length === 0
             ? <EmptyState text="No targets discovered"/>
             : (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {targets.map((t, i) => {
-                  const label = typeof t === "string" ? t
-                    : t.hostname ? `${t.hostname}${t.ips?.length ? " → " + t.ips.join(", ") : ""}`
-                    : (t.host || t.ip || t.target || JSON.stringify(t));
-                  return (
-                    <div key={i} style={{
-                      padding: "8px 12px", background: "var(--surface-1)", borderRadius: 6,
-                      fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text-1)",
-                    }}>
-                      {label}
-                    </div>
-                  );
-                })}
+                {domainTargets.map((t, i) => (
+                  <div key={i} style={{
+                    padding: "8px 12px", background: "var(--surface-1)", borderRadius: 6,
+                    fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text-1)",
+                  }}>
+                    {t.hostname}{t.ips?.length ? " → " + t.ips.join(", ") : ""}
+                  </div>
+                ))}
               </div>
             )
           }

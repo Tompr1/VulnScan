@@ -14,8 +14,14 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_role
 from app.db import models
-from app.core.host_discovery import NotPrivateNetworkError, discover_hosts, parse_private_network
+from app.core.config import settings
+from app.core.host_discovery import NotPrivateNetworkError
 from app.core.job_queue import QueueUnavailableError, get_job_queue
+from app.discovery.jobs import (
+    DiscoveryAlreadyRunningError, NoProbeError, RangeNotAllowedError, request_cancel, serialize, start_discovery,
+)
+from app.scanner.client_allowlists import client_policy
+from app.discovery.known_targets import known_targets
 
 logger = logging.getLogger("v0cday.analytics")
 
@@ -25,27 +31,6 @@ SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
 
 
 # ─── 1. Auto Asset Discovery ────────────────────────────────────────────────
-
-
-def _known_targets(db: Session, workspace_id: int) -> dict[str, tuple[int, str]]:
-    """Target → (asset id, asset name) for every target already on an asset:
-    registered ones, and those a scan job ran against under an asset."""
-    known: dict[str, tuple[int, str]] = {}
-    registered = (
-        db.query(models.AssetTarget.target, models.Asset.id, models.Asset.name)
-        .join(models.Asset, models.Asset.id == models.AssetTarget.asset_id)
-        .filter(models.AssetTarget.workspace_id == workspace_id)
-        .all()
-    )
-    scanned = (
-        db.query(models.ScanJob.target, models.Asset.id, models.Asset.name)
-        .join(models.Asset, models.Asset.id == models.ScanJob.asset_id)
-        .filter(models.ScanJob.workspace_id == workspace_id)
-        .all()
-    )
-    for target, asset_id, asset_name in [*registered, *scanned]:
-        known.setdefault(target, (asset_id, asset_name))
-    return known
 
 
 @router.post("/discover")
@@ -59,7 +44,8 @@ def discover_assets(
 
     Accepts either ``network_range`` (CIDR) or ``domain``.
     For domains: resolve DNS and return discovered IPs/subdomains.
-    For CIDR: validate and return the range with IP count.
+    For CIDR: queue a discovery of the private network for the client's
+    probe and return it (one at a time per client; refused without a probe).
     """
     network_range = body.get("network_range")
     domain = body.get("domain")
@@ -67,31 +53,20 @@ def discover_assets(
     if not network_range and not domain:
         raise HTTPException(400, "Provide either 'network_range' (CIDR) or 'domain'")
 
-    # --- CIDR discovery: which addresses of a private network are alive ---
+    # --- CIDR discovery: a job for the client's probe, followed by GET /discover/jobs/{id} ---
     if network_range:
+        allowlist = client_policy(db, user["ws"], settings.ALLOWLIST)
         try:
-            net = parse_private_network(str(network_range))
-        except NotPrivateNetworkError as exc:
+            job = start_discovery(db, user["ws"], str(network_range), allowlist)
+        except DiscoveryAlreadyRunningError as exc:
+            raise HTTPException(409, f"{exc}. Wait for it to finish or cancel it.")
+        except NoProbeError as exc:
+            raise HTTPException(409, str(exc))
+        except (NotPrivateNetworkError, RangeNotAllowedError) as exc:
             raise HTTPException(400, str(exc))
         except ValueError as exc:
             raise HTTPException(400, f"Invalid CIDR: {exc}")
-
-        hosts = discover_hosts(net)
-        known = _known_targets(db, user["ws"])
-        for host in hosts:
-            asset = known.get(host["ip"])
-            host["asset_id"] = asset[0] if asset else None
-            host["asset_name"] = asset[1] if asset else None
-        return {
-            "type": "network",
-            "network_range": str(net),
-            "num_addresses": net.num_addresses,
-            "first_ip": str(net.network_address),
-            "last_ip": str(net.broadcast_address),
-            "prefix_len": net.prefixlen,
-            "hosts": hosts,
-            "count": len(hosts),
-        }
+        return serialize(job, {})
 
     # --- Domain discovery ---
     targets: list[dict] = []
@@ -120,6 +95,56 @@ def discover_assets(
         "discovered": targets,
         "count": len(targets),
     }
+
+
+def _discovery_of_client(db: Session, workspace_id: int, discovery_id: int) -> models.DiscoveryJob:
+    job = db.query(models.DiscoveryJob).filter(
+        models.DiscoveryJob.workspace_id == workspace_id,
+        models.DiscoveryJob.id == discovery_id,
+    ).first()
+    if job is None:
+        raise HTTPException(404, "Discovery not found")
+    return job
+
+
+@router.get("/discover/jobs")
+def list_discoveries(
+    limit: int = Query(10, ge=1, le=50),
+    user=Depends(require_role("admin", "analyst")),
+    db: Session = Depends(get_db),
+):
+    """The client's latest discoveries, newest first (the page resumes the
+    first one when it opens)."""
+    jobs = (
+        db.query(models.DiscoveryJob)
+        .filter(models.DiscoveryJob.workspace_id == user["ws"])
+        .order_by(models.DiscoveryJob.id.desc())
+        .limit(limit)
+        .all()
+    )
+    known = known_targets(db, user["ws"]) if jobs else {}
+    return [serialize(j, known) for j in jobs]
+
+
+@router.get("/discover/jobs/{discovery_id}")
+def get_discovery(
+    discovery_id: int,
+    user=Depends(require_role("admin", "analyst")),
+    db: Session = Depends(get_db),
+):
+    job = _discovery_of_client(db, user["ws"], discovery_id)
+    return serialize(job, known_targets(db, user["ws"]))
+
+
+@router.post("/discover/jobs/{discovery_id}/cancel")
+def cancel_discovery(
+    discovery_id: int,
+    user=Depends(require_role("admin", "analyst")),
+    db: Session = Depends(get_db),
+):
+    job = _discovery_of_client(db, user["ws"], discovery_id)
+    request_cancel(db, job)
+    return serialize(job, known_targets(db, user["ws"]))
 
 
 # ─── 2. Vulnerability Trending ──────────────────────────────────────────────

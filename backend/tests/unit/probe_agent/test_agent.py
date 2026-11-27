@@ -254,3 +254,126 @@ def test_pendant_un_long_scan_la_sonde_reste_vue_en_ligne(tmp_path):
     asyncio.run(agent.run_once())
 
     assert platform.heartbeats >= 2
+
+
+# ── Découverte d'hôtes ────────────────────────────────────────────────────────
+
+from app.discovery.assignment import DiscoveryAssignment, DiscoveryReport  # noqa: E402
+
+
+def decouverte(network="10.1.2.0/24", allowlist="10.0.0.0/8", budget=3600, discovery_id=7):
+    return DiscoveryAssignment(discovery_id=discovery_id, workspace_id=1, network_range=network,
+                               allowlist=allowlist, budget_seconds=budget)
+
+
+class Reseau:
+    """discover_hosts de test : une vague par élément de ``vagues``."""
+
+    def __init__(self, vagues, plante=None):
+        self.vagues = vagues
+        self.plante = plante
+        self.reseaux = []
+
+    def __call__(self, net, on_progress, should_stop):
+        self.reseaux.append(str(net))
+        trouves = []
+        for i, vague in enumerate(self.vagues):
+            if should_stop():
+                break
+            trouves += vague
+            on_progress((i + 1) * 128, list(trouves))
+        if self.plante:
+            raise self.plante
+        return trouves
+
+
+def sonde_qui_decouvre(tmp_path, platform, reseau, local_allowlist=None, horloge=None):
+    agent = ProbeAgent(platform, RemoteReferenceData(platform, tmp_path / "ref"), lambda a, c: {},
+                       ReportOutbox(tmp_path / "outbox"), local_allowlist, wait_seconds=0,
+                       discover=reseau, clock=horloge or (lambda: 0.0))
+    asyncio.run(agent.run_once())
+    return agent
+
+
+H1, H2 = {"ip": "10.1.2.7", "hostname": "nas.lan"}, {"ip": "10.1.2.40", "hostname": None}
+
+
+def test_une_decouverte_envoie_ses_hotes_vague_par_vague_puis_son_rapport(tmp_path):
+    platform = FakePlatform([decouverte()])
+    reseau = Reseau([[H1], [H2]])
+
+    sonde_qui_decouvre(tmp_path, platform, reseau)
+
+    assert reseau.reseaux == ["10.1.2.0/24"]
+    assert platform.progress_sent == [(7, {"probed": 128, "hosts": [H1]}), (7, {"probed": 256, "hosts": [H1, H2]})]
+    [rapport] = platform.reports
+    assert rapport == DiscoveryReport(7, "done", 256, [H1, H2])
+    assert ReportOutbox(tmp_path / "outbox").pending() == []
+
+
+@pytest.mark.parametrize("assignment, local, raison", [
+    (decouverte(allowlist=None), None, "no allowlist"),
+    (decouverte(network="10.0.0.0/8", allowlist="10.1.0.0/16"), None, "outside the client's allowlist"),
+    (decouverte(network="10.1.2.0/24"), "10.9.0.0/16", "outside the scope the client set on its probe"),
+    (decouverte(network="8.8.8.0/24", allowlist=""), None, "Refused range"),
+])
+def test_une_decouverte_hors_perimetre_est_refusee_sans_rien_sonder(tmp_path, assignment, local, raison):
+    platform = FakePlatform([assignment])
+    reseau = Reseau([[H1]])
+
+    sonde_qui_decouvre(tmp_path, platform, reseau, local_allowlist=local)
+
+    assert reseau.reseaux == []
+    [rapport] = platform.reports
+    assert rapport.status == "failed" and raison in rapport.error
+
+
+def test_la_plateforme_peut_arreter_une_decouverte_en_gardant_ses_hotes(tmp_path):
+    platform = FakePlatform([decouverte()], stop_after_progress=1)
+
+    sonde_qui_decouvre(tmp_path, platform, Reseau([[H1], [H2]]))
+
+    [rapport] = platform.reports
+    assert (rapport.status, rapport.hosts) == ("cancelled", [H1])
+
+
+def test_le_budget_de_temps_arrete_une_decouverte(tmp_path):
+    temps = iter([0.0, 0.0, 120.0])
+    platform = FakePlatform([decouverte(budget=60)])
+
+    sonde_qui_decouvre(tmp_path, platform, Reseau([[H1], [H2]]), horloge=lambda: next(temps))
+
+    [rapport] = platform.reports
+    assert rapport.status == "failed" and "time budget (1 min)" in rapport.error
+    assert rapport.hosts == [H1]
+
+
+def test_une_decouverte_qui_plante_est_rapportee_avec_ses_hotes(tmp_path):
+    platform = FakePlatform([decouverte()])
+
+    sonde_qui_decouvre(tmp_path, platform, Reseau([[H1]], plante=OSError("too many open files")))
+
+    [rapport] = platform.reports
+    assert rapport.status == "failed" and "too many open files" in rapport.error
+    assert rapport.hosts == [H1]
+
+
+def test_une_progression_de_decouverte_perdue_ne_l_arrete_pas(tmp_path):
+    platform = FakePlatform([decouverte()])
+    platform.fail["discovery_progress"] = [PlatformUnavailable("réseau coupé")]
+
+    sonde_qui_decouvre(tmp_path, platform, Reseau([[H1], [H2]]))
+
+    assert platform.reports[0].status == "done"
+
+
+def test_un_rapport_de_decouverte_non_envoye_reste_sur_disque(tmp_path):
+    platform = FakePlatform([decouverte()])
+    platform.fail["discovery_report"] = [PlatformUnavailable("réseau coupé")]
+
+    with pytest.raises(PlatformUnavailable):
+        sonde_qui_decouvre(tmp_path, platform, Reseau([[H1]]))
+
+    [en_attente] = ReportOutbox(tmp_path / "outbox").pending()
+    assert en_attente == DiscoveryReport(7, "done", 128, [H1])
+    assert (tmp_path / "outbox" / "discovery-7.json").exists()

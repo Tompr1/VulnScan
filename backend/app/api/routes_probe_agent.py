@@ -53,6 +53,7 @@ def get_probe_gateway() -> ProbeGateway:
         cancellation=RedisCancellationSignal.from_url(settings.REDIS_URL),
         clock=lambda: datetime.now(timezone.utc),
         enrollment_ttl=timedelta(hours=settings.PROBE_ENROLLMENT_TTL_HOURS),
+        discovery_budget_seconds=settings.DISCOVERY_BUDGET_SECONDS,
     )
 
 
@@ -123,15 +124,19 @@ def heartbeat(
 @router.get("/jobs/next")
 async def next_job(
     wait: int = Query(default=25, ge=0, le=MAX_WAIT_SECONDS),
+    kinds: str = Query(default="scan", max_length=64),
     probe: ProbeIdentity = Depends(require_probe),
     gateway: ProbeGateway = Depends(get_probe_gateway),
 ):
     """The next job of the probe's client, waiting up to ``wait`` seconds
-    for one (long polling); 204 when there is none."""
+    for one (long polling); 204 when there is none. ``kinds`` lists what the
+    probe runs ("scan", "discovery"); a discovery answer has ``"kind":
+    "discovery"``."""
+    wanted = {k.strip() for k in kinds.split(",") if k.strip()}
     loop = asyncio.get_running_loop()
     deadline = loop.time() + wait
     while True:
-        assignment = await run_in_threadpool(gateway.next_assignment, probe)
+        assignment = await run_in_threadpool(gateway.next_assignment, probe, wanted)
         if assignment is not None:
             return Response(content=_json(assignment.to_dict()), media_type="application/json", headers=_NO_STORE)
         remaining = deadline - loop.time()
@@ -173,6 +178,41 @@ def job_report(
         raise HTTPException(404, "Job not found") from None
     except QueueUnavailableError:
         raise HTTPException(503, "The platform cannot accept the report now: send it again later") from None
+    return {"accepted": True}
+
+
+@router.post("/discoveries/{discovery_id}/progress")
+def discovery_progress(
+    discovery_id: int,
+    document: dict[str, Any],
+    probe: ProbeIdentity = Depends(require_probe),
+    gateway: ProbeGateway = Depends(get_probe_gateway),
+):
+    """Stores the addresses probed and the hosts found so far; ``cancel``
+    tells the probe to stop."""
+    try:
+        return {"cancel": gateway.discovery_progress(probe, discovery_id, document)}
+    except InvalidMessage as exc:
+        raise HTTPException(422, str(exc)) from None
+    except UnknownJob:
+        raise HTTPException(404, "Discovery not found") from None
+
+
+@router.post("/discoveries/{discovery_id}/report")
+def discovery_report(
+    discovery_id: int,
+    report: dict[str, Any],
+    probe: ProbeIdentity = Depends(require_probe),
+    gateway: ProbeGateway = Depends(get_probe_gateway),
+):
+    """Closes the discovery with its final status and hosts. A report sent
+    again after acceptance gets 404 (the discovery is no longer running)."""
+    try:
+        gateway.discovery_report(probe, discovery_id, report)
+    except InvalidMessage as exc:
+        raise HTTPException(422, str(exc)) from None
+    except UnknownJob:
+        raise HTTPException(404, "Discovery not found") from None
     return {"accepted": True}
 
 
