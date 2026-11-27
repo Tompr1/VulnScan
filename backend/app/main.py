@@ -299,6 +299,12 @@ def _run_migrations(db: Session) -> None:
             ADD COLUMN IF NOT EXISTS update_requested_at TIMESTAMPTZ,
             ADD COLUMN IF NOT EXISTS update_finished_at TIMESTAMPTZ;
         """,
+        # Discovered hosts go into a folder as targets, with an alias.
+        """
+        ALTER TABLE asset_targets
+            ADD COLUMN IF NOT EXISTS name VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS credential_id INTEGER REFERENCES credentials(id) ON DELETE SET NULL;
+        """,
     ]
     for sql in migrations:
         try:

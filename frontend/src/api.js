@@ -280,6 +280,7 @@ export const assetsApi = {
   delete:  (id)         => api(`/assets/${id}`, { method: "DELETE" }),
   jobs:    (id)         => api(`/assets/${id}/jobs`),
   targets: (id)         => api(`/assets/${id}/targets`),
+  renameTarget: (id, body) => api(`/assets/${id}/targets`, { method: "PATCH", body }),
 };
 
 // ── Reports ──────────────────────────────────────────────────────────

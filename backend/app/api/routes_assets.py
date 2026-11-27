@@ -173,9 +173,9 @@ def create_asset(
 
 
 class HostAssetIn(BaseModel):
-    name: str
+    name: str  # the alias of the host ("ERP"); its address when left as is
     target: str  # the IPv4 address that was discovered
-    parent_id: int | None = None
+    parent_id: int | None = None  # the folder to add the host to
     default_credential_id: int | None = None
     description: str | None = ""
 
@@ -184,15 +184,25 @@ class HostAssetsCreate(BaseModel):
     assets: list[HostAssetIn]
 
 
+def _alias(name: str, target: str) -> str | None:
+    """The alias to store: none when it is just the address."""
+    name = (name or "").strip()[:255]
+    return name if name and name != target else None
+
+
 @router.post("/from-hosts")
 def create_assets_from_hosts(
     body: HostAssetsCreate,
     user=Depends(require_role("admin", "analyst")),
     db: Session = Depends(get_db),
 ):
-    """Create one asset per discovered host, each with its target registered.
+    """Add discovered hosts to the assets.
 
-    All or nothing: if any entry is invalid, nothing is created. A host
+    With a folder, the host becomes a target of that folder, under its alias
+    (the name typed in, when it is not the address). Without one, it gets an
+    asset of its own, named after it.
+
+    All or nothing: if any entry is invalid, nothing is added. A host
     already on an asset of the client is refused (409), so adding the same
     discovery twice cannot create duplicates."""
     if not body.assets:
@@ -222,30 +232,40 @@ def create_assets_from_hosts(
     if already:
         raise HTTPException(409, f"Already in assets: {', '.join(already)}")
 
-    created = []
+    added = []
     for item, target in zip(body.assets, targets):
-        a = models.Asset(
-            workspace_id=user["ws"],
-            name=item.name.strip(),
-            description=item.description or "",
-            parent_id=item.parent_id,
-            default_credential_id=item.default_credential_id,
-            tags_json="[]",
-        )
-        db.add(a)
-        db.flush()  # assigns a.id for the target row
+        if item.parent_id is not None:
+            asset_id = item.parent_id
+        else:
+            a = models.Asset(
+                workspace_id=user["ws"],
+                name=item.name.strip(),
+                description=item.description or "",
+                default_credential_id=item.default_credential_id,
+                tags_json="[]",
+            )
+            db.add(a)
+            db.flush()  # assigns a.id for the target row
+            asset_id = a.id
         db.add(models.AssetTarget(
             workspace_id=user["ws"],
-            asset_id=a.id,
+            asset_id=asset_id,
             target=target,
+            name=_alias(item.name, target),
+            credential_id=item.default_credential_id,
         ))
-        created.append(a)
+        added.append((asset_id, target, _alias(item.name, target)))
 
     db.commit()
-    for a in created:
-        db.refresh(a)
-    logger.info("Created %d asset(s) from discovered hosts", len(created))
-    return [_serialize(a, db) for a in created]
+    names = dict(db.query(models.Asset.id, models.Asset.name).filter(
+        models.Asset.workspace_id == user["ws"],
+        models.Asset.id.in_({asset_id for asset_id, _, _ in added}),
+    ).all())
+    logger.info("Added %d discovered host(s) to the assets", len(added))
+    return {"added": [
+        {"target": target, "name": alias, "asset_id": asset_id, "asset_name": names.get(asset_id)}
+        for asset_id, target, alias in added
+    ]}
 
 
 @router.patch("/{asset_id}")
@@ -416,6 +436,7 @@ def asset_targets(
         )
         .all()
     )
+    aliases: dict[str, models.AssetTarget] = {}
     for reg in registered:
         by_target.setdefault(reg.target, {
             "target": reg.target,
@@ -423,12 +444,57 @@ def asset_targets(
             "last_scan_at": None,
             "findings": 0,
         })
+        aliases[reg.target] = reg
 
     out = []
     for slot in by_target.values():
+        reg = aliases.get(slot["target"])
         out.append({
             **slot,
+            "name": reg.name if reg else None,
+            "credential_id": reg.credential_id if reg else None,
             "last_scan_at": slot["last_scan_at"].isoformat() if slot["last_scan_at"] else None,
         })
     out.sort(key=lambda x: x["target"])
     return out
+
+
+class TargetRename(BaseModel):
+    target: str
+    name: str | None = None  # empty: back to the bare address
+
+
+@router.patch("/{asset_id}/targets")
+def rename_target(
+    asset_id: int,
+    body: TargetRename,
+    user=Depends(require_role("admin", "analyst")),
+    db: Session = Depends(get_db),
+):
+    """Give a target of the asset an alias (or remove it). A target only
+    known from its scans gets registered on the asset with it."""
+    a = db.query(models.Asset).filter(
+        models.Asset.workspace_id == user["ws"],
+        models.Asset.id == asset_id,
+    ).first()
+    if not a:
+        raise HTTPException(404, "Asset not found")
+    target = (body.target or "").strip()
+    reg = db.query(models.AssetTarget).filter(
+        models.AssetTarget.workspace_id == user["ws"],
+        models.AssetTarget.asset_id == asset_id,
+        models.AssetTarget.target == target,
+    ).first()
+    if reg is None:
+        scanned = db.query(models.ScanJob.id).filter(
+            models.ScanJob.workspace_id == user["ws"],
+            models.ScanJob.asset_id == asset_id,
+            models.ScanJob.target == target,
+        ).first()
+        if not target or not scanned:
+            raise HTTPException(404, "Target not found in this asset")
+        reg = models.AssetTarget(workspace_id=user["ws"], asset_id=asset_id, target=target)
+        db.add(reg)
+    reg.name = _alias(body.name or "", target)
+    db.commit()
+    return {"target": target, "name": reg.name}

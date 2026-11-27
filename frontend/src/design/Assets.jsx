@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Icons, Pip, Risk, Status } from "./icons.jsx";
 import { scanApi, assetsApi, reportsApi, apiScannerApi, credentialsApi, webAuthApi, canEdit } from "../api.js";
-
-// A child with a target is a host (an asset registered on a scan target), not a sub-folder.
-const isHost = (a) => (a.target_list || []).length > 0;
+import { assetCounts, isHost, treeRows } from "./assetsModel.js";
 
 export function Assets({ openAsset }) {
   const [view, setView] = useState("grid");
@@ -24,7 +22,7 @@ export function Assets({ openAsset }) {
 
   const roots = assets.filter(a => !a.parent_id);
   const children = (id) => assets.filter(a => a.parent_id === id);
-  const filtered = assets.filter(a => !q || a.name.toLowerCase().includes(q.toLowerCase()));
+  const counts = assetCounts(assets);
 
   return (
     <>
@@ -51,7 +49,7 @@ export function Assets({ openAsset }) {
         const totalCritical = assets.reduce((s, a) => s + (a.critical || 0), 0);
         return (
           <div className="grid-stat" style={{gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 20}}>
-            <div className="stat brand"><div className="accent-bar"/><div className="label"><Icons.Folder size={12}/> Folders</div><div className="value">{roots.length}</div><div className="delta flat">{assets.length - roots.length} sub-folders</div></div>
+            <div className="stat brand"><div className="accent-bar"/><div className="label"><Icons.Folder size={12}/> Folders</div><div className="value">{counts.folders}</div><div className="delta flat">{counts.subFolders} sub-folder{counts.subFolders === 1 ? "" : "s"}{counts.hosts > 0 ? ` · ${counts.hosts} host${counts.hosts === 1 ? "" : "s"}` : ""}</div></div>
             <div className="stat neutral"><div className="accent-bar"/><div className="label"><Icons.Target size={12}/> Targets</div><div className="value">{totalTargets}</div><div className="delta flat">across all assets</div></div>
             <div className="stat critical"><div className="accent-bar"/><div className="label">Highest risk</div><div className="value">{highest.risk || 0}</div><div className="delta up">{highest.name || "—"}</div></div>
             <div className="stat high"><div className="accent-bar"/><div className="label">Critical findings</div><div className="value">{totalCritical}</div><div className="delta flat">across folders</div></div>
@@ -158,15 +156,18 @@ export function Assets({ openAsset }) {
             <table className="tbl">
               <thead><tr><th>Asset</th><th>Owner</th><th style={{width: 80}}>Targets</th><th style={{width: 200}}>Severity</th><th style={{width: 90}}>Risk</th><th style={{width: 110}}>Last scan</th></tr></thead>
               <tbody>
-                {filtered.map(a => {
-                  const isChild = !!a.parent_id;
+                {treeRows(assets).map(({ asset: a, depth }) => {
+                  const isChild = depth > 0;
                   return (
                     <tr key={a.id} className="clickable" onClick={() => openAsset(a)}>
                       <td>
-                        <div style={{display: "flex", alignItems: "center", gap: 10, paddingLeft: isChild ? 24 : 0}}>
+                        <div style={{display: "flex", alignItems: "center", gap: 10, paddingLeft: 24 * depth}}>
                           {isChild && <span style={{color: "var(--text-3)", fontSize: 11, fontFamily: "var(--font-mono)"}}>└─</span>}
-                          <Icons.Folder size={14} color={isChild ? "var(--text-3)" : "var(--brand)"}/>
+                          {isHost(a)
+                            ? <Icons.Server size={14} color="var(--text-3)"/>
+                            : <Icons.Folder size={14} color={isChild ? "var(--text-3)" : "var(--brand)"}/>}
                           <span style={{color: "var(--text-0)", fontWeight: isChild ? 400 : 500}}>{a.name}</span>
+                          {isHost(a) && <span className="mono muted" style={{fontSize: 11.5}}>{a.target_list.join(", ")}</span>}
                         </div>
                       </td>
                       <td><span style={{fontSize: 12.5, color: "var(--text-2)"}}>{a.owner || "—"}</span></td>
@@ -200,6 +201,7 @@ export function AssetDetail({ asset: initialAsset, back }) {
   const [tab, setTab] = useState("targets");
   const [showCreate, setShowCreate] = useState(false);
   const [scanTarget, setScanTarget] = useState(null); // target to scan from a row, if any
+  const [renaming, setRenaming] = useState(null); // { target, name } while a target's alias is edited
   const [asset, setAsset] = useState(initialAsset);
   const [targets, setTargets] = useState([]);
   const [jobs, setJobs] = useState([]);
@@ -225,6 +227,14 @@ export function AssetDetail({ asset: initialAsset, back }) {
   }, [initialAsset.id]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  const saveAlias = async () => {
+    try {
+      await assetsApi.renameTarget(asset.id, { target: renaming.target, name: renaming.name });
+      setRenaming(null);
+      refresh();
+    } catch (e) { setError(e.message); }
+  };
 
   return (
     <>
@@ -278,7 +288,33 @@ export function AssetDetail({ asset: initialAsset, back }) {
                 <tbody>
                   {targets.map(t => (
                     <tr key={t.target} className="clickable">
-                      <td><div style={{display: "flex", gap: 10, alignItems: "center"}}><Icons.Server size={14} color="var(--text-3)"/><span className="mono" style={{color: "var(--text-0)"}}>{t.target}</span></div></td>
+                      <td>
+                        {renaming?.target === t.target ? (
+                          <form style={{display: "flex", gap: 6, alignItems: "center"}} onClick={e => e.stopPropagation()}
+                                onSubmit={e => { e.preventDefault(); saveAlias(); }}>
+                            <Icons.Server size={14} color="var(--text-3)"/>
+                            <input className="form-input" autoFocus style={{height: 28, maxWidth: 220}} value={renaming.name}
+                                   placeholder={t.target} onChange={e => setRenaming({ ...renaming, name: e.target.value })}
+                                   onKeyDown={e => { if (e.key === "Escape") setRenaming(null); }}/>
+                            <span className="mono muted" style={{fontSize: 11.5}}>{t.target}</span>
+                            <button type="submit" className="btn btn-sm btn-primary"><Icons.Check size={11}/></button>
+                            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setRenaming(null)}><Icons.X size={11}/></button>
+                          </form>
+                        ) : (
+                          <div style={{display: "flex", gap: 10, alignItems: "center"}}>
+                            <Icons.Server size={14} color="var(--text-3)"/>
+                            {t.name
+                              ? <><span style={{color: "var(--text-0)", fontWeight: 500}}>{t.name}</span><span className="mono muted" style={{fontSize: 11.5}}>{t.target}</span></>
+                              : <span className="mono" style={{color: "var(--text-0)"}}>{t.target}</span>}
+                            {canEdit() && (
+                              <button className="btn btn-ghost btn-icon btn-sm" title="Rename (alias)"
+                                      onClick={e => { e.stopPropagation(); setRenaming({ target: t.target, name: t.name || "" }); }}>
+                                <Icons.Edit size={11}/>
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
                       <td className="num"><span style={{color: "var(--text-0)", fontWeight: 600}}>{t.findings}</span></td>
                       <td className="num">{t.scans}</td>
                       <td className="muted" style={{fontSize: 12}}>{t.last_scan_at ? new Date(t.last_scan_at).toLocaleString("en-US", {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "—"}</td>

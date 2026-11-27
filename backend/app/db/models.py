@@ -183,6 +183,10 @@ class AssetTarget(Base):
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
     asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
     target: Mapped[str] = mapped_column(String(512))
+    # What people call the target ("ERP", "Sophos"), shown next to its address.
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The credential chosen for this target when it was added (discovery).
+    credential_id: Mapped[int | None] = mapped_column(ForeignKey("credentials.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
