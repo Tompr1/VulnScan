@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.db import models
-from app.probes import events, secrets
+from app.probes import events, secrets, updates
 
 PENDING, ACTIVE, REVOKED = "pending", "active", "revoked"
 ONLINE, OFFLINE = "online", "offline"
@@ -95,8 +95,9 @@ class ProbeRegistry:
         return probe
 
     def seen(self, probe: models.Probe, now: datetime, ip: str, hostname: str | None = None, version: str | None = None,
-             image: str | None = None, appliance_version: str | None = None) -> None:
+             image: str | None = None, appliance_version: str | None = None, build: str | None = None) -> None:
         self._seen(probe, now, ip, hostname, version)
+        updates.build_seen(self._db, probe, build, now)
         if image and image[:512] != probe.image:
             if probe.image:
                 events.record(self._db, probe, events.IMAGE_CHANGED, now, f"{probe.image} -> {image}")

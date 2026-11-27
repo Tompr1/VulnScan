@@ -93,6 +93,16 @@ class Settings(BaseModel):
     # each appliance's updater pulls it, checks its signature, and switches.
     # Empty: probes keep their image.
     PROBE_IMAGE: str = os.getenv("PROBE_IMAGE", "")
+    # Updates of probes installed from the source (deploy/probe): Root asks a
+    # probe to move to the platform's own commit, the updater installed on
+    # the probe's VM does it. The commit comes from PLATFORM_BUILD, else from
+    # the file scripts/deploy.sh writes.
+    PLATFORM_BUILD: str = os.getenv("PLATFORM_BUILD", "")
+    PLATFORM_BUILD_FILE: str = os.getenv("PLATFORM_BUILD_FILE", "/data/platform-build")
+    # A request no updater took in this time fails (no updater installed);
+    # an update not finished in this time fails (a build takes ~20 min).
+    PROBE_UPDATE_PICKUP_SECONDS: int = int(os.getenv("PROBE_UPDATE_PICKUP_SECONDS", "600"))
+    PROBE_UPDATE_RUN_SECONDS: int = int(os.getenv("PROBE_UPDATE_RUN_SECONDS", "3600"))
 
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")

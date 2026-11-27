@@ -196,6 +196,9 @@ main() {
   local commit
   commit=$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || echo "unknown commit")
   echo "$commit" > "$DEPLOY_DIR/.deployed-commit"
+  # The platform reads it (/data/platform-build): Root compares each probe's
+  # code with it, and asks outdated probes to move to it.
+  echo "$commit" > "$DEPLOY_DIR/data/platform-build"
   docker image prune -f >/dev/null
 
   log "Deployed $commit ($DEPLOY_STACK stack)"

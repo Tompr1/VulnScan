@@ -26,6 +26,7 @@ from app.db.session import SessionLocal
 from app.probes.gateway import InvalidMessage, ProbeGateway, ProbeIdentity, UnknownDataset, UnknownJob
 from app.probes import secrets
 from app.probes.registry import EnrollmentError
+from app.probes.updates import InvalidUpdateReport, NoUpdatePending
 from app.scan_jobs.assigner import JobAssigner
 from app.scan_jobs.repository import SqlScanJobRepository
 from app.scanner.cancellation import RedisCancellationSignal
@@ -35,6 +36,8 @@ from app.scanner.sql_resources import SqlCredentialVault
 logger = logging.getLogger(__name__)
 
 VERSION_HEADER = "X-Probe-Version"
+# The commit the probe's image was built from (installs from the source).
+BUILD_HEADER = "X-Probe-Build"
 MAX_WAIT_SECONDS = 30
 _POLL_INTERVAL_SECONDS = 2.0
 # Assignments hold credentials: no cache may keep a copy.
@@ -68,6 +71,7 @@ router = APIRouter(prefix="/probe/v1", tags=["probe-agent"], dependencies=[Depen
 def require_probe(request: Request, gateway: ProbeGateway = Depends(get_probe_gateway)) -> ProbeIdentity:
     probe = gateway.authenticate(
         request.headers.get("Authorization"), client_ip(request), request.headers.get(VERSION_HEADER),
+        request.headers.get(BUILD_HEADER),
     )
     if probe is None:
         raise HTTPException(401, "Unknown or revoked probe", headers={"WWW-Authenticate": "Probe"})
@@ -86,6 +90,12 @@ class HeartbeatBody(BaseModel):
     # The image the probe runs, and the appliance's version (appliances only).
     image: str | None = Field(default=None, max_length=512)
     appliance_version: str | None = Field(default=None, max_length=64)
+    build: str | None = Field(default=None, max_length=64)
+
+
+class UpdateReportBody(BaseModel):
+    status: str = Field(max_length=16)
+    detail: str | None = Field(default=None, max_length=4000)
 
 
 class CveLookupBody(BaseModel):
@@ -114,11 +124,31 @@ def heartbeat(
     probe: ProbeIdentity = Depends(require_probe),
     gateway: ProbeGateway = Depends(get_probe_gateway),
 ):
-    gateway.heartbeat(probe, client_ip(request), body.hostname, body.version, body.image, body.appliance_version)
+    target = gateway.heartbeat(probe, client_ip(request), body.hostname, body.version, body.image,
+                               body.appliance_version, body.build or request.headers.get(BUILD_HEADER))
     return {"probe_id": probe.id, "workspace_id": probe.workspace_id,
             "server_time": datetime.now(timezone.utc).isoformat(),
             # The image the appliance's updater should run (pinned by digest).
-            "desired_image": settings.PROBE_IMAGE.strip() or None}
+            "desired_image": settings.PROBE_IMAGE.strip() or None,
+            # The commit the source install's updater should move to (asked in Root).
+            "update_target": target}
+
+
+@router.post("/update-report")
+def update_report(
+    body: UpdateReportBody,
+    probe: ProbeIdentity = Depends(require_probe),
+    gateway: ProbeGateway = Depends(get_probe_gateway),
+):
+    """The probe's updater says it started, finished or failed the update
+    Root asked for."""
+    try:
+        gateway.update_report(probe, body.status, body.detail)
+    except NoUpdatePending:
+        raise HTTPException(409, "No update of this probe is in progress") from None
+    except InvalidUpdateReport as exc:
+        raise HTTPException(422, str(exc)) from None
+    return {"accepted": True}
 
 
 @router.get("/jobs/next")

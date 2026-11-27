@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  applianceHostname, clientsWithoutProbe, cloudInitUserData, enrollCommand, eventLabel, imageStatus, isAlarmEvent,
-  probeCounts, probeStatus, seenText, shortImage, toggledScanTypes,
+  applianceHostname, canUpdate, clientsWithoutProbe, codeCounts, cloudInitUserData, codeStatus, enrollCommand, eventLabel, imageStatus,
+  isAlarmEvent, probeCounts, probeStatus, seenText, shortBuild, shortImage, toggledScanTypes, updateSummary,
 } from "../src/design/probesModel.js";
 
 const DELEGABLE = ["internal", "external", "api"];
@@ -118,4 +118,49 @@ test("la vue d'ensemble compte les sondes par état", () => {
   const probes = [{ status: "online" }, { status: "online" }, { status: "offline" }, { status: "pending" }, { status: "revoked" }];
 
   assert.deepEqual(probeCounts(probes), { online: 2, offline: 1, pending: 1 });
+});
+
+// ── Mises à jour des sondes installées depuis les sources ────────────────────
+
+const sonde = (extra) => ({ status: "online", code_status: "outdated", update_status: null, ...extra });
+
+test("l'état du code d'une sonde suit la demande de mise à jour", () => {
+  assert.equal(codeStatus(sonde({ code_status: "current" })).label, "code up to date");
+  assert.equal(codeStatus(sonde()).label, "update available");
+  assert.equal(codeStatus(sonde({ update_status: "requested", code_status: "updating" })).label, "update asked");
+  assert.equal(codeStatus(sonde({ update_status: "running", code_status: "updating" })).label, "updating…");
+  assert.deepEqual(codeStatus(sonde({ update_status: "failed" })), { label: "update failed", pill: "failed" });
+  assert.equal(codeStatus(sonde({ code_status: "unknown" })).label, "code not reported");
+  assert.equal(codeStatus(sonde({ code_status: "appliance" })).label, "", "une appliance suit son image");
+});
+
+test("on ne demande une mise à jour qu'à une sonde enrôlée, en retard, sans mise à jour en cours", () => {
+  assert.equal(canUpdate(sonde(), "abc1234"), true);
+  assert.equal(canUpdate(sonde({ code_status: "unknown", status: "offline" }), "abc1234"), true);
+  assert.equal(canUpdate(sonde(), null), false, "commit de la plateforme inconnu");
+  assert.equal(canUpdate(sonde({ code_status: "current" }), "abc1234"), false);
+  assert.equal(canUpdate(sonde({ code_status: "appliance" }), "abc1234"), false);
+  assert.equal(canUpdate(sonde({ status: "pending" }), "abc1234"), false);
+  assert.equal(canUpdate(sonde({ update_status: "running" }), "abc1234"), false);
+});
+
+test("le résultat de la vérification tient en une phrase", () => {
+  assert.equal(shortBuild("0123456789abcdef"), "0123456");
+  assert.equal(updateSummary({ platform_build: "0123456789", counts: { outdated: 2, current: 1 } }),
+    "Platform code 0123456: 2 can be updated, 1 up to date.");
+  assert.match(updateSummary({ platform_build: null, counts: {} }), /does not know which commit/);
+  assert.equal(updateSummary({ platform_build: "0123456789", counts: {} }), "Platform code 0123456: no enrolled probe.");
+});
+
+test("un échec de mise à jour apparaît en rouge dans l'historique", () => {
+  assert.equal(eventLabel("update_done"), "Updated");
+  assert.equal(isAlarmEvent("update_failed"), true);
+});
+
+test("les compteurs de code ne comptent que les sondes enrôlées", () => {
+  assert.deepEqual(codeCounts([
+    { status: "online", code_status: "outdated" }, { status: "offline", code_status: "outdated" },
+    { status: "online", code_status: "current" }, { status: "pending", code_status: "unknown" },
+    { status: "revoked", code_status: "outdated" },
+  ]), { outdated: 2, current: 1 });
 });

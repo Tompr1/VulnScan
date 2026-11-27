@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_global_admin
 from app.core.config import settings
 from app.db import models
-from app.probes import events
+from app.probes import events, updates
 from app.probes.placement import (
     DELEGABLE_SCAN_TYPES, PROBE, NotDelegableError, probe_execution_is_default, probe_scan_types, set_probe_scan_types,
 )
@@ -74,7 +74,56 @@ def list_probes(db: Session = Depends(get_db)):
         ],
         "delegable_scan_types": [t.value for t in DELEGABLE_SCAN_TYPES],
         "desired_image": settings.PROBE_IMAGE.strip() or None,
+        "platform_build": _platform_build(),
     }
+
+
+@router.get("/updates")
+def check_for_updates(db: Session = Depends(get_db)):
+    """"Check for updates": the platform's commit, and for each enrolled
+    probe whether its code is the same. Nothing leaves the platform: probes
+    report their build each time they call."""
+    platform = _platform_build()
+    probes = (
+        db.query(models.Probe)
+        .filter(models.Probe.status == "active")
+        .order_by(models.Probe.workspace_id, models.Probe.name)
+        .all()
+    )
+    rows = [
+        {"id": p.id, "name": p.name, "build": p.build, "code_status": updates.code_status(p, platform),
+         "update_status": p.update_status, "update_detail": p.update_detail}
+        for p in probes
+    ]
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["code_status"]] = counts.get(row["code_status"], 0) + 1
+    return {"platform_build": platform, "checked_at": _iso(_now()), "probes": rows, "counts": counts}
+
+
+@router.post("/update-all")
+def update_all(db: Session = Depends(get_db)):
+    """Asks every enrolled probe whose code differs from the platform's to
+    update. Appliances and probes that cannot be asked are left out."""
+    platform = _platform_build()
+    requested = []
+    for probe in db.query(models.Probe).filter(models.Probe.status == "active").all():
+        if updates.code_status(probe, platform) == updates.OUTDATED:
+            updates.request_update(db, probe, platform, _now())
+            requested.append(probe.id)
+    return {"requested": requested, "platform_build": platform}
+
+
+@router.post("/{probe_id}/update")
+def update_probe(probe_id: int, db: Session = Depends(get_db)):
+    """Asks this probe's updater to move it to the platform's commit."""
+    probe = _get(db, probe_id)
+    try:
+        updates.request_update(db, probe, _platform_build(), _now())
+    except updates.UpdateNotPossible as exc:
+        raise HTTPException(409, str(exc)) from None
+    client = db.get(models.Workspace, probe.workspace_id)
+    return _probe(probe, {probe.workspace_id: client.name if client else ""}, _now(), 0)
 
 
 @router.post("", status_code=201)
@@ -177,7 +226,19 @@ def _probe(probe: models.Probe, client_names: dict[int, str], now: datetime, run
         "appliance_version": probe.appliance_version,
         "image_status": image_status(probe.image, settings.PROBE_IMAGE.strip() or None),
         "offline_since": _iso(probe.offline_since),
+        # Code of a probe installed from the source, next to the platform's.
+        "build": probe.build,
+        "code_status": updates.code_status(probe, _platform_build()),
+        "update_status": probe.update_status,
+        "update_target": probe.update_target,
+        "update_detail": probe.update_detail,
+        "update_requested_at": _iso(probe.update_requested_at),
+        "update_finished_at": _iso(probe.update_finished_at),
     }
+
+
+def _platform_build() -> str | None:
+    return updates.platform_build(settings.PLATFORM_BUILD, settings.PLATFORM_BUILD_FILE)
 
 
 def image_status(running: str | None, desired: str | None) -> str:

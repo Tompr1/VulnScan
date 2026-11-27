@@ -525,6 +525,14 @@ class Probe(Base):
     appliance_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Set when the platform said the probe went offline; cleared when it is back.
     offline_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The commit the probe's code was built from (installs from the source).
+    build: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Update asked from Root: requested -> running -> done | failed (app.probes.updates).
+    update_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    update_target: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    update_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    update_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    update_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ProbeEvent(Base):

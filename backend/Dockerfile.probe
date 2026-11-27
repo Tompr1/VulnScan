@@ -52,5 +52,11 @@ ENV PYTHONUNBUFFERED=1 \
     V0CDAY_PROBE_STATE=/var/lib/v0cday-probe
 VOLUME ["/etc/v0cday-probe", "/var/lib/v0cday-probe"]
 
+# The commit this image was built from, reported to the platform so Root can
+# tell whether the probe is up to date (set by the probe's updater; empty for
+# a plain build).
+ARG V0CDAY_BUILD=""
+ENV V0CDAY_BUILD=${V0CDAY_BUILD}
+
 ENTRYPOINT ["v0cday-probe"]
 CMD ["run"]
