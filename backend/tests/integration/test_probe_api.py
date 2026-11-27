@@ -114,8 +114,20 @@ def test_un_scan_d_un_client_part_sur_sa_sonde_et_en_revient(env):
     assert (ligne["id"], ligne["status"], ligne["version"], ligne["running_jobs"]) == (probe_id, "online", "0.1.0", 1)
 
 
-def test_sans_sonde_choisie_les_scans_restent_sur_la_plateforme(env):
+def test_sans_sonde_un_scan_interne_echoue_au_lieu_de_partir_de_la_plateforme(env):
+    # Un scan planifié arrive ici sans le contrôle de la soumission : depuis
+    # la plateforme, il atteindrait le réseau de la plateforme, pas du client.
     env.job_soumis(20)
+
+    env.db.expire_all()
+    job = env.db.get(models.ScanJob, 20)
+    assert env.file.scans == []
+    assert job.status == "failed"
+    assert "no scan probe" in json.loads(job.meta_json)["error"]
+
+
+def test_sans_sonde_un_scan_externe_part_de_la_plateforme(env):
+    env.job_soumis(20, scan_type="external")
 
     env.db.expire_all()
     assert env.file.scans == [20]
@@ -123,11 +135,12 @@ def test_sans_sonde_choisie_les_scans_restent_sur_la_plateforme(env):
 
 
 def test_un_type_non_confie_a_la_sonde_reste_sur_la_plateforme(env):
-    env.https.put(f"/probes/clients/{CLIENT}/execution", json={"scan_types": ["external"]})
+    reponse = env.https.put(f"/probes/clients/{CLIENT}/execution", json={"scan_types": ["external"]})
 
-    env.job_soumis(20)
+    env.job_soumis(20, scan_type="api")
 
     assert env.file.scans == [20]
+    assert reponse.json()["probe_scan_types"] == ["internal", "external"], "l'interne reste toujours sur la sonde"
 
 
 def test_sans_job_la_sonde_recoit_204(env):
@@ -355,12 +368,14 @@ def test_avec_une_sonde_active_les_scans_internes_et_api_y_vont_par_defaut(env):
     assert env.file.scans == [22]
 
 
-def test_une_sonde_creee_mais_pas_encore_enrolee_ne_change_rien(env):
+def test_une_sonde_creee_mais_pas_encore_enrolee_ne_lance_pas_de_scan_interne(env):
     env.https.post("/probes", json={"workspace_id": CLIENT, "name": "a-installer"})
 
     env.job_soumis(20)
 
-    assert env.file.scans == [20]
+    env.db.expire_all()
+    assert env.file.scans == []
+    assert env.db.get(models.ScanJob, 20).status == "failed"
 
 
 def test_root_voit_le_choix_par_defaut_et_peut_le_remplacer(env):
@@ -369,11 +384,12 @@ def test_root_voit_le_choix_par_defaut_et_peut_le_remplacer(env):
 
     env.https.put(f"/probes/clients/{CLIENT}/execution", json={"scan_types": []})
     apres = {c["id"]: c for c in env.https.get("/probes").json()["clients"]}
-    env.job_soumis(20)
+    env.job_soumis(20, scan_type="api")
+    env.job_soumis(21)
 
     assert (avant[CLIENT]["probe_scan_types"], avant[CLIENT]["probe_scan_types_default"]) == (["internal", "api"], True)
-    assert (apres[CLIENT]["probe_scan_types"], apres[CLIENT]["probe_scan_types_default"]) == ([], False)
-    assert env.file.scans == [20], "tout ramené sur la plateforme par Root"
+    assert (apres[CLIENT]["probe_scan_types"], apres[CLIENT]["probe_scan_types_default"]) == (["internal"], False)
+    assert env.file.scans == [20], "l'API ramenée sur la plateforme, l'interne jamais"
 
 
 # ── Découverte d'hôtes sur la sonde ───────────────────────────────────────────

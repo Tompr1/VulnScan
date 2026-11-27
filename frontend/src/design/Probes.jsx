@@ -3,7 +3,7 @@ import { Icons } from "./icons.jsx";
 import { probesApi } from "../api.js";
 import { Modal, useSubmit } from "./Access.jsx";
 import {
-  SCAN_TYPE_LABELS, applianceHostname, canUpdate, clientsWithoutProbe, cloudInitUserData, codeStatus, enrollCommand,
+  SCAN_TYPE_LABELS, allowlistText, applianceHostname, canUpdate, clientsWithoutProbe, cloudInitUserData, codeStatus, enrollCommand,
   codeCounts, eventLabel, imageStatus, isAlarmEvent, probeStatus, seenText, shortBuild, shortImage, toggledScanTypes,
   updateSummary,
 } from "./probesModel.js";
@@ -67,7 +67,8 @@ export function Probes() {
 
   const probes = data?.probes || [];
   const clients = data?.clients || [];
-  const orphans = clientsWithoutProbe(clients, probes);
+  const probeOnly = data?.probe_only_scan_types || [];
+  const orphans = clientsWithoutProbe(clients, probes, probeOnly);
   // After "Check for updates", the result follows the list as it refreshes.
   const liveCheck = check && { platform_build: data?.platform_build ?? check.platform_build, counts: codeCounts(probes) };
 
@@ -192,31 +193,36 @@ export function Probes() {
         <div className="card-head">
           <div>
             <div className="card-title">Where each client's scans run</div>
-            <div className="card-sub">Ticked scan types go to the client's probe; the others run on the platform. With an active probe, internal and API scans go to it by default ("default" below) until you change the list. Host discovery always runs on the probe, and is refused for a client without one. IaC and device inventory always run on the platform.</div>
+            <div className="card-sub">Ticked scan types go to the client's probe; the others run on the platform. Internal network scans and host discovery always run on the probe: they are refused while the client has no probe online. With an active probe, API scans go to it too by default ("default" below) until you change the list. IaC and device inventory always run on the platform. Internal scans may only reach the client's allowed networks.</div>
           </div>
         </div>
         <div className="card-body flush">
           {data === null ? <div className="empty">Loading…</div> : (
             <table className="tbl">
-              <thead><tr><th>Client</th>{(data.delegable_scan_types || []).map(t => <th key={t}>{SCAN_TYPE_LABELS[t] || t}</th>)}<th className="num">Waiting</th></tr></thead>
+              <thead><tr><th>Client</th>{(data.delegable_scan_types || []).map(t => <th key={t}>{SCAN_TYPE_LABELS[t] || t}</th>)}<th>Allowed networks</th><th className="num">Waiting</th></tr></thead>
               <tbody>
                 {clients.map(c => (
                   <tr key={c.id}>
                     <td style={{color: "var(--text-0)", fontWeight: 500}}>
                       {c.name}
-                      {c.probe_scan_types_default && (c.probe_scan_types || []).length > 0 && (
+                      {c.probe_scan_types_default && (c.probe_scan_types || []).some(t => !probeOnly.includes(t)) && (
                         <span className="muted" style={{fontSize: 11, fontWeight: 400, marginLeft: 8}} title="Not chosen yet: the default for a client with an active probe">default</span>
                       )}
                     </td>
-                    {(data.delegable_scan_types || []).map(t => (
-                      <td key={t}>
-                        <label style={{display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer"}}>
-                          <input type="checkbox" checked={(c.probe_scan_types || []).includes(t)} disabled={savingClient === c.id}
-                                 onChange={e => setScanType(c, t, e.target.checked)} aria-label={`${SCAN_TYPE_LABELS[t] || t} scans of ${c.name} on its probe`}/>
-                          <span className="muted" style={{fontSize: 12}}>{(c.probe_scan_types || []).includes(t) ? "probe" : "platform"}</span>
-                        </label>
-                      </td>
-                    ))}
+                    {(data.delegable_scan_types || []).map(t => {
+                      const locked = probeOnly.includes(t);
+                      return (
+                        <td key={t}>
+                          <label style={{display: "inline-flex", gap: 6, alignItems: "center", cursor: locked ? "default" : "pointer"}}
+                                 title={locked ? "Always on the client's probe: from the platform it would reach the platform's network" : undefined}>
+                            <input type="checkbox" checked={locked || (c.probe_scan_types || []).includes(t)} disabled={locked || savingClient === c.id}
+                                   onChange={e => setScanType(c, t, e.target.checked)} aria-label={`${SCAN_TYPE_LABELS[t] || t} scans of ${c.name} on its probe`}/>
+                            <span className="muted" style={{fontSize: 12}}>{locked ? "probe only" : (c.probe_scan_types || []).includes(t) ? "probe" : "platform"}</span>
+                          </label>
+                        </td>
+                      );
+                    })}
+                    <td><AllowlistCell client={c} platformDefault={data.default_allowlist} onSaved={refresh}/></td>
                     <td className="num">{c.waiting_jobs || <span style={{color: "var(--text-4)"}}>0</span>}</td>
                   </tr>
                 ))}
@@ -246,6 +252,49 @@ export function Probes() {
         </ConfirmModal>
       )}
     </>
+  );
+}
+
+/** The networks a client's internal scans may reach, edited in place. */
+function AllowlistCell({ client, platformDefault, onSaved }) {
+  const own = client.allowlist;
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const start = () => { setValue(allowlistText(own)); setError(""); setEditing(true); };
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try { await probesApi.setAllowlist(client.id, value); setEditing(false); setError(""); await onSaved(); }
+    catch (err) { setError(err.message); }
+    finally { setSaving(false); }
+  };
+
+  if (editing) {
+    return (
+      <form onSubmit={save} style={{display: "flex", flexDirection: "column", gap: 4, minWidth: 220}}>
+        <input className="form-input mono" style={{fontSize: 12}} value={value} autoFocus disabled={saving}
+               onChange={e => setValue(e.target.value)} placeholder={allowlistText(platformDefault)}
+               aria-label={`Allowed networks of ${client.name}`}/>
+        <div className="form-help" style={{margin: 0}}>CIDRs, IPs or .domain suffixes, comma separated. Empty: platform default.</div>
+        {error && <div style={{color: "var(--err)", fontSize: 12}}><Icons.AlertTriangle size={12}/> {error}</div>}
+        <div style={{display: "flex", gap: 6}}>
+          <button type="submit" className="btn btn-sm btn-primary" disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+          <button type="button" className="btn btn-sm" onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
+        </div>
+      </form>
+    );
+  }
+  return (
+    <button type="button" className="btn btn-ghost btn-sm" onClick={start} title="Edit the networks this client's internal scans may reach"
+            style={{height: "auto", textAlign: "left", whiteSpace: "normal", justifyContent: "flex-start"}}>
+      {own
+        ? <span className="mono" style={{fontSize: 12}}>{allowlistText(own) || "*"}</span>
+        : <span className="muted" style={{fontSize: 12}}>platform default <span className="mono">({allowlistText(platformDefault)})</span></span>}
+      <Icons.Edit size={12} style={{marginLeft: 6, flexShrink: 0}}/>
+    </button>
   );
 }
 
@@ -282,7 +331,9 @@ function TokenModal({ probe, enrollment, close }) {
   const [caPem, setCaPem] = useState("");
   const [seedError, setSeedError] = useState("");
   const platformUrl = window.location.origin;
-  const command = enrollCommand(platformUrl, enrollment.token);
+  let command = "", commandError = "";
+  try { command = enrollCommand(platformUrl, enrollment.token, localAllowlist); }
+  catch (e) { commandError = e.message; }
   const copy = async () => {
     try { await navigator.clipboard.writeText(command); setCopied(true); } catch { setCopied(false); }
   };
@@ -310,15 +361,21 @@ function TokenModal({ probe, enrollment, close }) {
       </div>
 
       <div>
+        <label className="form-label">Client's own scope limit on this probe (optional)</label>
+        <input className="form-input mono" value={localAllowlist} onChange={e => setLocalAllowlist(e.target.value)}
+               placeholder="192.168.3.0/24,.corp.local"/>
+        <div className="form-help">
+          Stored on the probe, on top of the client's allowed networks (set in the table below). Both installs below include it.
+        </div>
+      </div>
+
+      <div>
         <div className="card-title" style={{fontSize: 13}}>Appliance (VM image)</div>
         <div className="form-help" style={{marginBottom: 8}}>
           Its first-boot configuration (cloud-init): give it to the VM as its user-data, or as a seed ISO
           (<span className="mono">deploy/appliance/tools/make-seed-iso.sh</span>). The VM enrolls and starts by itself.
         </div>
-        <label className="form-label">Client's own scope limit (optional)</label>
-        <input className="form-input mono" value={localAllowlist} onChange={e => setLocalAllowlist(e.target.value)}
-               placeholder="10.0.0.0/8,.corp.local"/>
-        <label className="form-label" style={{marginTop: 8}}>Platform CA certificate (optional, for Caddy's internal CA)</label>
+        <label className="form-label">Platform CA certificate (optional, for Caddy's internal CA)</label>
         <textarea className="form-input mono" rows={3} value={caPem} onChange={e => setCaPem(e.target.value)}
                   placeholder="-----BEGIN CERTIFICATE-----" style={{fontSize: 11}}/>
         {seedError && <div style={{color: "var(--err)", fontSize: 12.5, marginTop: 6}}><Icons.AlertTriangle size={12}/> {seedError}</div>}
@@ -332,9 +389,11 @@ function TokenModal({ probe, enrollment, close }) {
         <div className="form-help" style={{marginBottom: 8}}>
           In <span className="mono">deploy/probe</span> (see its README), run:
         </div>
-        <pre className="mono" style={codeStyle}>{command}</pre>
+        {commandError
+          ? <div style={{color: "var(--err)", fontSize: 12.5}}><Icons.AlertTriangle size={12}/> {commandError}</div>
+          : <pre className="mono" style={codeStyle}>{command}</pre>}
         <div style={{marginTop: 8}}>
-          <button type="button" className="btn btn-sm" onClick={copy}>
+          <button type="button" className="btn btn-sm" onClick={copy} disabled={!command}>
             {copied ? <><Icons.Check size={12}/> Copied</> : <><Icons.Copy size={12}/> Copy</>}
           </button>
         </div>

@@ -35,7 +35,8 @@ def claims(workspace, session_de):
 
 
 @pytest.fixture
-def client(session_factory, workspace, queue, cancellation, claims):
+def client(session_factory, workspace, queue, cancellation, claims, sonde_en_ligne):
+    sonde_en_ligne(1)  # internal scans run on the client's probe only
     app = FastAPI()
     app.include_router(router)
 

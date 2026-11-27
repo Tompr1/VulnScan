@@ -60,3 +60,13 @@ export function assetCounts(assets) {
 
 // How a target is shown: its alias first when it has one.
 export const targetLabel = (t) => (t.name ? `${t.name} (${t.target})` : t.target);
+
+// Scan kinds sent as internal scans: they run on the client's probe only.
+export const NETWORK_SCAN_KINDS = ["network", "iot"];
+
+/** Whether a scan kind cannot be launched now: a network scan while the
+ * client has no probe online. Unknown availability blocks nothing (the
+ * platform refuses the scan itself). */
+export function scanKindBlocked(kind, availability) {
+  return NETWORK_SCAN_KINDS.includes(kind) && availability?.available === false;
+}

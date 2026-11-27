@@ -1,13 +1,14 @@
 """
 Where a client's scans run: on the platform, or on the client's probe.
 
-A client with an active probe runs its internal and API scans on it by
-default; Root can change the list per client (e.g. external scans from the
-probe too, or everything back on the platform). A client without an active
-probe runs everything on the platform, unless Root chose types explicitly
-(the jobs then wait for a probe). Only scans that reach the client's network
-can go to a probe; IaC scans read an uploaded file and inventory jobs read a
-cloud service, so they always run on the platform.
+Internal network scans always run on the client's probe: from the
+platform they would reach the platform's own network, not the client's
+(``app.scan_jobs.network_scope`` refuses them while the client has no probe
+online). A client with an active probe also runs its API scans on it by
+default; Root can change that list per client (e.g. external scans from the
+probe too). Only scans that reach the client's network can go to a probe;
+IaC scans read an uploaded file and inventory jobs read a cloud service, so
+they always run on the platform.
 
 Host discovery is not a scan type: it only ever runs on the client's probe
 (``app.discovery.jobs``).
@@ -26,6 +27,8 @@ DELEGABLE_SCAN_TYPES = (ScanType.INTERNAL, ScanType.EXTERNAL, ScanType.API)
 # External scans stay on the platform by default: they test the client from
 # the Internet, not from inside its network.
 DEFAULT_PROBE_SCAN_TYPES = (ScanType.INTERNAL, ScanType.API)
+# Never run from the platform, whatever Root chose.
+PROBE_ONLY_SCAN_TYPES = (ScanType.INTERNAL,)
 ACTIVE_PROBE = "active"
 
 
@@ -55,11 +58,14 @@ def probe_execution_is_default(db: Session, workspace_id: int) -> bool:
 
 def probe_scan_types(db: Session, workspace_id: int) -> list[str]:
     stored = _stored_scan_types(db, workspace_id)
-    if stored is not None:
-        return stored
-    if has_active_probe(db, workspace_id):
-        return [t.value for t in DEFAULT_PROBE_SCAN_TYPES]
-    return []
+    if stored is None:
+        stored = [t.value for t in DEFAULT_PROBE_SCAN_TYPES] if has_active_probe(db, workspace_id) else []
+    return _with_probe_only(stored)
+
+
+def _with_probe_only(scan_types: list[str]) -> list[str]:
+    chosen = set(scan_types) | {t.value for t in PROBE_ONLY_SCAN_TYPES}
+    return [t.value for t in DELEGABLE_SCAN_TYPES if t.value in chosen]
 
 
 def set_probe_scan_types(db: Session, workspace_id: int, scan_types: list[str]) -> list[str]:
@@ -68,7 +74,7 @@ def set_probe_scan_types(db: Session, workspace_id: int, scan_types: list[str]) 
     refused = sorted(set(scan_types) - set(delegable))
     if refused:
         raise NotDelegableError(f"Scan types that cannot run on a probe: {', '.join(refused)}")
-    chosen = [t for t in delegable if t in set(scan_types)]
+    chosen = _with_probe_only(scan_types)
     set_workspace_setting(db, workspace_id, PROBE_EXECUTION_KEY, {"scan_types": chosen})
     return chosen
 

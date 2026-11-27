@@ -449,7 +449,8 @@ def test_un_asset_peut_referencer_les_objets_de_son_propre_client(client):
     assert {k: modifie.json()[k] for k in references} == references
 
 
-def test_une_planification_peut_utiliser_un_profil_de_son_propre_client(client, db):
+def test_une_planification_peut_utiliser_un_profil_de_son_propre_client(client, db, sonde_en_ligne):
+    sonde_en_ligne(CLIENT)
     reponse = client.post("/scan/schedules", json={"target": "10.0.0.1", "profile_id": V.profil_client})
 
     assert reponse.status_code == 200, reponse.text

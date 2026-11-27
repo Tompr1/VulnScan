@@ -78,3 +78,19 @@ def session_de(db):
         return {"ws": ws, "uid": user.id, "sub": email, "role": role}
 
     return ouvrir
+
+
+@pytest.fixture
+def sonde_en_ligne(db):
+    """Gives a client an enrolled probe heard from just now: its internal
+    scans can be launched (they run on the probe only)."""
+    from datetime import datetime, timezone
+
+    def ajouter(workspace_id: int = 1, last_seen_at: datetime | None = None) -> models.Probe:
+        probe = models.Probe(workspace_id=workspace_id, name=f"sonde-{workspace_id}", status="active",
+                             last_seen_at=last_seen_at or datetime.now(timezone.utc))
+        db.add(probe)
+        db.commit()
+        return probe
+
+    return ajouter

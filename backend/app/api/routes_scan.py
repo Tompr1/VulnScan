@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.job_queue import QueueUnavailableError, ScanJobQueue, get_job_queue
 from app.db import models
 from app.risk.cvss_engine import cvss_baseline_from_severity
+from app.scan_jobs import network_scope
 from app.scan_jobs.submission import (
     AssetNotFoundError,
     JobNotFoundError,
@@ -198,6 +199,20 @@ def update_profile(
 
 # ─── Jobs ──────────────────────────────────────────────────────────────────────
 
+def _refused(exc: network_scope.NetworkScanRefused) -> HTTPException:
+    return HTTPException(409, exc.message)
+
+
+@router.get("/network-availability")
+def network_availability(
+    user=Depends(require_role("admin", "analyst", "viewer")),
+    db: Session = Depends(get_db),
+):
+    """Whether this client can launch an internal network scan now (it runs
+    on the client's probe only), and the networks it may scan."""
+    return network_scope.availability(db, user["ws"], datetime.now(timezone.utc)).to_dict()
+
+
 @router.post("/jobs")
 def create_job(
     body: CreateJobRequest,
@@ -219,6 +234,8 @@ def create_job(
         raise HTTPException(404, "profile not found")
     except AssetNotFoundError:
         raise HTTPException(400, "asset_id does not match a folder in this workspace")
+    except network_scope.NetworkScanRefused as exc:
+        raise _refused(exc) from None
     except QueueUnavailableError as exc:
         raise HTTPException(503, f"Could not enqueue job: {exc}")
 
@@ -514,6 +531,8 @@ def rescan_job(
         new_job = ScanJobSubmission(db, queue).rescan(user["ws"], job_id)
     except JobNotFoundError:
         raise HTTPException(404, "job not found")
+    except network_scope.NetworkScanRefused as exc:
+        raise _refused(exc) from None
     except QueueUnavailableError as exc:
         raise HTTPException(503, f"Could not enqueue rescan: {exc}")
     return {
@@ -616,6 +635,10 @@ def create_schedule(
     )
     if not profile:
         raise HTTPException(404, "profile not found")
+    try:
+        network_scope.check_scan(db, user["ws"], body.scan_type, body.target, datetime.now(timezone.utc))
+    except network_scope.NetworkScanRefused as exc:
+        raise _refused(exc) from None
 
     if body.schedule_type == "custom":
         next_run = body.custom_datetime

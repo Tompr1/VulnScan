@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.job_queue import QueueUnavailableError, ScanJobQueue
 from app.db import models
+from app.scan_jobs import network_scope
 from app.scan_jobs.assignment import INVENTORY_CONNECTION_KEY
 
 logger = logging.getLogger(__name__)
@@ -55,12 +56,14 @@ class ScanJobSubmission:
         """Create and enqueue a scan job.
 
         Raises ProfileNotFoundError / AssetNotFoundError when they are not in
-        the workspace, and QueueUnavailableError when the job could not be
-        queued (the job is then saved as failed).
+        the workspace, NetworkScanRefused for an internal scan the client's
+        probe cannot run now, and QueueUnavailableError when the job could
+        not be queued (the job is then saved as failed).
         """
         self._require_profile(workspace_id, profile_id)
         if asset_id is not None:
             self._require_asset(workspace_id, asset_id)
+        network_scope.check_scan(self._db, workspace_id, scan_type, target, datetime.now(timezone.utc))
         job = models.ScanJob(
             workspace_id=workspace_id,
             target=target,
@@ -99,12 +102,14 @@ class ScanJobSubmission:
         ).first()
         if original is None:
             raise JobNotFoundError(job_id)
+        scan_type = original.scan_type or "internal"
+        network_scope.check_scan(self._db, workspace_id, scan_type, original.target, datetime.now(timezone.utc))
         return self._save_and_enqueue(models.ScanJob(
             workspace_id=workspace_id,
             target=original.target,
             profile_id=original.profile_id,
             status="queued",
-            scan_type=original.scan_type or "internal",
+            scan_type=scan_type,
         ))
 
     def _save_and_enqueue(self, job: models.ScanJob) -> models.ScanJob:

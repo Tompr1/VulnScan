@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Icons, Pip, Risk, Status } from "./icons.jsx";
 import { scanApi, assetsApi, reportsApi, apiScannerApi, credentialsApi, webAuthApi, canEdit } from "../api.js";
-import { assetCounts, isHost, treeRows } from "./assetsModel.js";
+import { assetCounts, isHost, scanKindBlocked, treeRows } from "./assetsModel.js";
 
 export function Assets({ openAsset }) {
   const [view, setView] = useState("grid");
@@ -453,6 +453,19 @@ function NewFolderModal({ assets, close, onCreated }) {
 
 export function NewScanModal({ close, preselectedAsset, initialTarget, onCreated }) {
   const [scanKind, setScanKind] = useState("network");
+  // Network scans run on the client's probe only: greyed out without one online.
+  const [network, setNetwork] = useState(null);
+  useEffect(() => {
+    let live = true;
+    scanApi.networkAvailability()
+      .then(state => {
+        if (!live) return;
+        setNetwork(state);
+        if (!state.available) setScanKind(kind => scanKindBlocked(kind, state) ? "web" : kind);
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
   // Opened from an asset with a single target (a discovered host): pre-fill it.
   const [target, setTarget] = useState(
     initialTarget || (preselectedAsset?.target_list?.length === 1 ? preselectedAsset.target_list[0] : "")
@@ -721,6 +734,7 @@ export function NewScanModal({ close, preselectedAsset, initialTarget, onCreated
 
   const submit = async () => {
     setError("");
+    if (scanKindBlocked(scanKind, network)) { setError(network.message); return; }
 
     // ── API scan → dedicated endpoint ─────────────────────────────
     if (scanKind === "api") {
@@ -866,10 +880,13 @@ export function NewScanModal({ close, preselectedAsset, initialTarget, onCreated
             <div style={{display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6}}>
               {SCAN_KINDS.map(k => {
                 const I = k.icon; const active = scanKind === k.id;
+                const blocked = scanKindBlocked(k.id, network);
                 return (
-                  <button key={k.id} onClick={() => setScanKind(k.id)}
+                  <button key={k.id} type="button" onClick={() => setScanKind(k.id)} disabled={blocked}
+                          title={blocked ? network.message : undefined}
                           className={`btn ${active ? "btn-primary" : ""}`}
-                          style={{flexDirection: "column", height: "auto", padding: "10px 4px", gap: 4, alignItems: "center", justifyContent: "center"}}>
+                          style={{flexDirection: "column", height: "auto", padding: "10px 4px", gap: 4, alignItems: "center", justifyContent: "center",
+                                  opacity: blocked ? 0.45 : 1, cursor: blocked ? "not-allowed" : "pointer"}}>
                     {I && <I size={16}/>}
                     <div style={{fontSize: 12, fontWeight: 600}}>{k.label}</div>
                   </button>
@@ -877,6 +894,11 @@ export function NewScanModal({ close, preselectedAsset, initialTarget, onCreated
               })}
             </div>
             <div className="form-help">{activeKind.desc}</div>
+            {network && !network.available && (
+              <div className="form-help" style={{color: "var(--sev-high)", marginTop: 6}}>
+                <Icons.AlertTriangle size={12}/> {network.message} Network and IoT scans are unavailable.
+              </div>
+            )}
           </div>
 
           {scanKind === "api" ? (
@@ -1042,6 +1064,9 @@ export function NewScanModal({ close, preselectedAsset, initialTarget, onCreated
                      value={target} onChange={e => setTarget(e.target.value)} autoFocus/>
               <div className="form-help">
                 {scanKind === "network" && "Hostname, IP, CIDR range, or comma-separated list"}
+                {(scanKind === "network" || scanKind === "iot") && network?.allowlist && (
+                  <> · Allowed networks: <span className="mono">{network.allowlist}</span></>
+                )}
                 {scanKind === "web"     && "Full URL including scheme. Login flow can be configured under Authentication"}
                 {scanKind === "iot"     && "Broker URI or gateway address. Supports MQTT, CoAP, AMQP"}
                 {scanKind === "cloud"   && "Cloud account identifier — credential needed to enumerate resources"}

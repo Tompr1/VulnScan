@@ -1,6 +1,6 @@
 import pytest
 
-from app.scanner.allowlist import AllowlistPolicy
+from app.scanner.allowlist import AllowlistPolicy, parse_entries
 from app.scanner.target import ScanTarget, ScanType
 
 
@@ -69,3 +69,48 @@ def test_une_plage_a_decouvrir_doit_tenir_dans_une_entree_de_l_allowlist(setting
     import ipaddress
 
     assert AllowlistPolicy.from_setting(setting).allows_network(ipaddress.ip_network(network)) is allowed
+
+
+# ── Une cible telle que saisie ────────────────────────────────────────────
+
+def allows_target(setting: str, raw: str, scan_type: ScanType = ScanType.INTERNAL) -> bool:
+    return AllowlistPolicy.from_setting(setting).allows_target(raw, scan_type)
+
+
+def test_une_plage_doit_tenir_entierement_dans_un_reseau_autorise():
+    assert allows_target("192.168.3.0/24", "192.168.3.0/24")
+    assert allows_target("192.168.3.0/24", "192.168.3.128/25")
+    assert not allows_target("192.168.3.0/24", "192.168.2.0/24")
+    assert not allows_target("192.168.3.0/25", "192.168.3.0/24"), "seule sa première adresse est autorisée, pas la plage"
+
+
+def test_chaque_entree_d_une_liste_doit_etre_autorisee():
+    assert allows_target("192.168.3.0/24", "192.168.3.1, 192.168.3.2")
+    assert not allows_target("192.168.3.0/24", "192.168.3.1,192.168.2.1")
+
+
+def test_une_url_ou_un_hote_avec_port_est_juge_sur_son_hote():
+    assert allows_target("192.168.3.0/24", "http://192.168.3.7:8080/admin")
+    assert allows_target(".corp.local", "nas.corp.local:445")
+    assert not allows_target("192.168.3.0/24", "http://192.168.2.7/")
+
+
+def test_une_cible_externe_n_est_jamais_limitee():
+    assert allows_target("192.168.3.0/24", "203.0.113.0/24", ScanType.EXTERNAL)
+
+
+# ── Entrées saisies par un admin ────────────────────────────────────────────────
+
+def test_les_entrees_sont_separees_par_virgules_et_espaces():
+    assert parse_entries(" 192.168.3.0/24, 10.0.0.1  .Corp.Local nas.lan ") == [
+        "192.168.3.0/24", "10.0.0.1", ".corp.local", "nas.lan"]
+
+
+@pytest.mark.parametrize("raw", ["192.168.3.0/33", "300.1.1.1/24", "bad entry!", "*,10.0.0.0/8", "a/b"])
+def test_une_entree_inutilisable_est_refusee(raw):
+    with pytest.raises(ValueError):
+        parse_entries(raw)
+
+
+def test_une_etoile_seule_autorise_tout():
+    assert parse_entries("*") == ["*"]
