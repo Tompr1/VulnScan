@@ -486,6 +486,52 @@ function AddHostsModal({ hosts, close, onDone }) {
   const [creds, setCreds] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // Inline creation: null = closed, otherwise the form's draft values.
+  const [newFolder, setNewFolder] = useState(null);
+  const [newCred, setNewCred] = useState(null);
+  const [creating, setCreating] = useState(false);
+
+  const createFolder = async () => {
+    if (!newFolder.name.trim()) return;
+    setCreating(true);
+    setError("");
+    try {
+      const folder = await assetsApi.create({ name: newFolder.name.trim() });
+      setFolders(fs => [...fs, folder]);
+      setNewFolder(null);
+    } catch (err) {
+      setError(err.message || "Could not create the folder");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const createCred = async () => {
+    const { name, username, secret_type, secret, passphrase } = newCred;
+    if (!name.trim() || !username.trim() || !secret.trim()) {
+      setError("Credential needs a name, a username and a secret");
+      return;
+    }
+    setCreating(true);
+    setError("");
+    try {
+      const body = {
+        name: name.trim(),
+        kind: "ssh",
+        username: username.trim(),
+        secret_type,
+        secret,
+        passphrase: passphrase || null,
+      };
+      const { id } = await credentialsApi.create(body);
+      setCreds(cs => [...cs, { id, name: body.name, kind: body.kind, username: body.username, secret_type }]);
+      setNewCred(null);
+    } catch (err) {
+      setError(err.message || "Could not create the credential");
+    } finally {
+      setCreating(false);
+    }
+  };
 
   useEffect(() => {
     Promise.all([assetsApi.list(), credentialsApi.list()])
@@ -498,6 +544,8 @@ function AddHostsModal({ hosts, close, onDone }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    // Enter inside an inline folder/credential form must not create the assets.
+    if (newFolder || newCred) return;
     setSubmitting(true);
     setError("");
     try {
@@ -529,6 +577,79 @@ function AddHostsModal({ hosts, close, onDone }) {
             style={{ marginLeft: "auto" }}><Icons.X size={14}/></button>
         </div>
         <form onSubmit={submit} style={{ padding: "16px 24px 20px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "70vh", overflowY: "auto" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="btn" disabled={submitting || !!newFolder}
+              onClick={() => setNewFolder({ name: "" })}>
+              <Icons.Plus size={12}/> New folder
+            </button>
+            <button type="button" className="btn" disabled={submitting || !!newCred}
+              onClick={() => setNewCred({ name: "", username: "", secret_type: "password", secret: "", passphrase: "" })}>
+              <Icons.Plus size={12}/> New credential
+            </button>
+          </div>
+
+          {newFolder && (
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", padding: 12, background: "var(--surface-1)", borderRadius: 6 }}>
+              <div style={{ flex: 1 }}>
+                <label className="form-label">New folder name</label>
+                <input className="form-input" autoFocus value={newFolder.name}
+                  onChange={e => setNewFolder({ name: e.target.value })}
+                  placeholder="e.g. Lab · Printers"/>
+              </div>
+              <button type="button" className="btn" disabled={creating} onClick={() => setNewFolder(null)}>Cancel</button>
+              <button type="button" className="btn btn-primary" disabled={creating || !newFolder.name.trim()} onClick={createFolder}>
+                {creating ? "Creating…" : "Create folder"}
+              </button>
+            </div>
+          )}
+
+          {newCred && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 12, background: "var(--surface-1)", borderRadius: 6 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label className="form-label">Name</label>
+                  <input className="form-input" autoFocus value={newCred.name}
+                    onChange={e => setNewCred({ ...newCred, name: e.target.value })} placeholder="e.g. lab-root"/>
+                </div>
+                <div>
+                  <label className="form-label">Username</label>
+                  <input className="form-input" value={newCred.username}
+                    onChange={e => setNewCred({ ...newCred, username: e.target.value })} placeholder="root"/>
+                </div>
+                <div>
+                  <label className="form-label">Secret type</label>
+                  <select className="form-input" value={newCred.secret_type}
+                    onChange={e => setNewCred({ ...newCred, secret_type: e.target.value })}>
+                    <option value="password">Password</option>
+                    <option value="SSH_KEY">SSH private key</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Passphrase (optional)</label>
+                  <input className="form-input" type="password" value={newCred.passphrase}
+                    onChange={e => setNewCred({ ...newCred, passphrase: e.target.value })}/>
+                </div>
+              </div>
+              <div>
+                <label className="form-label">{newCred.secret_type === "SSH_KEY" ? "Private key" : "Password"}</label>
+                {newCred.secret_type === "SSH_KEY" ? (
+                  <textarea className="form-input" rows={4} value={newCred.secret}
+                    onChange={e => setNewCred({ ...newCred, secret: e.target.value })}
+                    style={{ height: "auto", padding: "8px 12px", fontFamily: "var(--font-mono)" }}/>
+                ) : (
+                  <input className="form-input" type="password" value={newCred.secret}
+                    onChange={e => setNewCred({ ...newCred, secret: e.target.value })}/>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button type="button" className="btn" disabled={creating} onClick={() => setNewCred(null)}>Cancel</button>
+                <button type="button" className="btn btn-primary" disabled={creating} onClick={createCred}>
+                  {creating ? "Creating…" : "Create credential"}
+                </button>
+              </div>
+            </div>
+          )}
+
           {rows.map((r, i) => (
             <div key={r.ip} style={{
               display: "grid", gridTemplateColumns: "minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr)", gap: 10,
