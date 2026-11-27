@@ -66,6 +66,11 @@ discoveries run there; the platform never probes a client's network for a
 discovery itself (see `deploy/probe/README.md`). Settings: `DISCOVERY_BUDGET_SECONDS`
 and `DISCOVERY_UNCLAIMED_AFTER_SECONDS` in `.env`.
 
+Each deploy writes the deployed commit to `data/platform-build`: **Root › Scan
+probes › Check for updates** compares every probe installed from the source
+with it, and **Update** asks a probe's updater to move to it
+(`deploy/probe/README.md`, *Update*).
+
 ## Firewall
 
 Open 443 (and 80 for Let's Encrypt and the HTTP → HTTPS redirect). Nothing

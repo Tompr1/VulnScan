@@ -1,0 +1,112 @@
+#!/bin/bash
+# v0cday-probe-source-update — updates a probe installed from the source
+# (deploy/probe) when Root asks for it (Root > Scan probes > Update).
+# Run every minute by v0cday-probe-source-update.timer, as the user who owns
+# the repository (install-updater.sh sets it up).
+#
+#   1. ask the platform, with the probe's own credential, whether an update
+#      was asked; it answers with the platform's commit, or nothing;
+#   2. trust it: only a commit of the branch this clone follows, as published
+#      on its remote (origin) — a compromised platform cannot make the probe
+#      build code that is not on that branch;
+#   3. check it out, rebuild the image, restart the probe and check it can
+#      reach the platform; otherwise go back to the previous commit and image;
+#   4. tell the platform: running, then done or failed (with the reason).
+#
+# Env: V0CDAY_UPDATE_BRANCH (default: main), V0CDAY_REPO_DIR (default: the
+# clone this script is in), V0CDAY_HEALTH_TRIES / V0CDAY_HEALTH_DELAY.
+#
+# Exit codes: 0 nothing to do or updated; 1 update failed (rolled back).
+set -euo pipefail
+
+main() {
+  local here repo probe_dir branch lock target previous
+  here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  repo="${V0CDAY_REPO_DIR:-$(cd "$here/../../.." && pwd)}"
+  probe_dir="$repo/deploy/probe"
+  branch="${V0CDAY_UPDATE_BRANCH:-main}"
+  HEALTH_TRIES="${V0CDAY_HEALTH_TRIES:-6}"
+  HEALTH_DELAY="${V0CDAY_HEALTH_DELAY:-10}"
+  cd "$probe_dir"
+
+  if [ ! -e config/probe.json ]; then
+    exit 0  # not enrolled yet
+  fi
+  lock="$probe_dir/.update.lock"
+  if ! mkdir "$lock" 2>/dev/null; then
+    log "another update is running"
+    exit 0
+  fi
+  trap 'rmdir "'"$lock"'"' EXIT
+
+  # 1. Asked?
+  if ! target=$(docker compose run --rm -T probe update-target </dev/null 2>/dev/null | tail -n 1 | tr -d '\r'); then
+    log "cannot ask the platform (unreachable, or this probe's version has no update-target command)"
+    exit 0
+  fi
+  [ -n "$target" ] || exit 0
+  if ! [[ "$target" =~ ^[0-9a-f]{40}$ ]]; then
+    fail "the platform asked for '$target', which is not a full commit id"
+  fi
+  report running "Fetching ${target:0:12} from $(git -C "$repo" remote get-url origin 2>/dev/null || echo origin)"
+  log "update to $target asked"
+
+  # 2. Trust.
+  if [ -n "$(git -C "$repo" status --porcelain --untracked-files=no)" ]; then
+    fail "the clone in $repo has local changes: commit or discard them, then ask again"
+  fi
+  git -C "$repo" fetch --quiet origin "$branch" || fail "cannot fetch $branch from origin (network to the repository?)"
+  git -C "$repo" cat-file -e "$target^{commit}" 2>/dev/null || fail "commit ${target:0:12} is not in the repository"
+  git -C "$repo" merge-base --is-ancestor "$target" "origin/$branch" \
+    || fail "commit ${target:0:12} is not on origin/$branch: refused"
+
+  # 3. Switch, build, check; roll back on failure.
+  previous=$(git -C "$repo" rev-parse HEAD)
+  docker image tag v0cday-probe:latest v0cday-probe:previous 2>/dev/null || true
+  git -C "$repo" checkout --quiet -B "$branch" "$target"
+  if ! V0CDAY_BUILD="$target" docker compose build probe; then
+    git -C "$repo" checkout --quiet -B "$branch" "$previous"
+    fail "the image of ${target:0:12} did not build; the probe keeps running ${previous:0:12}"
+  fi
+  docker compose up -d probe
+  if healthy; then
+    log "now running $target"
+    report done "Now runs ${target:0:12} (was ${previous:0:12})"
+    exit 0
+  fi
+  log "$target does not come up: back to $previous"
+  git -C "$repo" checkout --quiet -B "$branch" "$previous"
+  docker image tag v0cday-probe:previous v0cday-probe:latest 2>/dev/null || true
+  docker compose up -d probe
+  fail "${target:0:12} did not come up (cannot reach the platform): back to ${previous:0:12}"
+}
+
+log() { echo "v0cday-probe-source-update: $*"; }
+
+report() {
+  docker compose run --rm -T probe update-report --status "$1" --detail "$2" </dev/null >/dev/null 2>&1 \
+    || log "could not tell the platform: $1 $2"
+}
+
+fail() {
+  log "failed: $*"
+  report failed "$*"
+  exit 1
+}
+
+healthy() {
+  local try=1
+  while [ "$try" -le "$HEALTH_TRIES" ]; do
+    if [ -n "$(docker compose ps --status running -q probe 2>/dev/null)" ] \
+       && docker compose run --rm -T probe status </dev/null >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "$HEALTH_DELAY"
+    try=$((try + 1))
+  done
+  return 1
+}
+
+# Everything runs from main, read in full before it starts: a checkout that
+# rewrites this file mid-run cannot change what runs.
+main "$@"

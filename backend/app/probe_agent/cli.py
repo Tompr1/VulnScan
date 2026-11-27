@@ -5,6 +5,8 @@ The ``v0cday-probe`` command.
     v0cday-probe run
     v0cday-probe status
     v0cday-probe desired-image    (for the appliance's updater)
+    v0cday-probe update-target    (for the source install's updater)
+    v0cday-probe update-report --status running|done|failed [--detail TEXT]
 
 Exit codes: 0 ok, 1 error, 2 the platform rejects this probe (revoked, or
 enrolled again elsewhere): enroll it again with a new token from Root.
@@ -15,6 +17,7 @@ import argparse
 import asyncio
 import logging
 import os
+import re
 import signal
 import socket
 import sys
@@ -74,12 +77,18 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--once", action="store_true", help="run at most one job, then exit")
     commands.add_parser("status", help="check the configuration and the connection to the platform")
     commands.add_parser("desired-image", help="print the probe image the platform asks for (empty: keep the current one)")
+    commands.add_parser("update-target",
+                        help="print the commit Root asked this probe to move to (empty: no update asked)")
+    update_report = commands.add_parser("update-report", help="tell the platform where the update Root asked for stands")
+    update_report.add_argument("--status", required=True, choices=["running", "done", "failed"])
+    update_report.add_argument("--detail", default=None)
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     try:
-        return {"enroll": _enroll, "run": _run, "status": _status, "desired-image": _desired_image}[args.command](args)
+        return {"enroll": _enroll, "run": _run, "status": _status, "desired-image": _desired_image,
+                "update-target": _update_target, "update-report": _update_report}[args.command](args)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -160,12 +169,36 @@ def _desired_image(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _update_target(args: argparse.Namespace) -> int:
+    """Prints only the commit (or nothing), for the updater script."""
+    config = ProbeConfig.load(args.config)
+    with _http(config) as http:
+        answer = _client(http, config, args.config).heartbeat(socket.gethostname())
+    print(answer.get("update_target") or "")
+    return EXIT_OK
+
+
+def _update_report(args: argparse.Namespace) -> int:
+    config = ProbeConfig.load(args.config)
+    with _http(config) as http:
+        _client(http, config, args.config).update_report(args.status, args.detail)
+    return EXIT_OK
+
+
 def _client(http, config: ProbeConfig, config_path: Path) -> PlatformClient:
     """The probe's client, telling the platform which image and appliance
-    version it runs (set by the appliance; absent on a plain Docker install)."""
+    version it runs (set by the appliance; absent on a plain Docker install)
+    and which commit its image was built from (installs from the source)."""
     return PlatformClient(http, config.authorization, settings.PLATFORM_VERSION,
                           image=os.environ.get("V0CDAY_PROBE_IMAGE") or None,
-                          appliance_version=_appliance_version(config_path))
+                          appliance_version=_appliance_version(config_path),
+                          build=build_of_image())
+
+
+def build_of_image() -> str | None:
+    """The commit the image was built from (V0CDAY_BUILD), when it is one."""
+    value = (os.environ.get("V0CDAY_BUILD") or "").strip().lower()
+    return value if re.fullmatch(r"[0-9a-f]{7,40}", value) else None
 
 
 def _appliance_version(config_path: Path) -> str | None:

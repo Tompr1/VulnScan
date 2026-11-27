@@ -24,6 +24,7 @@ from app.scan_jobs.assignment import ScanAssignment, ScanReport
 
 API = "/probe/v1"
 VERSION_HEADER = "X-Probe-Version"
+BUILD_HEADER = "X-Probe-Build"
 # Above the longest wait the platform allows on /jobs/next (30 s).
 _LONG_POLL_MARGIN = 15.0
 _PRODUCTS_PER_LOOKUP = 5000
@@ -75,12 +76,13 @@ def open_http(base_url: str, ca_bundle: str | None = None, client_cert: str | No
 
 class PlatformClient:
     def __init__(self, http: httpx.Client, authorization: str | None, version: str,
-                 image: str | None = None, appliance_version: str | None = None) -> None:
+                 image: str | None = None, appliance_version: str | None = None, build: str | None = None) -> None:
         self._http = http
         self._authorization = authorization
         self._version = version
         self._image = image
         self._appliance_version = appliance_version
+        self._build = build
 
     # ── Identity ─────────────────────────────────────────────────────────
 
@@ -92,8 +94,13 @@ class PlatformClient:
     def heartbeat(self, hostname: str | None = None) -> dict[str, Any]:
         return self._call("POST", "/heartbeat", json={
             "hostname": hostname, "version": self._version,
-            "image": self._image, "appliance_version": self._appliance_version,
+            "image": self._image, "appliance_version": self._appliance_version, "build": self._build,
         })
+
+    def update_report(self, status: str, detail: str | None = None) -> None:
+        """Tells the platform where the update Root asked for stands
+        (running, done, failed)."""
+        self._call("POST", "/update-report", json={"status": status, "detail": detail})
 
     # ── Jobs ─────────────────────────────────────────────────────────────
 
@@ -154,6 +161,8 @@ class PlatformClient:
     def _send(self, method: str, path: str, authenticated: bool = True, headers: dict[str, str] | None = None,
               **kwargs: Any) -> httpx.Response:
         all_headers = {VERSION_HEADER: self._version, **(headers or {})}
+        if self._build:
+            all_headers[BUILD_HEADER] = self._build
         if authenticated and self._authorization:
             all_headers["Authorization"] = self._authorization
         try:

@@ -8,6 +8,9 @@ services:
     build:
       context: ../../backend
       dockerfile: Dockerfile.probe
+      args:
+        # The commit built (the updater sets it); shown in Root.
+        V0CDAY_BUILD: ${V0CDAY_BUILD:-}
     image: v0cday-probe:latest
     restart: unless-stopped
     # The scanners must reach the client's network as the VM does, and nmap

@@ -90,15 +90,63 @@ every probe silently are not seen.
 
 ## Update
 
+A probe should run the same code as the platform. Two ways to get there.
+
+### From Root (recommended)
+
+Install the probe's updater once, on the VM, from the clone (it must belong
+to the user who runs the probe, in the docker group):
+
 ```sh
-git pull && docker compose build && docker compose up -d
+cd ~/VulnScan
+git pull && V0CDAY_BUILD=$(git rev-parse HEAD) docker compose -f deploy/probe/docker-compose.yml build
+docker compose -f deploy/probe/docker-compose.yml up -d
+sudo deploy/probe/updater/install-updater.sh
 ```
+
+The first two commands bring the probe to a version that reports its code
+(`V0CDAY_BUILD`) and understands update requests; a probe built before that
+shows *code not reported* in Root and must be updated by hand this once.
+
+Then, in **Root › Scan probes**:
+
+1. **Check for updates** compares each probe's code (the commit its image was
+   built from) with the platform's (the commit `scripts/deploy.sh` deployed);
+2. **Update** on a probe (or **Update N** for all those behind) asks it to
+   move to the platform's commit;
+3. within a minute the updater (`v0cday-probe-source-update.timer`, every
+   minute, as the clone's owner) sees the request, fetches the branch the clone
+   follows from `origin`, checks that the commit is **on that branch** (a
+   compromised platform cannot make the probe build anything else), rebuilds
+   the image (10 to 20 min), restarts the probe and checks it reaches the
+   platform. If the build fails or the new version does not come up, it goes
+   back to the previous commit and image;
+4. Root shows *update asked*, *updating…* (with what the updater is doing),
+   then *code up to date*, or *update failed* with the reason; every step is in
+   the probe's history.
+
+The VM needs outbound access to the repository (GitHub) and to what the build
+downloads (Debian, PyPI, Docker Hub, GitHub releases) during an update. A
+clone with local changes is not updated (the updater says so). Logs:
+`journalctl -u v0cday-probe-source-update`. A request no updater takes within
+10 minutes (`PROBE_UPDATE_PICKUP_SECONDS`) fails with a hint to install it;
+an update not finished within an hour (`PROBE_UPDATE_RUN_SECONDS`) fails too.
+Remove the updater with `sudo deploy/probe/updater/install-updater.sh --uninstall`.
+
+### By hand
+
+```sh
+git pull && V0CDAY_BUILD=$(git rev-parse HEAD) docker compose build && docker compose up -d
+```
+
+(`V0CDAY_BUILD` is optional: without it the probe works, but Root cannot tell
+whether its code is current.)
 
 Host discovery needs a probe built from this version or later: an older probe
 keeps running scans but never takes a discovery, which then fails after 30 min
 (`DISCOVERY_UNCLAIMED_AFTER_SECONDS`) with a message asking to check the probe.
-Appliances update themselves when the platform publishes a new `PROBE_IMAGE`
-(`deploy/appliance/README.md`).
+Appliances are not updated from Root: they update themselves when the platform
+publishes a new `PROBE_IMAGE` (`deploy/appliance/README.md`).
 
 ## Revocation, reinstallation
 

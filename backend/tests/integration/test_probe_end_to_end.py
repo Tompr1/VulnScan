@@ -296,3 +296,32 @@ def test_une_decouverte_lancee_par_un_client_tourne_sur_sa_sonde(plateforme, ses
     assert (fini.status, fini.probed, fini.probe_id) == ("done", 254, config.probe_id)
     assert [h["ip"] for h in json.loads(fini.hosts_json)] == ["10.1.2.7", "10.1.2.40"]
     assert ReportOutbox(tmp_path / "outbox").pending() == []
+
+
+def test_l_updater_de_la_sonde_lit_la_demande_de_root_et_rend_compte(plateforme, db, tmp_path, monkeypatch, capsys):
+    app, _ = plateforme
+    admin = TestClient(app, base_url=PLATFORM)
+    monkeypatch.setattr(cli, "open_http", lambda *args, **kwargs: TestClient(app, base_url=PLATFORM))
+    monkeypatch.setattr(settings, "PLATFORM_BUILD", "c" * 40)
+    monkeypatch.setenv("V0CDAY_BUILD", "d" * 40)  # l'image en place a été construite depuis un autre commit
+    config_path = tmp_path / "probe.json"
+    created = admin.post("/probes", json={"workspace_id": CLIENT, "name": "Paris"}).json()
+    assert cli.main(["--config", str(config_path), "enroll", "--platform", PLATFORM,
+                     "--token", created["enrollment"]["token"]]) == 0
+    capsys.readouterr()
+
+    # Rien n'est demandé : la commande n'imprime rien.
+    assert cli.main(["--config", str(config_path), "update-target"]) == 0
+    assert capsys.readouterr().out.strip() == ""
+
+    # Root voit le commit de la sonde, et lui demande de se mettre à jour.
+    ligne = next(p for p in admin.get("/probes").json()["probes"] if p["id"] == created["id"])
+    assert (ligne["build"], ligne["code_status"]) == ("d" * 40, "outdated")
+    assert admin.post(f"/probes/{created['id']}/update").status_code == 200
+
+    assert cli.main(["--config", str(config_path), "update-target"]) == 0
+    assert capsys.readouterr().out.strip() == "c" * 40
+    assert cli.main(["--config", str(config_path), "update-report", "--status", "failed", "--detail", "no network"]) == 0
+
+    ligne = next(p for p in admin.get("/probes").json()["probes"] if p["id"] == created["id"])
+    assert (ligne["update_status"], ligne["update_detail"]) == ("failed", "no network")

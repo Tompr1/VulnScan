@@ -120,6 +120,62 @@ export function imageStatus(status) {
   return IMAGE_STATUS[status] || IMAGE_STATUS.unknown;
 }
 
+// ── Updates of probes installed from the source ──────────────────────────────
+
+/** "a1b2c3d4e5…" → "a1b2c3d". */
+export function shortBuild(build) {
+  return build ? String(build).slice(0, 7) : "";
+}
+
+/** The probe's code next to the platform's (code_status from the API),
+ * with the last update asked from Root. Appliances follow their image. */
+export function codeStatus(probe) {
+  if (!probe || probe.code_status === "appliance") return { label: "", pill: "" };
+  if (probe.update_status === "requested") return { label: "update asked", pill: "running" };
+  if (probe.update_status === "running") return { label: "updating…", pill: "running" };
+  if (probe.code_status === "current") return { label: "code up to date", pill: "done" };
+  if (probe.update_status === "failed") return { label: "update failed", pill: "failed" };
+  if (probe.code_status === "outdated") return { label: "update available", pill: "queued" };
+  return { label: "code not reported", pill: "queued" };
+}
+
+/** Whether Root can ask this probe to update: an enrolled probe installed
+ * from the source, whose code is not the platform's, with no update going. */
+export function canUpdate(probe, platformBuild) {
+  if (!probe || !platformBuild) return false;
+  if (probe.status !== "online" && probe.status !== "offline") return false;
+  if (probe.update_status === "requested" || probe.update_status === "running") return false;
+  return probe.code_status === "outdated" || probe.code_status === "unknown";
+}
+
+/** code_status counts of the enrolled probes, as GET /probes/updates gives
+ * them, from the probe list (kept live by the page's refresh). */
+export function codeCounts(probes) {
+  const counts = {};
+  for (const p of probes || []) {
+    if (p.status !== "online" && p.status !== "offline") continue;
+    counts[p.code_status] = (counts[p.code_status] || 0) + 1;
+  }
+  return counts;
+}
+
+/** One line for the "Check for updates" result. */
+export function updateSummary(check) {
+  if (!check) return "";
+  if (!check.platform_build) {
+    return "The platform does not know which commit it runs (deploy it with scripts/deploy.sh, or set PLATFORM_BUILD): probes cannot be compared.";
+  }
+  const counts = check.counts || {};
+  const parts = [];
+  if (counts.outdated) parts.push(`${counts.outdated} can be updated`);
+  if (counts.updating) parts.push(`${counts.updating} updating`);
+  if (counts.current) parts.push(`${counts.current} up to date`);
+  if (counts.unknown) parts.push(`${counts.unknown} not reporting their code (too old: update them by hand once)`);
+  if (counts.appliance) parts.push(`${counts.appliance} appliance${counts.appliance > 1 ? "s" : ""} (update${counts.appliance > 1 ? "" : "s"} itself from PROBE_IMAGE)`);
+  const head = `Platform code ${shortBuild(check.platform_build)}`;
+  return parts.length ? `${head}: ${parts.join(", ")}.` : `${head}: no enrolled probe.`;
+}
+
 /** "registry/v0cday-probe@sha256:abcdef…" → "v0cday-probe@abcdef123456". */
 export function shortImage(reference) {
   if (!reference) return "";
@@ -139,6 +195,10 @@ const EVENT_LABELS = {
   image_changed: "Image changed",
   offline: "Went offline",
   online: "Back online",
+  update_requested: "Update asked",
+  update_started: "Update started",
+  update_done: "Updated",
+  update_failed: "Update failed",
 };
 
 export function eventLabel(kind) {
@@ -147,7 +207,7 @@ export function eventLabel(kind) {
 
 /** Events that need attention, shown in red. */
 export function isAlarmEvent(kind) {
-  return kind === "offline" || kind === "revoked" || kind === "job_refused";
+  return kind === "offline" || kind === "revoked" || kind === "job_refused" || kind === "update_failed";
 }
 
 /** Counts for the Root overview: online, offline, pending enrollment. */

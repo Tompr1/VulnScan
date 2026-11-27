@@ -39,7 +39,7 @@ from app.cve.sql_catalog import SqlCveCatalog, SqlSyncStateStore
 from app.db import models
 from app.discovery import jobs as discoveries
 from app.discovery.assignment import DiscoveryAssignment
-from app.probes import events
+from app.probes import events, updates
 from app.probes.placement import PROBE
 from app.probes.registry import ProbeRegistry
 from app.scan_jobs.assigner import JobAssigner, JobNotReady
@@ -120,21 +120,37 @@ class ProbeGateway:
             logger.info("Probe #%d (%s) of client #%d enrolled from %s", probe.id, probe.name, probe.workspace_id, ip)
             return _identity(probe), secret
 
-    def authenticate(self, authorization: str | None, ip: str, version: str | None = None) -> ProbeIdentity | None:
+    def authenticate(self, authorization: str | None, ip: str, version: str | None = None,
+                     build: str | None = None) -> ProbeIdentity | None:
         with self._session_factory() as db:
             registry = self._registry(db)
             probe = registry.authenticate(authorization)
             if probe is None:
                 return None
-            registry.seen(probe, self._clock(), ip, version=version)
+            registry.seen(probe, self._clock(), ip, version=version, build=build)
             return _identity(probe)
 
     def heartbeat(self, probe: ProbeIdentity, ip: str, hostname: str | None, version: str | None,
-                  image: str | None = None, appliance_version: str | None = None) -> None:
+                  image: str | None = None, appliance_version: str | None = None,
+                  build: str | None = None) -> str | None:
+        """Records what the probe says about itself; returns the commit its
+        updater should move to, when Root asked for an update."""
         with self._session_factory() as db:
             row = db.get(models.Probe, probe.id)
-            if row is not None:
-                self._registry(db).seen(row, self._clock(), ip, hostname, version, image, appliance_version)
+            if row is None:
+                return None
+            self._registry(db).seen(row, self._clock(), ip, hostname, version, image, appliance_version, build)
+            return updates.target_for(row)
+
+    def update_report(self, probe: ProbeIdentity, status: str, detail: str | None) -> None:
+        """What the probe's updater says. Raises
+        :class:`app.probes.updates.NoUpdatePending` and
+        :class:`app.probes.updates.InvalidUpdateReport`."""
+        with self._session_factory() as db:
+            row = db.get(models.Probe, probe.id)
+            if row is None:
+                raise updates.NoUpdatePending(probe.id)
+            updates.report(db, row, status, detail, self._clock())
 
     # ── Jobs ─────────────────────────────────────────────────────────────
 

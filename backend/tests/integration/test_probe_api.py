@@ -503,3 +503,146 @@ def test_supprimer_une_sonde_garde_ses_decouvertes(env):
     env.db.expire_all()
     job = env.db.get(models.DiscoveryJob, decouverte)
     assert (job.status, job.probe_id) == ("failed", None)
+
+
+# ── Mises à jour des sondes installées depuis les sources ─────────────────────
+
+COMMIT_PLATEFORME = "a" * 40
+COMMIT_ANCIEN = "b" * 40
+
+
+@pytest.fixture
+def plateforme_deployee(monkeypatch):
+    monkeypatch.setattr(settings, "PLATFORM_BUILD", COMMIT_PLATEFORME)
+
+
+def _sonde_sur(env, commit=COMMIT_ANCIEN):
+    probe_id, sonde = env.sonde_enrolee()
+    sonde = {**sonde, "X-Probe-Build": commit}
+    env.https.post("/probe/v1/heartbeat", json={}, headers=sonde)
+    return probe_id, sonde
+
+
+def _ligne(env, probe_id):
+    return next(p for p in env.https.get("/probes").json()["probes"] if p["id"] == probe_id)
+
+
+def test_root_voit_si_le_code_d_une_sonde_est_celui_de_la_plateforme(env, plateforme_deployee):
+    ancienne, _ = _sonde_sur(env, COMMIT_ANCIEN)
+
+    verif = env.https.get("/probes/updates").json()
+
+    assert verif["platform_build"] == COMMIT_PLATEFORME
+    assert [(p["id"], p["build"], p["code_status"]) for p in verif["probes"]] == [(ancienne, COMMIT_ANCIEN, "outdated")]
+    assert verif["counts"] == {"outdated": 1}
+
+
+def test_une_mise_a_jour_demandee_part_vers_la_sonde_puis_se_termine(env, plateforme_deployee):
+    probe_id, sonde = _sonde_sur(env)
+
+    demande = env.https.post(f"/probes/{probe_id}/update")
+    cible = env.https.post("/probe/v1/heartbeat", json={}, headers=sonde).json()["update_target"]
+    en_cours = env.https.post("/probe/v1/update-report", json={"status": "running", "detail": "fetching"}, headers=sonde)
+    cible_pendant = env.https.post("/probe/v1/heartbeat", json={}, headers=sonde).json()["update_target"]
+    # La nouvelle image appelle avec son nouveau commit : c'est fini, même sans le dernier mot de l'updater.
+    env.https.get("/probe/v1/jobs/next", params={"wait": 0}, headers={**sonde, "X-Probe-Build": COMMIT_PLATEFORME})
+
+    assert demande.status_code == 200 and demande.json()["update_status"] == "requested"
+    assert cible == COMMIT_PLATEFORME
+    assert en_cours.status_code == 200
+    assert cible_pendant is None, "l'updater ne relance pas une mise à jour en cours"
+    ligne = _ligne(env, probe_id)
+    assert (ligne["update_status"], ligne["code_status"], ligne["build"]) == ("done", "current", COMMIT_PLATEFORME)
+    evenements = [e["kind"] for e in env.https.get(f"/probes/{probe_id}/events").json()]
+    assert evenements[:3] == ["update_done", "update_started", "update_requested"]
+
+
+def test_un_echec_rapporte_par_l_updater_est_affiche_avec_sa_raison(env, plateforme_deployee):
+    probe_id, sonde = _sonde_sur(env)
+    env.https.post(f"/probes/{probe_id}/update")
+
+    env.https.post("/probe/v1/update-report", json={"status": "failed", "detail": "did not build"}, headers=sonde)
+
+    ligne = _ligne(env, probe_id)
+    assert (ligne["update_status"], ligne["update_detail"], ligne["code_status"]) == ("failed", "did not build", "outdated")
+    assert env.https.post(f"/probes/{probe_id}/update").status_code == 200, "on peut redemander"
+
+
+def test_rien_a_rapporter_sans_mise_a_jour_demandee(env, plateforme_deployee):
+    _, sonde = _sonde_sur(env)
+
+    assert env.https.post("/probe/v1/update-report", json={"status": "done"}, headers=sonde).status_code == 409
+
+
+def test_un_statut_de_mise_a_jour_inconnu_est_refuse(env, plateforme_deployee):
+    probe_id, sonde = _sonde_sur(env)
+    env.https.post(f"/probes/{probe_id}/update")
+
+    assert env.https.post("/probe/v1/update-report", json={"status": "bof"}, headers=sonde).status_code == 422
+
+
+@pytest.mark.parametrize("cas, raison", [
+    ("deja_a_jour", "already runs the platform's commit"),
+    ("appliance", "appliance"),
+    ("en_cours", "already in progress"),
+    ("commit_plateforme_inconnu", "does not know which commit it runs"),
+    ("pas_enrolee", "Only an enrolled probe"),
+])
+def test_une_mise_a_jour_impossible_est_refusee_avec_sa_raison(env, monkeypatch, plateforme_deployee, cas, raison):
+    probe_id, sonde = _sonde_sur(env, COMMIT_PLATEFORME if cas == "deja_a_jour" else COMMIT_ANCIEN)
+    if cas == "appliance":
+        env.https.post("/probe/v1/heartbeat", json={"appliance_version": "1.0.0"}, headers=sonde)
+    if cas == "en_cours":
+        env.https.post(f"/probes/{probe_id}/update")
+    if cas == "commit_plateforme_inconnu":
+        monkeypatch.setattr(settings, "PLATFORM_BUILD", "")
+        monkeypatch.setattr(settings, "PLATFORM_BUILD_FILE", "/nonexistent/platform-build")
+    if cas == "pas_enrolee":
+        probe_id = env.https.post("/probes", json={"workspace_id": CLIENT, "name": "a-installer"}).json()["id"]
+
+    reponse = env.https.post(f"/probes/{probe_id}/update")
+
+    assert reponse.status_code == 409
+    assert raison in reponse.json()["detail"]
+
+
+def test_tout_mettre_a_jour_ne_vise_que_les_sondes_en_retard(env, plateforme_deployee):
+    en_retard, _ = _sonde_sur(env, COMMIT_ANCIEN)
+    a_jour, _ = _sonde_sur(env, COMMIT_PLATEFORME)
+
+    reponse = env.https.post("/probes/update-all").json()
+
+    assert reponse["requested"] == [en_retard]
+    assert _ligne(env, a_jour)["update_status"] is None
+
+
+def test_le_commit_de_la_plateforme_vient_du_fichier_ecrit_au_deploiement(env, monkeypatch, tmp_path):
+    fichier = tmp_path / "platform-build"
+    fichier.write_text(COMMIT_PLATEFORME + "\n")
+    monkeypatch.setattr(settings, "PLATFORM_BUILD", "")
+    monkeypatch.setattr(settings, "PLATFORM_BUILD_FILE", str(fichier))
+
+    assert env.https.get("/probes").json()["platform_build"] == COMMIT_PLATEFORME
+
+
+def test_seul_un_admin_global_demande_une_mise_a_jour(env, plateforme_deployee):
+    probe_id, _ = _sonde_sur(env)
+    env.connecte(ADMIN_CLIENT)
+
+    assert env.https.post(f"/probes/{probe_id}/update").status_code == 403
+    assert env.https.get("/probes/updates").status_code == 403
+
+
+def test_une_demande_que_personne_ne_prend_echoue_avec_un_conseil(env, plateforme_deployee):
+    from app.probes.updates import close_stale_updates
+
+    probe_id, _ = _sonde_sur(env)
+    env.https.post(f"/probes/{probe_id}/update")
+    plus_tard = datetime.now(timezone.utc) + timedelta(minutes=11)
+
+    with env.session_factory() as db:
+        fermees = close_stale_updates(db, plus_tard, timedelta(minutes=10), timedelta(hours=1))
+
+    ligne = _ligne(env, probe_id)
+    assert fermees == 1
+    assert ligne["update_status"] == "failed" and "No updater on the probe's VM" in ligne["update_detail"]

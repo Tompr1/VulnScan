@@ -289,6 +289,16 @@ def _run_migrations(db: Session) -> None:
             ADD COLUMN IF NOT EXISTS appliance_version VARCHAR(64),
             ADD COLUMN IF NOT EXISTS offline_since TIMESTAMPTZ;
         """,
+        # Probe updates from Root (app.probes.updates).
+        """
+        ALTER TABLE probes
+            ADD COLUMN IF NOT EXISTS build VARCHAR(64),
+            ADD COLUMN IF NOT EXISTS update_status VARCHAR(16),
+            ADD COLUMN IF NOT EXISTS update_target VARCHAR(64),
+            ADD COLUMN IF NOT EXISTS update_detail TEXT,
+            ADD COLUMN IF NOT EXISTS update_requested_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS update_finished_at TIMESTAMPTZ;
+        """,
     ]
     for sql in migrations:
         try:
@@ -532,6 +542,17 @@ def _schedule_loop():
                 probe_watch.check()
             except Exception as e_probes:
                 logger.warning("Probe watch failed: %s", e_probes)
+            # ── Probe updates asked in Root that nobody finished ────────
+            try:
+                from app.probes.updates import close_stale_updates
+                close_stale_updates(
+                    db, now_utc,
+                    pickup_after=timedelta(seconds=settings.PROBE_UPDATE_PICKUP_SECONDS),
+                    run_after=timedelta(seconds=settings.PROBE_UPDATE_RUN_SECONDS),
+                )
+            except Exception as e_updates:
+                logger.warning("Probe update watch failed: %s", e_updates)
+                db.rollback()
 
             # ── Stale scan job detection ───────────────────────────────
             # RQ SIGKILLs a work-horse that overruns SCAN_JOB_TIMEOUT. A

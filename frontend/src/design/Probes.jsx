@@ -3,8 +3,9 @@ import { Icons } from "./icons.jsx";
 import { probesApi } from "../api.js";
 import { Modal, useSubmit } from "./Access.jsx";
 import {
-  SCAN_TYPE_LABELS, applianceHostname, clientsWithoutProbe, cloudInitUserData, enrollCommand, eventLabel, imageStatus,
-  isAlarmEvent, probeStatus, seenText, shortImage, toggledScanTypes,
+  SCAN_TYPE_LABELS, applianceHostname, canUpdate, clientsWithoutProbe, cloudInitUserData, codeStatus, enrollCommand,
+  codeCounts, eventLabel, imageStatus, isAlarmEvent, probeStatus, seenText, shortBuild, shortImage, toggledScanTypes,
+  updateSummary,
 } from "./probesModel.js";
 
 // Root > Scan probes: the VMs installed on clients' networks. A probe only
@@ -15,17 +16,40 @@ export function Probes() {
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null); // {kind: "create"} | {kind: "token", probe, enrollment} | {kind: "revoke"|"delete", probe}
   const [savingClient, setSavingClient] = useState(null);
+  const [check, setCheck] = useState(null);       // last "Check for updates" answer
+  const [checking, setChecking] = useState(false);
+  const [updating, setUpdating] = useState(null); // probe id, or "all"
 
   const refresh = useCallback(async () => {
     try { setData(await probesApi.list()); setError(""); }
     catch (e) { setError(e.message); }
   }, []);
 
+  // Online / offline and running scans move; an update in progress moves faster.
+  const inProgress = (data?.probes || []).some(p => p.update_status === "requested" || p.update_status === "running");
   useEffect(() => {
     refresh();
-    const t = setInterval(refresh, 15000); // online / offline and running scans move
+    const t = setInterval(refresh, inProgress ? 5000 : 15000);
     return () => clearInterval(t);
-  }, [refresh]);
+  }, [refresh, inProgress]);
+
+  const checkUpdates = async () => {
+    setChecking(true);
+    try { setCheck(await probesApi.checkUpdates()); await refresh(); setError(""); }
+    catch (e) { setError(e.message); }
+    finally { setChecking(false); }
+  };
+
+  const update = async (target) => {
+    setUpdating(target);
+    try {
+      if (target === "all") await probesApi.updateAll(); else await probesApi.update(target);
+      await refresh();
+      setCheck(await probesApi.checkUpdates());
+      setError("");
+    } catch (e) { setError(e.message); }
+    finally { setUpdating(null); }
+  };
 
   const setScanType = async (client, scanType, on) => {
     setSavingClient(client.id);
@@ -44,6 +68,8 @@ export function Probes() {
   const probes = data?.probes || [];
   const clients = data?.clients || [];
   const orphans = clientsWithoutProbe(clients, probes);
+  // After "Check for updates", the result follows the list as it refreshes.
+  const liveCheck = check && { platform_build: data?.platform_build ?? check.platform_build, counts: codeCounts(probes) };
 
   return (
     <>
@@ -53,12 +79,30 @@ export function Probes() {
           <div className="sub">VMs on the clients' networks. They only connect out to the platform: the client opens no port.</div>
         </div>
         <div className="actions">
+          <button className="btn" onClick={checkUpdates} disabled={checking}
+                  title="Compare each probe's code with the platform's">
+            <Icons.Refresh size={13}/> {checking ? "Checking…" : "Check for updates"}
+          </button>
           <button className="btn btn-primary" onClick={() => setModal({ kind: "create" })} disabled={!clients.length}>
             <Icons.Plus size={13}/> New probe
           </button>
         </div>
       </div>
       {error && <div style={{color: "var(--err)", marginBottom: 14, fontSize: 13}}><Icons.AlertTriangle size={13}/> {error}</div>}
+      {check && (
+        <div className="card" style={{marginBottom: 16}}>
+          <div className="card-body" style={{display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 13, color: "var(--text-1)"}}>
+            <Icons.Info size={13}/>
+            <span style={{flex: "1 1 320px"}}>{updateSummary(liveCheck)}</span>
+            {(liveCheck.counts.outdated || 0) > 0 && (
+              <button className="btn btn-primary btn-sm" onClick={() => update("all")} disabled={updating !== null}>
+                <Icons.Download size={12}/> {updating === "all" ? "Asking…" : `Update ${liveCheck.counts.outdated}`}
+              </button>
+            )}
+            <button className="btn btn-ghost btn-icon btn-sm" title="Close" aria-label="Close" onClick={() => setCheck(null)}><Icons.X size={13}/></button>
+          </div>
+        </div>
+      )}
       {orphans.length > 0 && (
         <div className="card" style={{marginBottom: 16, borderColor: "var(--sev-high)"}}>
           <div className="card-body" style={{fontSize: 13, color: "var(--text-1)"}}>
@@ -82,11 +126,12 @@ export function Probes() {
             <div className="empty"><div className="empty-body" style={{margin: "0 auto"}}>No probe yet. Create one for a client, then enroll the VM with its token.</div></div>
           ) : (
             <table className="tbl">
-              <thead><tr><th>Probe</th><th>Client</th><th>Status</th><th>Host</th><th>Versions</th><th>Last seen</th><th className="num">Scans</th><th style={{width: 150}}/></tr></thead>
+              <thead><tr><th>Probe</th><th>Client</th><th>Status</th><th>Host</th><th>Versions</th><th>Last seen</th><th className="num">Scans</th><th style={{width: 180}}/></tr></thead>
               <tbody>
                 {probes.map(p => {
                   const status = probeStatus(p.status);
                   const image = imageStatus(p.image_status);
+                  const code = codeStatus(p);
                   return (
                     <tr key={p.id}>
                       <td style={{color: "var(--text-0)", fontWeight: 500}}>{p.name}</td>
@@ -104,10 +149,23 @@ export function Probes() {
                         {p.appliance_version && <div className="mono" style={{fontSize: 11}}>appliance {p.appliance_version}</div>}
                         {p.image && <div className="mono" style={{fontSize: 11}} title={p.image}>{shortImage(p.image)}</div>}
                         {image.label && <span className={`status ${image.pill}`} style={{fontSize: 11}}>{image.label}</span>}
+                        {p.build && <div className="mono" style={{fontSize: 11}} title={p.build}>code {shortBuild(p.build)}</div>}
+                        {code.label && (
+                          <div><span className={`status ${code.pill}`} style={{fontSize: 11}}
+                                     title={p.update_detail || (p.update_target ? `to ${p.update_target}` : "")}>{code.label}</span></div>
+                        )}
+                        {p.update_detail && (p.update_status === "failed" || p.update_status === "running") && (
+                          <div style={{fontSize: 11, maxWidth: 260, whiteSpace: "normal", color: p.update_status === "failed" ? "var(--err)" : "var(--text-3)"}}>{p.update_detail}</div>
+                        )}
                       </td>
                       <td className="muted" style={{fontSize: 12}} title={p.last_seen_at || ""}>{seenText(p.last_seen_at)}</td>
                       <td className="num">{p.running_jobs}</td>
                       <td style={{whiteSpace: "nowrap", textAlign: "right"}}>
+                        {canUpdate(p, data?.platform_build) && (
+                          <button className="btn btn-ghost btn-icon btn-sm" disabled={updating !== null}
+                                  title={`Update to the platform's code (${shortBuild(data.platform_build)}): the updater on the probe's VM rebuilds it`}
+                                  aria-label="Update" onClick={() => update(p.id)}><Icons.Download size={13}/></button>
+                        )}
                         <button className="btn btn-ghost btn-icon btn-sm" title="History" aria-label="History"
                                 onClick={() => setModal({ kind: "history", probe: p })}><Icons.Clock size={13}/></button>
                         {p.status !== "revoked" && (

@@ -165,6 +165,9 @@ export const probesApi = {
   revoke:        (id)             => api(`/probes/${id}/revoke`, { method: "POST" }),
   remove:        (id)             => api(`/probes/${id}`, { method: "DELETE" }),
   setExecution:  (clientId, scanTypes) => api(`/probes/clients/${clientId}/execution`, { method: "PUT", body: { scan_types: scanTypes } }),
+  checkUpdates:  ()               => api("/probes/updates"),
+  update:        (id)             => api(`/probes/${id}/update`, { method: "POST" }),
+  updateAll:     ()               => api("/probes/update-all", { method: "POST" }),
 };
 
 // ── Access administration (global admins) ───────────────────────────

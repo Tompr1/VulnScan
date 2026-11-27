@@ -21,6 +21,10 @@ REPORT_RECEIVED = "report_received"
 IMAGE_CHANGED = "image_changed"
 OFFLINE = "offline"
 ONLINE = "online"
+UPDATE_REQUESTED = "update_requested"
+UPDATE_STARTED = "update_started"
+UPDATE_DONE = "update_done"
+UPDATE_FAILED = "update_failed"
 
 _MAX_DETAIL = 1000
 
