@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Icons, Pip, Risk, Status } from "./icons.jsx";
 import { scanApi, assetsApi, reportsApi, apiScannerApi, credentialsApi, webAuthApi, canEdit } from "../api.js";
 
+// A child with a target is a host (an asset registered on a scan target), not a sub-folder.
+const isHost = (a) => (a.target_list || []).length > 0;
+
 export function Assets({ openAsset }) {
   const [view, setView] = useState("grid");
   const [q, setQ] = useState("");
@@ -99,7 +102,9 @@ export function Assets({ openAsset }) {
 
                     <div style={{display: "flex", gap: 14, marginTop: 14, fontSize: 12, color: "var(--text-3)"}}>
                       <span><Icons.Target size={11} style={{marginRight: 4, verticalAlign: "-1px"}}/><span className="mono" style={{color: "var(--text-1)", fontWeight: 600}}>{a.targets || 0}</span> targets</span>
-                      {subs.length > 0 && <span><Icons.Folder size={11} style={{marginRight: 4, verticalAlign: "-1px"}}/><span className="mono" style={{color: "var(--text-1)", fontWeight: 600}}>{subs.length}</span> sub</span>}
+                      {subs.length > 0 && (subs.every(isHost)
+                        ? <span><Icons.Server size={11} style={{marginRight: 4, verticalAlign: "-1px"}}/><span className="mono" style={{color: "var(--text-1)", fontWeight: 600}}>{subs.length}</span> {subs.length > 1 ? "hôtes" : "hôte"}</span>
+                        : <span><Icons.Folder size={11} style={{marginRight: 4, verticalAlign: "-1px"}}/><span className="mono" style={{color: "var(--text-1)", fontWeight: 600}}>{subs.length}</span> sub</span>)}
                       <span style={{marginLeft: "auto"}}><Icons.Clock size={11} style={{marginRight: 4, verticalAlign: "-1px"}}/>{a.last_scan_at ? new Date(a.last_scan_at).toLocaleDateString() : "never"}</span>
                     </div>
 
@@ -124,9 +129,9 @@ export function Assets({ openAsset }) {
                       <div style={{marginTop: 14, paddingTop: 12, borderTop: "1px dashed var(--line)", display: "flex", flexDirection: "column", gap: 4}}>
                         {subs.map(s => (
                           <div key={s.id} style={{display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "4px 6px", borderRadius: 4, color: "var(--text-2)"}}>
-                            <Icons.Folder size={11} color="var(--text-3)"/>
+                            {isHost(s) ? <Icons.Server size={11} color="var(--text-3)"/> : <Icons.Folder size={11} color="var(--text-3)"/>}
                             <span style={{flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{s.name}</span>
-                            <span className="mono muted" style={{fontSize: 11}}>{s.targets || 0}</span>
+                            <span className="mono muted" style={{fontSize: 11}}>{isHost(s) ? s.target_list.join(", ") : (s.targets || 0)}</span>
                           </div>
                         ))}
                       </div>
@@ -254,7 +259,7 @@ export function AssetDetail({ asset: initialAsset, back }) {
           <div className="left">
             <div className="tabs">
               <button className={`tab ${tab === "targets" ? "active" : ""}`} onClick={() => setTab("targets")}>Targets <span className="badge">{targets.length}</span></button>
-              {subs.length > 0 && <button className={`tab ${tab === "subs" ? "active" : ""}`} onClick={() => setTab("subs")}>Sub-folders <span className="badge">{subs.length}</span></button>}
+              {subs.length > 0 && <button className={`tab ${tab === "subs" ? "active" : ""}`} onClick={() => setTab("subs")}>{subs.every(isHost) ? "Hôtes" : "Sub-folders"} <span className="badge">{subs.length}</span></button>}
               <button className={`tab ${tab === "scans" ? "active" : ""}`} onClick={() => setTab("scans")}>Scan history</button>
               <button className={`tab ${tab === "settings" ? "active" : ""}`} onClick={() => setTab("settings")}>Settings</button>
             </div>
@@ -284,12 +289,12 @@ export function AssetDetail({ asset: initialAsset, back }) {
           )}
           {tab === "subs" && (
             <table className="tbl">
-              <thead><tr><th>Sub-folder</th><th style={{width: 100}}>Targets</th><th style={{width: 100}}>Risk</th></tr></thead>
+              <thead><tr><th>{subs.every(isHost) ? "Hôte" : "Sub-folder"}</th><th style={{width: 180}}>{subs.every(isHost) ? "IP" : "Targets"}</th><th style={{width: 100}}>Risk</th></tr></thead>
               <tbody>
                 {subs.map(s => (
                   <tr key={s.id} className="clickable">
-                    <td><div style={{display: "flex", gap: 10, alignItems: "center"}}><Icons.Folder size={14} color="var(--brand)"/><span style={{fontWeight: 500, color: "var(--text-0)"}}>{s.name}</span></div></td>
-                    <td className="num">{s.targets || 0}</td>
+                    <td><div style={{display: "flex", gap: 10, alignItems: "center"}}>{isHost(s) ? <Icons.Server size={14} color="var(--brand)"/> : <Icons.Folder size={14} color="var(--brand)"/>}<span style={{fontWeight: 500, color: "var(--text-0)"}}>{s.name}</span></div></td>
+                    <td className="num">{isHost(s) ? <span className="mono">{s.target_list.join(", ")}</span> : (s.targets || 0)}</td>
                     <td><Risk score={s.risk}/></td>
                   </tr>
                 ))}

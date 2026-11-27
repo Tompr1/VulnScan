@@ -27,10 +27,32 @@ SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
 # ─── 1. Auto Asset Discovery ────────────────────────────────────────────────
 
 
+def _known_targets(db: Session, workspace_id: int) -> dict[str, tuple[int, str]]:
+    """Target → (asset id, asset name) for every target already on an asset:
+    registered ones, and those a scan job ran against under an asset."""
+    known: dict[str, tuple[int, str]] = {}
+    registered = (
+        db.query(models.AssetTarget.target, models.Asset.id, models.Asset.name)
+        .join(models.Asset, models.Asset.id == models.AssetTarget.asset_id)
+        .filter(models.AssetTarget.workspace_id == workspace_id)
+        .all()
+    )
+    scanned = (
+        db.query(models.ScanJob.target, models.Asset.id, models.Asset.name)
+        .join(models.Asset, models.Asset.id == models.ScanJob.asset_id)
+        .filter(models.ScanJob.workspace_id == workspace_id)
+        .all()
+    )
+    for target, asset_id, asset_name in [*registered, *scanned]:
+        known.setdefault(target, (asset_id, asset_name))
+    return known
+
+
 @router.post("/discover")
 def discover_assets(
     body: dict,
     user=Depends(require_role("admin", "analyst")),
+    db: Session = Depends(get_db),
 ):
     """
     Lightweight asset discovery.
@@ -55,6 +77,11 @@ def discover_assets(
             raise HTTPException(400, f"Invalid CIDR: {exc}")
 
         hosts = discover_hosts(net)
+        known = _known_targets(db, user["ws"])
+        for host in hosts:
+            asset = known.get(host["ip"])
+            host["asset_id"] = asset[0] if asset else None
+            host["asset_name"] = asset[1] if asset else None
         return {
             "type": "network",
             "network_range": str(net),

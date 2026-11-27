@@ -96,6 +96,7 @@ def _serialize(a: models.Asset, db: Session) -> dict:
         "created_at": a.created_at.isoformat() if a.created_at else None,
         # Rollups
         "targets": len(target_set),
+        "target_list": sorted(target_set),
         "scans": len(job_rows),
         "critical": sev_counts["critical"],
         "high":     sev_counts["high"],

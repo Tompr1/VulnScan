@@ -57,6 +57,15 @@ def test_creates_one_asset_per_host_with_its_target(client, db):
     assert cibles == ["192.168.3.10", "192.168.3.11"]
 
 
+def test_asset_list_carries_its_targets(client):
+    client.post("/assets/from-hosts", json={"assets": [_hote("10.1.2.4")]})
+
+    liste = client.get("/assets").json()
+
+    par_nom = {a["name"]: a["target_list"] for a in liste}
+    assert par_nom == {"Labo": [], "10.1.2.4": ["10.1.2.4"]}
+
+
 def test_target_of_a_new_asset_is_listed_before_any_scan(client):
     asset_id = client.post("/assets/from-hosts", json={"assets": [_hote("10.1.2.3")]}).json()[0]["id"]
 
