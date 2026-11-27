@@ -67,6 +67,7 @@ class Ids:
     credential: int = 902
     dataset: int = 903
     asset: int = 904
+    cible_asset: int = 914
     job: int = 905
     finding: int = 906
     planification: int = 907
@@ -243,6 +244,7 @@ def donnees(db, workspace, tmp_path):
         models.CveDataset(id=V.dataset, name="CISA KEV", kind="cisa_kev", path=str(kev)),
         models.Asset(id=V.asset, workspace_id=VOISIN, name="parc-voisin", owner="dsi@voisin.example"),
         models.Asset(id=V.asset_client, workspace_id=CLIENT, name="parc-client"),
+        models.AssetTarget(id=V.cible_asset, workspace_id=VOISIN, asset_id=V.asset, target="10.10.0.5"),
         models.Credential(id=V.credential_client, workspace_id=CLIENT, name="ssh-client", username="root",
                           secret_enc=encrypt_str("secret-client")),
     ])

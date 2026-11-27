@@ -272,6 +272,7 @@ export const assetsApi = {
   list:    ()           => api("/assets"),
   get:     (id)         => api(`/assets/${id}`),
   create:  (body)       => api("/assets", { method: "POST", body }),
+  createFromHosts: (body) => api("/assets/from-hosts", { method: "POST", body }),
   update:  (id, body)   => api(`/assets/${id}`, { method: "PATCH", body }),
   delete:  (id)         => api(`/assets/${id}`, { method: "DELETE" }),
   jobs:    (id)         => api(`/assets/${id}/jobs`),

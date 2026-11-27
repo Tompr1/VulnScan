@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Icons } from "./icons.jsx";
-import { analyticsApi, scanApi } from "../api.js";
+import { analyticsApi, scanApi, assetsApi, credentialsApi } from "../api.js";
 import { SevBadge, Spinner, EmptyState, Panel } from "../components/ui.jsx";
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -472,17 +472,122 @@ function CompareTab() {
 // ======================================================================
 // Tab 4: Asset Discovery
 // ======================================================================
+// Register discovered hosts as assets: one asset per host, its IP registered
+// as the target. Name is pre-filled with the reverse DNS name (or the IP) and
+// stays editable; folder and credential are optional.
+function AddHostsModal({ hosts, close, onDone }) {
+  const [rows, setRows] = useState(() => hosts.map(h => ({
+    ip: h.ip,
+    name: h.hostname || h.ip,
+    parent_id: "",
+    credential_id: "",
+  })));
+  const [folders, setFolders] = useState([]);
+  const [creds, setCreds] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    Promise.all([assetsApi.list(), credentialsApi.list()])
+      .then(([a, c]) => { setFolders(a); setCreds(c); })
+      .catch(e => setError(e.message || "Could not load folders and credentials"));
+  }, []);
+
+  const update = (i, field, value) =>
+    setRows(rs => rs.map((r, j) => (j === i ? { ...r, [field]: value } : r)));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      await assetsApi.createFromHosts({
+        assets: rows.map(r => ({
+          name: r.name.trim(),
+          target: r.ip,
+          parent_id: r.parent_id ? parseInt(r.parent_id, 10) : null,
+          default_credential_id: r.credential_id ? parseInt(r.credential_id, 10) : null,
+        })),
+      });
+      onDone(rows.length);
+    } catch (err) {
+      setError(err.message || "Could not create the assets");
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="drawer-backdrop" onClick={submitting ? undefined : close}/>
+      <div className="modal" style={{ maxWidth: 760, width: "calc(100vw - 32px)" }}>
+        <div className="drawer-head">
+          <Icons.FolderOpen size={16} color="var(--brand)"/>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-0)" }}>
+            Add {rows.length} host{rows.length > 1 ? "s" : ""} to assets
+          </span>
+          <button className="btn btn-ghost btn-icon btn-sm" onClick={close} disabled={submitting}
+            style={{ marginLeft: "auto" }}><Icons.X size={14}/></button>
+        </div>
+        <form onSubmit={submit} style={{ padding: "16px 24px 20px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "70vh", overflowY: "auto" }}>
+          {rows.map((r, i) => (
+            <div key={r.ip} style={{
+              display: "grid", gridTemplateColumns: "minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr)", gap: 10,
+              alignItems: "end", paddingBottom: 12, borderBottom: "1px solid var(--line)",
+            }}>
+              <div>
+                <label className="form-label">Name <span className="mono muted">({r.ip})</span></label>
+                <input className="form-input" value={r.name} required
+                  onChange={e => update(i, "name", e.target.value)}/>
+              </div>
+              <div>
+                <label className="form-label">Folder (optional)</label>
+                <select className="form-input" value={r.parent_id} onChange={e => update(i, "parent_id", e.target.value)}>
+                  <option value="">No folder</option>
+                  {folders.filter(f => !f.parent_id).map(f => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Credential (optional)</label>
+                <select className="form-input" value={r.credential_id} onChange={e => update(i, "credential_id", e.target.value)}>
+                  <option value="">No credential</option>
+                  {creds.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.username})</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          ))}
+          {error && <div style={{ color: "var(--err)", fontSize: 12.5 }}>{error}</div>}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button type="button" className="btn" onClick={close} disabled={submitting}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={submitting || rows.length === 0}>
+              {submitting ? "Creating…" : <><Icons.Check size={12}/> Create {rows.length} asset{rows.length > 1 ? "s" : ""}</>}
+            </button>
+          </div>
+        </form>
+      </div>
+    </>
+  );
+}
+
 function DiscoverTab() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [results, setResults] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+  const [showAdd, setShowAdd] = useState(false);
+  const [addedCount, setAddedCount] = useState(0);
 
   const run = async () => {
     if (!input.trim()) return;
     setLoading(true);
     setError("");
     setResults(null);
+    setSelected(new Set());
+    setAddedCount(0);
     try {
       // Detect if input is CIDR (contains /) or domain
       const val = input.trim();
@@ -499,6 +604,15 @@ function DiscoverTab() {
   // Domain response has 'discovered' array, CIDR response has network metadata
   const targets = results?.discovered || results?.targets || results?.hosts || [];
   const isCidr = results?.type === "network";
+
+  const toggleOne = ip => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(ip)) next.delete(ip); else next.add(ip);
+    return next;
+  });
+  const toggleAll = () => setSelected(
+    selected.size === targets.length ? new Set() : new Set(targets.map(h => h.ip))
+  );
 
   return (
     <>
@@ -524,13 +638,53 @@ function DiscoverTab() {
       {!loading && results && (
         <Panel title={isCidr ? `Network: ${results.network_range}` : `Discovered Targets (${targets.length})`}>
           {isCidr ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13, color: "var(--text-1)" }}>
-              <div>Range: <strong>{results.network_range}</strong></div>
-              <div>Addresses: <strong>{results.num_addresses}</strong></div>
-              <div>First IP: <code>{results.first_ip}</code></div>
-              <div>Last IP: <code>{results.last_ip}</code></div>
-              <div>Prefix: /{results.prefix_len}</div>
-            </div>
+            <>
+              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 13, color: "var(--text-2)", marginBottom: 14 }}>
+                <span>Range <strong style={{ color: "var(--text-0)" }}>{results.network_range}</strong></span>
+                <span>Addresses <strong style={{ color: "var(--text-0)" }}>{results.num_addresses}</strong></span>
+                <span>Hosts found <strong style={{ color: "var(--text-0)" }}>{targets.length}</strong></span>
+              </div>
+              {targets.length === 0 ? <EmptyState text="No live host found on this network"/> : (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
+                    <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center", color: "var(--text-1)", cursor: "pointer" }}>
+                      <input type="checkbox" checked={selected.size === targets.length} onChange={toggleAll}/>
+                      Select all
+                    </label>
+                    <button className="btn btn-primary" disabled={selected.size === 0} onClick={() => setShowAdd(true)}>
+                      <Icons.Plus size={14}/> Add {selected.size} to assets
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {targets.map(h => (
+                      <label key={h.ip} style={{
+                        padding: "8px 12px", background: "var(--surface-1)", borderRadius: 6,
+                        display: "flex", gap: 14, alignItems: "center", cursor: "pointer",
+                        fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text-1)",
+                      }}>
+                        <input type="checkbox" checked={selected.has(h.ip)} onChange={() => toggleOne(h.ip)}/>
+                        <span style={{ minWidth: 130 }}>{h.ip}</span>
+                        <span style={{ color: h.hostname ? "var(--text-1)" : "var(--text-3)" }}>
+                          {h.hostname || "no reverse DNS name"}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+              {addedCount > 0 && (
+                <div style={{ marginTop: 12, fontSize: 13, color: "var(--text-1)" }}>
+                  {addedCount} asset(s) created. They are listed in Assets.
+                </div>
+              )}
+              {showAdd && (
+                <AddHostsModal
+                  hosts={targets.filter(h => selected.has(h.ip))}
+                  close={() => setShowAdd(false)}
+                  onDone={n => { setShowAdd(false); setSelected(new Set()); setAddedCount(n); }}
+                />
+              )}
+            </>
           ) : targets.length === 0
             ? <EmptyState text="No targets discovered"/>
             : (

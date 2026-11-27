@@ -173,6 +173,19 @@ class Asset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class AssetTarget(Base):
+    """A scan target (IP, hostname, CIDR…) registered on an asset, so it can
+    be rescanned later even before any scan job has run against it."""
+
+    __tablename__ = "asset_targets"
+    __table_args__ = (UniqueConstraint("asset_id", "target", name="uq_asset_targets_asset_target"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
+    target: Mapped[str] = mapped_column(String(512))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class WorkspaceSetting(Base):
     __tablename__ = "workspace_settings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

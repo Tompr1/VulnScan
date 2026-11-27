@@ -2,7 +2,6 @@
 Analytics API routes – discovery, trending, diff, executive dashboard,
 comparative reports, and re-verification scans.
 """
-import ipaddress
 import json
 import logging
 import socket
@@ -15,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_role
 from app.db import models
+from app.core.host_discovery import NotPrivateNetworkError, discover_hosts, parse_private_network
 from app.core.job_queue import QueueUnavailableError, get_job_queue
 
 logger = logging.getLogger("v0cday.analytics")
@@ -45,13 +45,16 @@ def discover_assets(
     if not network_range and not domain:
         raise HTTPException(400, "Provide either 'network_range' (CIDR) or 'domain'")
 
-    # --- CIDR discovery ---
+    # --- CIDR discovery: which addresses of a private network are alive ---
     if network_range:
         try:
-            net = ipaddress.ip_network(network_range, strict=False)
+            net = parse_private_network(str(network_range))
+        except NotPrivateNetworkError as exc:
+            raise HTTPException(400, str(exc))
         except ValueError as exc:
             raise HTTPException(400, f"Invalid CIDR: {exc}")
 
+        hosts = discover_hosts(net)
         return {
             "type": "network",
             "network_range": str(net),
@@ -59,6 +62,8 @@ def discover_assets(
             "first_ip": str(net.network_address),
             "last_ip": str(net.broadcast_address),
             "prefix_len": net.prefixlen,
+            "hosts": hosts,
+            "count": len(hosts),
         }
 
     # --- Domain discovery ---

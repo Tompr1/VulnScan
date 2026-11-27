@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import logging
 from datetime import datetime, timezone
@@ -54,6 +55,11 @@ def _serialize(a: models.Asset, db: Session) -> dict:
         target_set.add(j.target)
         if j.created_at and (last_scan_at is None or j.created_at > last_scan_at):
             last_scan_at = j.created_at
+    target_set.update(
+        t.target for t in db.query(models.AssetTarget.target).filter(
+            models.AssetTarget.workspace_id == ws, models.AssetTarget.asset_id == a.id
+        )
+    )
 
     if job_rows:
         job_ids = [j.id for j in job_rows]
@@ -162,6 +168,74 @@ def create_asset(
     db.refresh(a)
     logger.info("Asset #%d created: %s", a.id, a.name)
     return _serialize(a, db)
+
+
+class HostAssetIn(BaseModel):
+    name: str
+    target: str  # the IPv4 address that was discovered
+    parent_id: int | None = None
+    default_credential_id: int | None = None
+    description: str | None = ""
+
+
+class HostAssetsCreate(BaseModel):
+    assets: list[HostAssetIn]
+
+
+@router.post("/from-hosts")
+def create_assets_from_hosts(
+    body: HostAssetsCreate,
+    user=Depends(require_role("admin", "analyst")),
+    db: Session = Depends(get_db),
+):
+    """Create one asset per discovered host, each with its target registered.
+
+    All or nothing: if any entry is invalid, nothing is created."""
+    if not body.assets:
+        raise HTTPException(400, "No host selected")
+
+    seen_targets: set[str] = set()
+    for item in body.assets:
+        if not item.name or not item.name.strip():
+            raise HTTPException(400, f"Name is required for {item.target}")
+        try:
+            addr = ipaddress.ip_address(item.target.strip())
+        except ValueError:
+            raise HTTPException(400, f"Not an IP address: {item.target}")
+        if addr.version != 4 or not addr.is_private:
+            raise HTTPException(400, f"Only private IPv4 addresses can be added: {item.target}")
+        if item.target in seen_targets:
+            raise HTTPException(400, f"Duplicate host in selection: {item.target}")
+        seen_targets.add(item.target)
+        _require_references_in_workspace(db, user["ws"], {
+            "parent_id": item.parent_id,
+            "default_credential_id": item.default_credential_id,
+        })
+
+    created = []
+    for item in body.assets:
+        a = models.Asset(
+            workspace_id=user["ws"],
+            name=item.name.strip(),
+            description=item.description or "",
+            parent_id=item.parent_id,
+            default_credential_id=item.default_credential_id,
+            tags_json="[]",
+        )
+        db.add(a)
+        db.flush()  # assigns a.id for the target row
+        db.add(models.AssetTarget(
+            workspace_id=user["ws"],
+            asset_id=a.id,
+            target=item.target.strip(),
+        ))
+        created.append(a)
+
+    db.commit()
+    for a in created:
+        db.refresh(a)
+    logger.info("Created %d asset(s) from discovered hosts", len(created))
+    return [_serialize(a, db) for a in created]
 
 
 @router.patch("/{asset_id}")
@@ -322,6 +396,23 @@ def asset_targets(
             t = job_to_target.get(jid)
             if t and t in by_target:
                 by_target[t]["findings"] += 1
+
+    # Registered targets that have not been scanned yet still belong here.
+    registered = (
+        db.query(models.AssetTarget)
+        .filter(
+            models.AssetTarget.workspace_id == user["ws"],
+            models.AssetTarget.asset_id == asset_id,
+        )
+        .all()
+    )
+    for reg in registered:
+        by_target.setdefault(reg.target, {
+            "target": reg.target,
+            "scans": 0,
+            "last_scan_at": None,
+            "findings": 0,
+        })
 
     out = []
     for slot in by_target.values():
