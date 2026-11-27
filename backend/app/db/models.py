@@ -186,6 +186,29 @@ class AssetTarget(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class DiscoveryJob(Base):
+    """A host discovery of a private network, run by the client's probe: the
+    API only creates it, and the page follows its progress and its hosts as
+    the probe reports them."""
+
+    __tablename__ = "discovery_jobs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    network_range: Mapped[str] = mapped_column(String(64))
+    # queued | running | done | cancelled | failed
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    total: Mapped[int] = mapped_column(Integer, default=0)   # addresses to probe
+    probed: Mapped[int] = mapped_column(Integer, default=0)  # addresses probed so far
+    hosts_json: Mapped[str] = mapped_column(Text, default="[]")  # [{"ip", "hostname"}]
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The probe that took it (set when claimed).
+    probe_id: Mapped[int | None] = mapped_column(ForeignKey("probes.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class WorkspaceSetting(Base):
     __tablename__ = "workspace_settings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

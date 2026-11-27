@@ -38,6 +38,11 @@ It prints the digest-pinned reference, e.g.
 platform's `.env` rolls it out to every appliance within the hour (the
 production stack refuses a `PROBE_IMAGE` that is not pinned by digest).
 
+Release a new image to bring new probe features to appliances already
+installed: host discovery, for instance, only runs on probes built from a
+version that has it (older ones keep running scans and never take a
+discovery).
+
 ## 2. Build the appliance (MSP)
 
 Needs [Packer](https://developer.hashicorp.com/packer) with QEMU (KVM on a
@@ -65,7 +70,8 @@ Output in `output/v0cday-probe-1.0.0/`: `.qcow2` (Proxmox, KVM), `.ova`
 In **Root › Scan probes**: *New probe* for the client, then in the window that
 shows the token, *Download first-boot configuration*. Optional fields:
 
-- **client's own scope limit** — the probe refuses any job outside it;
+- **client's own scope limit** — the probe refuses any job outside it, and
+  any range to discover that does not fit inside it;
 - **platform CA certificate** — when the platform uses Caddy's internal CA
   (`deploy/master/README.md` says how to get it).
 
@@ -91,7 +97,9 @@ Give the VM at least 2 vCPU, 4 GB of memory and outbound access to the
 platform (443) and to the networks it scans.
 
 Power it on: within a few minutes the probe is **online** in Root. Delete the
-seed (file and ISO) afterwards: the token is spent anyway.
+seed (file and ISO) afterwards: the token is spent anyway. From then on the
+client's internal and API scans and its host discoveries run on it
+(`deploy/probe/README.md`, *What runs on the probe*).
 
 ## Troubleshooting (hypervisor console)
 

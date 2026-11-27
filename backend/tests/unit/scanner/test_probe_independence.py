@@ -106,6 +106,8 @@ EXECUTION_SIDE = (
     "app.scan_jobs.execution", "app.scan_jobs.assignment", "app.scan_jobs.progress",
     # L'agent de la sonde tout entier, commande comprise.
     "app.probe_agent.cli", "app.probe_agent.agent", "app.probe_agent.reference",
+    # La découverte d'hôtes, que seule la sonde exécute.
+    "app.discovery.assignment", "app.core.host_discovery",
 )
 
 

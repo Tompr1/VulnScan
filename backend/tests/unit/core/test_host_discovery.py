@@ -76,3 +76,40 @@ def test_discover_hosts_skips_network_and_broadcast_addresses(monkeypatch):
     host_discovery.discover_hosts(parse_private_network("10.0.0.0/30"))
 
     assert probed == ["10.0.0.1", "10.0.0.2"]
+
+
+def test_address_count_leaves_out_network_and_broadcast():
+    assert host_discovery.address_count(parse_private_network("10.0.0.0/24")) == 254
+    assert host_discovery.address_count(parse_private_network("10.0.0.0/31")) == 2
+    assert host_discovery.address_count(parse_private_network("10.0.0.7/32")) == 1
+
+
+def test_discover_hosts_reports_progress_after_each_wave(monkeypatch):
+    monkeypatch.setattr(host_discovery, "WAVE_SIZE", 4)
+    monkeypatch.setattr(host_discovery, "_probe", lambda ip: ip in {"10.0.0.2", "10.0.0.6"})
+    monkeypatch.setattr(host_discovery, "_reverse_dns", lambda ip: None)
+    progress = []
+
+    host_discovery.discover_hosts(
+        parse_private_network("10.0.0.0/29"),
+        on_progress=lambda probed, hosts: progress.append((probed, [h["ip"] for h in hosts])),
+    )
+
+    assert progress == [(4, ["10.0.0.2"]), (6, ["10.0.0.2", "10.0.0.6"])]
+
+
+def test_discover_hosts_stops_between_waves_and_keeps_what_it_found(monkeypatch):
+    monkeypatch.setattr(host_discovery, "WAVE_SIZE", 4)
+    probed = []
+    monkeypatch.setattr(host_discovery, "_probe", lambda ip: probed.append(ip) or ip == "10.0.0.1")
+    monkeypatch.setattr(host_discovery, "_reverse_dns", lambda ip: None)
+    waves = []
+
+    hosts = host_discovery.discover_hosts(
+        parse_private_network("10.0.0.0/24"),
+        on_progress=lambda n, h: waves.append(n),
+        should_stop=lambda: len(waves) >= 1,
+    )
+
+    assert sorted(probed) == ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"]
+    assert hosts == [{"ip": "10.0.0.1", "hostname": None}]

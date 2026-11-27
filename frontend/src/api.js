@@ -393,6 +393,9 @@ export const graphApi = {
 // ── Analytics ────────────────────────────────────────────────────────
 export const analyticsApi = {
   discover:     (body)             => api("/analytics/discover", { method: "POST", body }),
+  discoveries:  (limit=10)         => api(`/analytics/discover/jobs?limit=${limit}`),
+  discovery:    (id)               => api(`/analytics/discover/jobs/${id}`),
+  cancelDiscovery: (id)            => api(`/analytics/discover/jobs/${id}/cancel`, { method: "POST" }),
   trending:     (days=30, interval="daily") => api(`/analytics/trending?days=${days}&interval=${interval}`),
   diff:         (jobA, jobB)       => api(`/analytics/diff?job_a=${jobA}&job_b=${jobB}`),
   executive:    ()                 => api("/analytics/executive"),

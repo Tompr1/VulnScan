@@ -54,3 +54,18 @@ def test_une_entree_cidr_invalide_est_ignoree_sans_ouvrir_l_allowlist():
 
 def test_l_allowlist_se_decrit_par_ses_entrees():
     assert str(AllowlistPolicy.from_setting("10.0.0.0/8, .Local")) == "10.0.0.0/8,.local"
+
+
+@pytest.mark.parametrize("setting, network, allowed", [
+    ("", "10.0.0.0/8", True),
+    ("10.0.0.0/8", "10.20.0.0/16", True),
+    ("10.0.0.0/8", "10.0.0.0/8", True),
+    ("10.20.0.0/16", "10.0.0.0/8", False),      # plus large que ce qui est permis
+    ("10.0.0.0/24,10.0.1.0/24", "10.0.0.0/23", False),  # à cheval : chaque plage doit tenir dans une entrée
+    ("10.0.0.5", "10.0.0.5/32", True),
+    (".corp.local", "10.0.0.0/24", False),
+])
+def test_une_plage_a_decouvrir_doit_tenir_dans_une_entree_de_l_allowlist(setting, network, allowed):
+    import ipaddress
+
+    assert AllowlistPolicy.from_setting(setting).allows_network(ipaddress.ip_network(network)) is allowed

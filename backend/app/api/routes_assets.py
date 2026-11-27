@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_role
 from app.db import models
+from app.discovery.known_targets import known_targets
 
 logger = logging.getLogger("v0cday.assets")
 
@@ -191,11 +192,13 @@ def create_assets_from_hosts(
 ):
     """Create one asset per discovered host, each with its target registered.
 
-    All or nothing: if any entry is invalid, nothing is created."""
+    All or nothing: if any entry is invalid, nothing is created. A host
+    already on an asset of the client is refused (409), so adding the same
+    discovery twice cannot create duplicates."""
     if not body.assets:
         raise HTTPException(400, "No host selected")
 
-    seen_targets: set[str] = set()
+    targets: list[str] = []  # normalized, in the order of body.assets
     for item in body.assets:
         if not item.name or not item.name.strip():
             raise HTTPException(400, f"Name is required for {item.target}")
@@ -205,16 +208,22 @@ def create_assets_from_hosts(
             raise HTTPException(400, f"Not an IP address: {item.target}")
         if addr.version != 4 or not addr.is_private:
             raise HTTPException(400, f"Only private IPv4 addresses can be added: {item.target}")
-        if item.target in seen_targets:
-            raise HTTPException(400, f"Duplicate host in selection: {item.target}")
-        seen_targets.add(item.target)
+        target = str(addr)
+        if target in targets:
+            raise HTTPException(400, f"Duplicate host in selection: {target}")
+        targets.append(target)
         _require_references_in_workspace(db, user["ws"], {
             "parent_id": item.parent_id,
             "default_credential_id": item.default_credential_id,
         })
 
+    known = known_targets(db, user["ws"])
+    already = [f"{t} (asset \"{known[t][1]}\")" for t in targets if t in known]
+    if already:
+        raise HTTPException(409, f"Already in assets: {', '.join(already)}")
+
     created = []
-    for item in body.assets:
+    for item, target in zip(body.assets, targets):
         a = models.Asset(
             workspace_id=user["ws"],
             name=item.name.strip(),
@@ -228,7 +237,7 @@ def create_assets_from_hosts(
         db.add(models.AssetTarget(
             workspace_id=user["ws"],
             asset_id=a.id,
-            target=item.target.strip(),
+            target=target,
         ))
         created.append(a)
 

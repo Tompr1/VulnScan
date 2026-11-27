@@ -443,6 +443,15 @@ class FakePlatform:
         self._maybe_fail("report")
         self.reports.append(report)
 
+    def discovery_progress(self, discovery_id, probed, hosts):
+        self._maybe_fail("discovery_progress")
+        self.progress_sent.append((discovery_id, {"probed": probed, "hosts": list(hosts)}))
+        return self.stop_after_progress is not None and len(self.progress_sent) >= self.stop_after_progress
+
+    def discovery_report(self, report):
+        self._maybe_fail("discovery_report")
+        self.reports.append(report)
+
     def reference_status(self):
         self._maybe_fail("reference_status")
         return {"cve_catalog_complete": self.catalog_complete,

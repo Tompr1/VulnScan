@@ -260,3 +260,39 @@ def test_un_jeton_qui_commence_par_un_tiret_s_enrole_avec_la_commande_affichee(p
     code = cli.main(["--config", str(tmp_path / "p.json"), "enroll", "--platform", PLATFORM, f"--token={token}"])
 
     assert token.startswith("-") and code == 0
+
+
+def test_une_decouverte_lancee_par_un_client_tourne_sur_sa_sonde(plateforme, session_factory, db, tmp_path, monkeypatch):
+    from app.discovery.jobs import start_discovery
+
+    app, _ = plateforme
+    admin = TestClient(app, base_url=PLATFORM)
+    monkeypatch.setattr(cli, "open_http", lambda *args, **kwargs: TestClient(app, base_url=PLATFORM))
+    config_path = tmp_path / "probe.json"
+    token = admin.post("/probes", json={"workspace_id": CLIENT, "name": "Paris"}).json()["enrollment"]["token"]
+    assert cli.main(["--config", str(config_path), "enroll", "--platform", PLATFORM, "--token", token]) == 0
+    config = ProbeConfig.load(config_path)
+
+    # Le client lance une découverte (possible : il a maintenant une sonde active).
+    job = start_discovery(db, CLIENT, "10.1.2.0/24", AllowlistPolicy.from_setting("10.0.0.0/8"))
+    vu_pendant = []
+
+    def reseau(net, on_progress, should_stop):
+        # Aucun paquet réel : le réseau du client est simulé.
+        on_progress(128, [{"ip": "10.1.2.7", "hostname": "nas.lan"}])
+        with session_factory() as s:
+            ligne = s.get(models.DiscoveryJob, job.id)
+            vu_pendant.append((ligne.status, ligne.probed, len(json.loads(ligne.hosts_json))))
+        return [{"ip": "10.1.2.7", "hostname": "nas.lan"}, {"ip": "10.1.2.40", "hostname": None}]
+
+    client = PlatformClient(TestClient(app, base_url=PLATFORM), config.authorization, "test")
+    agent = ProbeAgent(client, RemoteReferenceData(client, tmp_path / "ref"), lambda a, c: {},
+                       ReportOutbox(tmp_path / "outbox"), wait_seconds=0, discover=reseau)
+    assert asyncio.run(agent.run_once()) is True
+
+    db.expire_all()
+    fini = db.get(models.DiscoveryJob, job.id)
+    assert vu_pendant == [("running", 128, 1)]
+    assert (fini.status, fini.probed, fini.probe_id) == ("done", 254, config.probe_id)
+    assert [h["ip"] for h in json.loads(fini.hosts_json)] == ["10.1.2.7", "10.1.2.40"]
+    assert ReportOutbox(tmp_path / "outbox").pending() == []

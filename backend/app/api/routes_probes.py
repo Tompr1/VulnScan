@@ -16,7 +16,9 @@ from app.api.deps import get_db, require_global_admin
 from app.core.config import settings
 from app.db import models
 from app.probes import events
-from app.probes.placement import DELEGABLE_SCAN_TYPES, PROBE, NotDelegableError, probe_scan_types, set_probe_scan_types
+from app.probes.placement import (
+    DELEGABLE_SCAN_TYPES, PROBE, NotDelegableError, probe_execution_is_default, probe_scan_types, set_probe_scan_types,
+)
 from app.probes.registry import Enrollment, ProbeRegistry, ProbeStateError, display_status
 from app.scan_jobs.outcome import JobStatus
 
@@ -63,6 +65,9 @@ def list_probes(db: Session = Depends(get_db)):
                 "id": client.id,
                 "name": client.name,
                 "probe_scan_types": probe_scan_types(db, client.id),
+                # Not chosen by Root yet: the default list (internal + API
+                # with an active probe, nothing without).
+                "probe_scan_types_default": probe_execution_is_default(db, client.id),
                 "waiting_jobs": waiting.get(client.id, 0),
             }
             for client in clients
@@ -97,6 +102,7 @@ def renew_enrollment(probe_id: int, db: Session = Depends(get_db)):
 def revoke_probe(probe_id: int, db: Session = Depends(get_db)):
     probe = _get(db, probe_id)
     _registry(db).revoke(probe, _now())
+    _close_discoveries(db, probe, f"The probe {probe.name} was revoked")
     client = db.get(models.Workspace, probe.workspace_id)
     return _probe(probe, {probe.workspace_id: client.name if client else ""}, _now(), 0)
 
@@ -104,7 +110,9 @@ def revoke_probe(probe_id: int, db: Session = Depends(get_db)):
 @router.delete("/{probe_id}")
 def delete_probe(probe_id: int, db: Session = Depends(get_db)):
     probe = _get(db, probe_id)
+    _close_discoveries(db, probe, f"The probe {probe.name} was deleted")
     db.query(models.ScanJob).filter(models.ScanJob.probe_id == probe.id).update({"probe_id": None})
+    db.query(models.DiscoveryJob).filter(models.DiscoveryJob.probe_id == probe.id).update({"probe_id": None})
     db.delete(probe)
     db.commit()
     return {"deleted": probe_id}
@@ -130,7 +138,17 @@ def set_client_execution(workspace_id: int, body: ExecutionBody, db: Session = D
         chosen = set_probe_scan_types(db, workspace_id, body.scan_types)
     except NotDelegableError as exc:
         raise HTTPException(422, str(exc)) from None
-    return {"workspace_id": workspace_id, "probe_scan_types": chosen}
+    return {"workspace_id": workspace_id, "probe_scan_types": chosen, "probe_scan_types_default": False}
+
+
+def _close_discoveries(db: Session, probe: models.Probe, reason: str) -> None:
+    """The probe's running discoveries can no longer report: close them,
+    keeping the hosts it already sent."""
+    db.query(models.DiscoveryJob).filter(
+        models.DiscoveryJob.probe_id == probe.id, models.DiscoveryJob.status == "running",
+    ).update({"status": "failed", "error": f"{reason} during the discovery. The hosts found so far are kept.",
+              "finished_at": _now()})
+    db.commit()
 
 
 def _get(db: Session, probe_id: int) -> models.Probe:

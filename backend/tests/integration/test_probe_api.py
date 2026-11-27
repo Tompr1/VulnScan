@@ -70,9 +70,9 @@ class Env:
         reponse = self.https.post("/probe/v1/enroll", json={"token": creee["enrollment"]["token"], "hostname": "probe-01"})
         return creee["id"], {"Authorization": f"Probe {reponse.json()['credential']}", "X-Probe-Version": "0.1.0"}
 
-    def job_soumis(self, job_id, workspace_id=CLIENT):
+    def job_soumis(self, job_id, workspace_id=CLIENT, scan_type="internal"):
         self.db.add(models.ScanJob(id=job_id, workspace_id=workspace_id, target="10.0.0.5", profile_id=5,
-                                   status="queued", scan_type="internal"))
+                                   status="queued", scan_type=scan_type))
         self.db.commit()
         ProbeAwareJobQueue(self.session_factory, self.file).enqueue_scan(job_id)
 
@@ -339,3 +339,167 @@ def test_le_client_voit_sur_quelle_sonde_ses_scans_ont_tourne(env):
 
     assert liste == {20: ("probe", "site-paris"), 21: ("platform", None)}
     assert (detail["runs_on"], detail["probe_name"]) == ("probe", "site-paris")
+
+
+# ── Placement par défaut : un client équipé d'une sonde l'utilise ─────────────
+
+def test_avec_une_sonde_active_les_scans_internes_et_api_y_vont_par_defaut(env):
+    env.sonde_enrolee()
+
+    env.job_soumis(20, scan_type="internal")
+    env.job_soumis(21, scan_type="api")
+    env.job_soumis(22, scan_type="external")
+
+    env.db.expire_all()
+    assert [env.db.get(models.ScanJob, i).runs_on for i in (20, 21, 22)] == ["probe", "probe", "platform"]
+    assert env.file.scans == [22]
+
+
+def test_une_sonde_creee_mais_pas_encore_enrolee_ne_change_rien(env):
+    env.https.post("/probes", json={"workspace_id": CLIENT, "name": "a-installer"})
+
+    env.job_soumis(20)
+
+    assert env.file.scans == [20]
+
+
+def test_root_voit_le_choix_par_defaut_et_peut_le_remplacer(env):
+    env.sonde_enrolee()
+    avant = {c["id"]: c for c in env.https.get("/probes").json()["clients"]}
+
+    env.https.put(f"/probes/clients/{CLIENT}/execution", json={"scan_types": []})
+    apres = {c["id"]: c for c in env.https.get("/probes").json()["clients"]}
+    env.job_soumis(20)
+
+    assert (avant[CLIENT]["probe_scan_types"], avant[CLIENT]["probe_scan_types_default"]) == (["internal", "api"], True)
+    assert (apres[CLIENT]["probe_scan_types"], apres[CLIENT]["probe_scan_types_default"]) == ([], False)
+    assert env.file.scans == [20], "tout ramené sur la plateforme par Root"
+
+
+# ── Découverte d'hôtes sur la sonde ───────────────────────────────────────────
+
+AVEC_DECOUVERTE = {"wait": 0, "kinds": "scan,discovery"}
+
+
+def _decouverte_en_attente(env, workspace_id=CLIENT, network_range="10.1.2.0/24"):
+    job = models.DiscoveryJob(workspace_id=workspace_id, network_range=network_range, status="queued",
+                              total=254, hosts_json="[]")
+    env.db.add(job)
+    env.db.commit()
+    return job.id
+
+
+def test_une_decouverte_part_sur_la_sonde_et_en_revient(env):
+    probe_id, sonde = env.sonde_enrolee()
+    decouverte = _decouverte_en_attente(env)
+
+    prise = env.https.get("/probe/v1/jobs/next", params=AVEC_DECOUVERTE, headers=sonde)
+    progression = env.https.post(f"/probe/v1/discoveries/{decouverte}/progress", headers=sonde,
+                                 json={"probed": 128, "hosts": [{"ip": "10.1.2.7", "hostname": "nas.lan"}]})
+    env.db.expire_all()
+    en_cours = env.db.get(models.DiscoveryJob, decouverte)
+    vu_en_cours = (en_cours.status, en_cours.probe_id, en_cours.probed, json.loads(en_cours.hosts_json))
+    rapport = env.https.post(f"/probe/v1/discoveries/{decouverte}/report", headers=sonde, json={
+        "discovery_id": decouverte, "status": "done", "probed": 254,
+        "hosts": [{"ip": "10.1.2.40", "hostname": None}, {"ip": "10.1.2.7", "hostname": "nas.lan"}],
+    })
+    renvoi = env.https.post(f"/probe/v1/discoveries/{decouverte}/report", headers=sonde,
+                            json={"discovery_id": decouverte, "status": "done", "probed": 254, "hosts": []})
+
+    assert prise.status_code == 200
+    assert prise.headers["Cache-Control"] == "no-store"
+    assert prise.json() == {"kind": "discovery", "discovery_id": decouverte, "workspace_id": CLIENT,
+                            "network_range": "10.1.2.0/24", "allowlist": "10.0.0.0/8", "budget_seconds": 3600}
+    assert progression.json() == {"cancel": False}
+    assert vu_en_cours == ("running", probe_id, 128, [{"ip": "10.1.2.7", "hostname": "nas.lan"}])
+    assert rapport.status_code == 200
+    env.db.expire_all()
+    fini = env.db.get(models.DiscoveryJob, decouverte)
+    assert (fini.status, fini.probed, fini.error) == ("done", 254, None)
+    assert [h["ip"] for h in json.loads(fini.hosts_json)] == ["10.1.2.7", "10.1.2.40"], "triés par adresse"
+    assert renvoi.status_code == 404, "un rapport n'est accepté qu'une fois"
+    assert [e["kind"] for e in env.https.get(f"/probes/{probe_id}/events").json()][:2] == ["report_received", "job_claimed"]
+
+
+def test_une_sonde_d_avant_la_decouverte_ne_la_recoit_pas(env):
+    _, sonde = env.sonde_enrolee()
+    _decouverte_en_attente(env)
+
+    reponse = env.https.get("/probe/v1/jobs/next", params={"wait": 0}, headers=sonde)
+
+    assert reponse.status_code == 204
+
+
+def test_la_decouverte_passe_avant_les_scans_en_attente(env):
+    _, sonde = env.sonde_enrolee()
+    env.job_soumis(20)
+    decouverte = _decouverte_en_attente(env)
+
+    premier = env.https.get("/probe/v1/jobs/next", params=AVEC_DECOUVERTE, headers=sonde).json()
+    second = env.https.get("/probe/v1/jobs/next", params=AVEC_DECOUVERTE, headers=sonde).json()
+
+    assert (premier.get("discovery_id"), second.get("job_id")) == (decouverte, 20)
+
+
+def test_une_annulation_de_decouverte_est_transmise_a_la_sonde(env):
+    _, sonde = env.sonde_enrolee()
+    decouverte = _decouverte_en_attente(env)
+    env.https.get("/probe/v1/jobs/next", params=AVEC_DECOUVERTE, headers=sonde)
+    env.db.get(models.DiscoveryJob, decouverte).cancel_requested = True
+    env.db.commit()
+
+    reponse = env.https.post(f"/probe/v1/discoveries/{decouverte}/progress", json={"probed": 10, "hosts": []},
+                             headers=sonde)
+
+    assert reponse.json() == {"cancel": True}
+
+
+@pytest.mark.parametrize("hotes", [
+    [{"ip": "10.9.9.9", "hostname": None}],      # hors de la plage découverte
+    [{"ip": "pas-une-ip", "hostname": None}],
+    "pas une liste",
+])
+def test_des_hotes_incoherents_sont_refuses(env, hotes):
+    _, sonde = env.sonde_enrolee()
+    decouverte = _decouverte_en_attente(env)
+    env.https.get("/probe/v1/jobs/next", params=AVEC_DECOUVERTE, headers=sonde)
+
+    reponse = env.https.post(f"/probe/v1/discoveries/{decouverte}/progress", json={"probed": 1, "hosts": hotes},
+                             headers=sonde)
+
+    assert reponse.status_code == 422
+
+
+def test_une_sonde_ne_voit_pas_les_decouvertes_d_un_autre_client(env):
+    _, sonde = env.sonde_enrolee(CLIENT)
+    decouverte = _decouverte_en_attente(env, VOISIN)
+
+    prise = env.https.get("/probe/v1/jobs/next", params=AVEC_DECOUVERTE, headers=sonde)
+    progression = env.https.post(f"/probe/v1/discoveries/{decouverte}/progress", json={"probed": 1, "hosts": []},
+                                 headers=sonde)
+
+    assert (prise.status_code, progression.status_code) == (204, 404)
+
+
+def test_revoquer_une_sonde_clot_sa_decouverte_en_cours(env):
+    probe_id, sonde = env.sonde_enrolee()
+    decouverte = _decouverte_en_attente(env)
+    env.https.get("/probe/v1/jobs/next", params=AVEC_DECOUVERTE, headers=sonde)
+
+    env.https.post(f"/probes/{probe_id}/revoke")
+
+    env.db.expire_all()
+    job = env.db.get(models.DiscoveryJob, decouverte)
+    assert job.status == "failed" and "revoked" in job.error
+
+
+def test_supprimer_une_sonde_garde_ses_decouvertes(env):
+    probe_id, sonde = env.sonde_enrolee()
+    decouverte = _decouverte_en_attente(env)
+    env.https.get("/probe/v1/jobs/next", params=AVEC_DECOUVERTE, headers=sonde)
+
+    assert env.https.delete(f"/probes/{probe_id}").status_code == 200
+
+    env.db.expire_all()
+    job = env.db.get(models.DiscoveryJob, decouverte)
+    assert (job.status, job.probe_id) == ("failed", None)
