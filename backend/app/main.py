@@ -316,6 +316,27 @@ def _run_migrations(db: Session) -> None:
             ADD COLUMN IF NOT EXISTS name VARCHAR(255),
             ADD COLUMN IF NOT EXISTS credential_id INTEGER REFERENCES credentials(id) ON DELETE SET NULL;
         """,
+        # Threat Intel "present on my fleet": link the findings saved before
+        # finding_cves existed (create_all) to the CVEs their text names —
+        # once, the marker being written in the same statement. New findings
+        # are linked when saved (app.cve.ids).
+        """
+        WITH marker AS (
+            INSERT INTO platform_settings (key, value_json, updated_at)
+            VALUES ('finding_cves_backfill', '{"done": true}', NOW())
+            ON CONFLICT (key) DO NOTHING
+            RETURNING key
+        )
+        INSERT INTO finding_cves (finding_id, workspace_id, cve)
+        SELECT DISTINCT f.id, f.workspace_id, upper(m[1])
+        FROM findings f
+        CROSS JOIN LATERAL regexp_matches(
+            concat_ws(' ', f.title, f.description, f.evidence, f.references_json),
+            '\m(CVE-[0-9]{4}-[0-9]{4,})', 'gi'
+        ) AS m
+        WHERE EXISTS (SELECT 1 FROM marker) AND length(m[1]) <= 32
+        ON CONFLICT (finding_id, cve) DO NOTHING;
+        """,
     ]
     for sql in migrations:
         try:

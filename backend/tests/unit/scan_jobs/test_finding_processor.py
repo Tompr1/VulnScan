@@ -183,3 +183,14 @@ def test_l_etat_de_validation_est_lu_dans_la_preuve(evidence, state, method):
 )
 def test_les_options_de_filtrage_invalides_gardent_leur_valeur_par_defaut(options, expected):
     assert FindingFilterPolicy.from_profile_options(options) == expected
+
+
+def test_les_cve_d_un_constat_sont_relevees_pour_le_threat_intel():
+    raw = finding(
+        "Apache 2.4.49 (cve-2021-41773)", cve="CVE-2021-42013", cves=["CVE-2021-40438"],
+        description="Also fixes CVE-2021-41524.", references=["https://nvd.nist.gov/vuln/detail/CVE-2021-44790"],
+    )
+
+    saved = process_one(raw)
+
+    assert saved.cve_ids == ("CVE-2021-40438", "CVE-2021-41524", "CVE-2021-41773", "CVE-2021-42013", "CVE-2021-44790")

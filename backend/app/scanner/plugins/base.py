@@ -56,6 +56,9 @@ class Finding:
     references: list[str] = field(default_factory=list)
     cvss: float | None = None
     cve: str | None = None
+    # Every CVE the finding is about, when it is more than ``cve`` (an
+    # inventory product listing all its known vulnerabilities).
+    cves: list[str] = field(default_factory=list)
     is_kev: bool = False
     confidence: float = 1.0
     affected: str = ""

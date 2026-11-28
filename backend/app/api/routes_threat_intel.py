@@ -4,6 +4,7 @@ Threat Intel API — fused NVD + EPSS + CISA KEV per CVE.
 Endpoints:
   GET /threat-intel/cves          — paginated, filterable, sortable list
   GET /threat-intel/cves/{cve_id} — single-CVE detail
+  GET /threat-intel/cves/{cve_id}/affected — where it is on the open client's fleet
   GET /threat-intel/stats         — summary counters (used for dashboard tiles)
   POST /threat-intel/refresh      — rebuild the table if the datasets changed
 
@@ -16,10 +17,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_shared_reader
+from app.api.deps import get_db, require_role, require_shared_reader
 from app.core.config import settings
 from app.core.job_queue import get_job_queue
-from app.threat_intel import aggregator
+from app.threat_intel import aggregator, exposure
 
 logger = logging.getLogger("v0cday.api.threat_intel")
 router = APIRouter(prefix="/threat-intel", tags=["threat-intel"])
@@ -42,6 +43,7 @@ def list_cves(
     ransomware_only: bool = Query(False),
     min_epss: Optional[float] = Query(None, ge=0.0, le=1.0),
     min_cvss: Optional[float] = Query(None, ge=0.0, le=10.0),
+    on_fleet: bool = Query(False, description="Only the CVEs found on the open client's fleet"),
     sort: str = Query("threat_score", description="threat_score | cvss | epss | kev_due | kev_added"),
     order: str = Query("desc", description="asc | desc"),
     page: int = Query(1, ge=1),
@@ -50,6 +52,10 @@ def list_cves(
     db: Session = Depends(get_db),
 ):
     sev_list = [s.strip() for s in (severity or "").split(",") if s.strip()] or None
+    # The catalog is shared; the fleet is the open client's (none on Root).
+    client_id = user.get("ws")
+    if on_fleet and client_id is None:
+        raise HTTPException(400, "Open a client to filter on its fleet")
     return aggregator.query(
         db,
         q=q, severity=sev_list,
@@ -57,6 +63,7 @@ def list_cves(
         min_epss=min_epss, min_cvss=min_cvss,
         sort=sort, order=order,
         page=page, per_page=per_page,
+        fleet_workspace=client_id, on_fleet_only=on_fleet,
     )
 
 
@@ -70,6 +77,17 @@ def get_cve(
     if not rec:
         raise HTTPException(404, f"CVE not found in Threat Intel: {cve_id}")
     return rec
+
+
+@router.get("/cves/{cve_id}/affected")
+def affected_assets(
+    cve_id: str,
+    user=Depends(require_role("admin", "analyst", "viewer")),
+    db: Session = Depends(get_db),
+):
+    """Devices and scan targets of the open client whose current findings
+    name this CVE."""
+    return exposure.affected_places(db, user["ws"], cve_id)
 
 
 @router.post("/refresh")

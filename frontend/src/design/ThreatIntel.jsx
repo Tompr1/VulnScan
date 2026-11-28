@@ -12,7 +12,9 @@ const SORT_OPTIONS = [
 
 const SEVERITY_OPTIONS = ["critical", "high", "medium", "low"];
 
-export function ThreatIntel() {
+// `client`: a client is open (not Root), so each CVE can be crossed with its
+// fleet — the "On my fleet" filter and the affected assets of a CVE.
+export function ThreatIntel({ client = false, openDevice, openJob } = {}) {
   const [stats, setStats] = useState(null);
   const [loadingStats, setLoadingStats] = useState(true);
 
@@ -21,6 +23,7 @@ export function ThreatIntel() {
     severity: new Set(["critical", "high"]),
     kev_only: false,
     ransomware_only: false,
+    on_fleet: false,
     min_epss: 0,
     sort: "threat_score",
     order: "desc",
@@ -63,13 +66,14 @@ export function ThreatIntel() {
       severity: sev || undefined,
       kev_only: f.kev_only || undefined,
       ransomware_only: f.ransomware_only || undefined,
+      on_fleet: (client && f.on_fleet) || undefined,
       min_epss: f.min_epss > 0 ? f.min_epss : undefined,
       sort: f.sort,
       order: f.order,
       page: f.page,
       per_page: f.per_page,
     };
-  }, []);
+  }, [client]);
 
   const loadResults = useCallback(async (f) => {
     setLoading(true);
@@ -187,6 +191,14 @@ export function ThreatIntel() {
                   style={{fontSize: 11.5, padding: "3px 10px"}}>
             {filters.ransomware_only && <Icons.Check size={10}/>} Ransomware-known
           </button>
+          {client && (
+            <button className={`btn btn-sm ${filters.on_fleet ? "btn-primary" : ""}`}
+                    onClick={() => updateFilter({on_fleet: !filters.on_fleet})}
+                    title="Only the CVEs named by a current finding of this client (latest scan of each target, Intune audits)"
+                    style={{fontSize: 11.5, padding: "3px 10px"}}>
+              {filters.on_fleet ? <Icons.Check size={10}/> : <Icons.Server size={10}/>} On my fleet
+            </button>
+          )}
 
           <span style={{width: 1, height: 20, background: "var(--line)", margin: "0 4px"}}/>
 
@@ -204,7 +216,7 @@ export function ThreatIntel() {
 
           <span style={{flex: 1}}/>
           <span style={{fontSize: 12, color: "var(--text-3)"}}>
-            {(results?.total ?? 0).toLocaleString()} CVEs match
+            {(results?.total ?? 0).toLocaleString()} CVEs {client && filters.on_fleet ? "on this client's fleet" : "match"}
           </span>
         </div>
       </div>
@@ -219,14 +231,18 @@ export function ThreatIntel() {
             <Icons.AlertTriangle size={13}/> {error}
           </div>
         )}
-        <CVETable rows={results.cves} loading={loading} onSelect={setSelected}/>
+        <CVETable rows={results.cves} loading={loading} onSelect={setSelected} fleet={client}
+                  emptyText={client && filters.on_fleet
+                    ? "None of the CVEs matching these filters is on this client's fleet."
+                    : "No CVEs match the current filters."}/>
         <Pagination
           page={results.page} totalPages={results.total_pages}
           onPage={(p) => updateFilter({page: p})}
         />
       </div>
 
-      {selected && <CVEDrawer cveId={selected} close={() => setSelected(null)}/>}
+      {selected && <CVEDrawer cveId={selected} close={() => setSelected(null)}
+                              client={client} openDevice={openDevice} openJob={openJob}/>}
     </>
   );
 }
@@ -278,7 +294,7 @@ function StatsRow({ stats, loading }) {
 
 // ─── Results table ──────────────────────────────────────────────────────────
 
-function CVETable({ rows, loading, onSelect }) {
+function CVETable({ rows, loading, onSelect, fleet, emptyText }) {
   if (loading) {
     return <div style={{padding: 30, textAlign: "center", color: "var(--text-3)", fontSize: 13}}>
       <Icons.Refresh size={14} className="spin"/> Loading CVEs…
@@ -286,7 +302,7 @@ function CVETable({ rows, loading, onSelect }) {
   }
   if (rows.length === 0) {
     return <div style={{padding: 40, textAlign: "center", color: "var(--text-3)", fontSize: 13}}>
-      No CVEs match the current filters.
+      {emptyText}
     </div>;
   }
 
@@ -301,6 +317,7 @@ function CVETable({ rows, loading, onSelect }) {
             <th style={{...cellHead, width: 50, textAlign: "center"}}>KEV</th>
             <th style={{...cellHead, width: 80, textAlign: "center"}}>Ransom.</th>
             <th style={cellHead}>Vendor / product</th>
+            {fleet && <th style={{...cellHead, width: 90, textAlign: "center"}} title="Devices and scan targets of this client it is on">On fleet</th>}
             <th style={{...cellHead, width: 100, textAlign: "right"}}>Threat score</th>
           </tr>
         </thead>
@@ -335,6 +352,16 @@ function CVETable({ rows, loading, onSelect }) {
                   ? <span><span style={{color: "var(--text-1)"}}>{r.vendor || "—"}</span>{" "}<span style={{color: "var(--text-3)"}}>· {r.product || "—"}</span></span>
                   : <span style={{color: "var(--text-3)"}}>—</span>}
               </td>
+              {fleet && (
+                <td style={{...cell, textAlign: "center"}}>
+                  {r.affected > 0
+                    ? <span className="tag brand" title={`On ${r.affected} asset${r.affected > 1 ? "s" : ""} of this client`}
+                            style={{display: "inline-flex", alignItems: "center", gap: 4}}>
+                        <Icons.Server size={10}/> {r.affected}
+                      </span>
+                    : <span style={{color: "var(--text-3)"}}>—</span>}
+                </td>
+              )}
               <td style={{...cell, textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 600, color: scoreColor(r.threat_score)}}>
                 {(r.threat_score ?? 0).toFixed(1)}
               </td>
@@ -363,7 +390,7 @@ function Pagination({ page, totalPages, onPage }) {
 
 // ─── Detail drawer ──────────────────────────────────────────────────────────
 
-function CVEDrawer({ cveId, close }) {
+function CVEDrawer({ cveId, close, client, openDevice, openJob }) {
   const [rec, setRec] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -428,6 +455,15 @@ function CVEDrawer({ cveId, close }) {
                   ]}
                 />
               </div>
+
+              {/* Where it is on the open client's fleet */}
+              {client
+                ? <AffectedAssets cveId={cveId} openDevice={openDevice} openJob={openJob} close={close}/>
+                : (
+                  <div style={{marginBottom: 16, padding: "10px 14px", background: "var(--surface-1)", border: "1px solid var(--line)", borderRadius: 6, fontSize: 12, color: "var(--text-3)"}}>
+                    <Icons.Info size={11}/> Open a client to see which of its assets this CVE affects.
+                  </div>
+                )}
 
               {/* Description */}
               {rec.summary && (
@@ -524,14 +560,88 @@ function CVEDrawer({ cveId, close }) {
                 </Section>
               )}
 
-              <div style={{marginTop: 20, padding: "12px 14px", background: "var(--surface-1)", border: "1px solid var(--line)", borderRadius: 6, fontSize: 12, color: "var(--text-3)"}}>
-                <Icons.AlertTriangle size={11}/> "Find affected assets in workspace" cross-reference is coming in Phase 2 — for now, search the Findings page for this CVE-ID directly.
-              </div>
             </>
           )}
         </div>
       </div>
     </>
+  );
+}
+
+// Devices (Intune audit) and scan targets of the open client whose current
+// findings name the CVE; a row opens the device page or the scan.
+function AffectedAssets({ cveId, openDevice, openJob, close }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setData(null);
+    setError("");
+    threatIntelApi.affected(cveId)
+      .then(r => { if (!cancelled) setData(r); })
+      .catch(e => { if (!cancelled) setError(e.message || "Failed to load the affected assets"); });
+    return () => { cancelled = true; };
+  }, [cveId]);
+
+  const places = Array.isArray(data?.places) ? data.places : [];
+  const open = (p) => {
+    if (p.kind === "device" && openDevice) { close(); openDevice(p.device_id); }
+    else if (p.kind === "target" && openJob) { close(); openJob(p.job_id); }
+  };
+
+  return (
+    <Section title={data ? `Affected assets in this client (${data.total})` : "Affected assets in this client"}>
+      {!data && !error && (
+        <div style={{fontSize: 12, color: "var(--text-3)"}}><Icons.Refresh size={11} className="spin"/> Looking for it on the fleet…</div>
+      )}
+      {error && <div style={{fontSize: 12, color: "var(--err)"}}><Icons.AlertTriangle size={11}/> {error}</div>}
+      {data && places.length === 0 && (
+        <div style={{padding: "10px 14px", background: "var(--surface-1)", border: "1px solid var(--line)", borderRadius: 6, fontSize: 12, color: "var(--text-3)"}}>
+          <Icons.Check size={11}/> Not found on this client's fleet: no current finding (latest scan of each target, latest Intune audit) names this CVE.
+        </div>
+      )}
+      {places.length > 0 && (
+        <div style={{display: "flex", flexDirection: "column", gap: 6}}>
+          {places.map(p => {
+            const device = p.kind === "device";
+            const name = device ? (p.device_name || `Device #${p.device_id}`) : (p.asset_name || p.target);
+            const detail = device
+              ? [p.platform, "Intune audit"].filter(Boolean).join(" · ")
+              : [p.asset_name ? p.target : null, p.scan_type ? `${p.scan_type} scan #${p.job_id}` : `scan #${p.job_id}`].filter(Boolean).join(" · ");
+            const titles = (p.findings || []).map(f => f.title);
+            return (
+              <button key={`${p.kind}-${p.device_id ?? p.target}`} type="button" onClick={() => open(p)}
+                      title={device ? "Open the device" : "Open the scan"}
+                      style={{display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", cursor: "pointer",
+                              padding: "8px 12px", background: "var(--surface-1)", border: "1px solid var(--line)", borderRadius: 6,
+                              color: "inherit", font: "inherit"}}>
+                {device ? <Icons.Monitor size={14} color="var(--text-2)"/> : <Icons.Server size={14} color="var(--text-2)"/>}
+                <div style={{flex: 1, minWidth: 0}}>
+                  <div style={{fontSize: 12.5, fontWeight: 600, color: "var(--text-0)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>
+                    {name}
+                    <span style={{fontWeight: 400, color: "var(--text-3)", marginLeft: 8}}>{detail}</span>
+                  </div>
+                  <div style={{fontSize: 11.5, color: "var(--text-2)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>
+                    {titles.slice(0, 2).join(" · ")}{titles.length > 2 ? ` · +${titles.length - 2} more` : ""}
+                  </div>
+                </div>
+                {p.seen_at && (
+                  <span style={{fontSize: 11, color: "var(--text-3)", whiteSpace: "nowrap"}}>{new Date(p.seen_at).toLocaleDateString()}</span>
+                )}
+                <span className="tag" style={{background: severityColor(p.severity), color: "#0a0a0a", textTransform: "uppercase", fontSize: 10, fontWeight: 700}}>
+                  {p.severity || "—"}
+                </span>
+                <Icons.ChevronRight size={12} color="var(--text-3)"/>
+              </button>
+            );
+          })}
+          {data.truncated && (
+            <span style={{fontSize: 11, color: "var(--text-3)"}}>Showing the {places.length} most urgent of {data.total}.</span>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }
 

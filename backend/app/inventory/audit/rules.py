@@ -203,6 +203,7 @@ class VulnerableSoftwareRule:
             confidence=0.9,  # curated product identification, NVD version ranges
             references=tuple(f"https://nvd.nist.gov/vuln/detail/{v.cve_id}" for v in vulnerabilities[:5]),
             cve=most_urgent.cve_id,
+            cves=tuple(v.cve_id for v in vulnerabilities),
             cvss=highest,
             is_kev=bool(exploited),
         )

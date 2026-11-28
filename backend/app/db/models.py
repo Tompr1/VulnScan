@@ -282,6 +282,22 @@ class Finding(Base):
     )
 
 
+class FindingCve(Base):
+    """A CVE a finding names (app.cve.ids), so Threat Intel can tell which
+    of its CVEs are on a client's fleet and where, without reading every
+    finding's text."""
+
+    __tablename__ = "finding_cves"
+    __table_args__ = (
+        UniqueConstraint("finding_id", "cve", name="uq_finding_cves_finding_cve"),
+        Index("ix_finding_cves_workspace_cve", "workspace_id", "cve"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"))
+    cve: Mapped[str] = mapped_column(String(32))
+
+
 class SuppressedFinding(Base):
     __tablename__ = "suppressed_findings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

@@ -108,6 +108,7 @@ VALEURS_DE_CHEMIN = {
     "target": CIBLE_DU_VOISIN,
     "group_id": V.groupe,
     "grant_id": V.attribution,
+    "cve_id": "CVE-2099-0001",  # nommée par un constat du voisin
     "probe_id": V.sonde,
     "workspace_id": VOISIN,
     "discovery_id": V.decouverte,
@@ -293,6 +294,7 @@ def donnees(db, workspace, tmp_path):
     db.flush()
     db.add_all([
         models.InventoryDeviceApp(device_id=V.appareil, name="logiciel-voisin", version="1.0"),
+        models.FindingCve(finding_id=V.finding, workspace_id=VOISIN, cve="CVE-2099-0001"),
         models.ProbeEvent(probe_id=V.sonde, workspace_id=VOISIN, kind="job_claimed", job_id=V.job,
                           detail="scan de srv.voisin.example", at=maintenant),
         models.DiscoveryJob(id=V.decouverte, workspace_id=VOISIN, network_range="10.10.0.0/24", status="running",
