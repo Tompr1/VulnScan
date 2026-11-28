@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from app.core.platform_settings import get_platform_setting, set_platform_setting
 from app.cve.reference_datasets import REFRESH_LOCK_KEY, latest_dataset_path
 from app.db import models
+from app.threat_intel import exposure
 
 logger = logging.getLogger("v0cday.threat_intel")
 
@@ -379,7 +380,12 @@ def query(
     page: int = 1,
     per_page: int = 50,
     today: date | None = None,
+    fleet_workspace: int | None = None,
+    on_fleet_only: bool = False,
 ) -> dict[str, Any]:
+    """``fleet_workspace``: the open client, whose fleet each CVE is
+    counted on (``affected``); ``on_fleet_only`` keeps only the CVEs found on
+    it (app.threat_intel.exposure)."""
     today = today or date.today()
     score = _score_column(today)
     rows = db.query(
@@ -402,6 +408,8 @@ def query(
         rows = rows.filter(func.coalesce(T.epss, 0.0) >= min_epss)
     if min_cvss is not None:
         rows = rows.filter(func.coalesce(T.cvss, 0.0) >= min_cvss)
+    if on_fleet_only and fleet_workspace is not None:
+        rows = rows.filter(T.cve.in_(exposure.fleet_cves(fleet_workspace)))
 
     total = rows.count()
 
@@ -419,13 +427,18 @@ def query(
     per_page = max(1, min(per_page, 200))
     page = max(1, page)
     page_rows = rows.order_by(key, T.cve.asc()).offset((page - 1) * per_page).limit(per_page).all()
+    cves = [_summarise(r, today) for r in page_rows]
+    if fleet_workspace is not None:
+        counts = exposure.affected_counts(db, fleet_workspace, [c["cve"] for c in cves])
+        for c in cves:
+            c["affected"] = counts.get(c["cve"], 0)
 
     return {
         "total": total,
         "page": page,
         "per_page": per_page,
         "total_pages": max(1, -(-total // per_page)),
-        "cves": [_summarise(r, today) for r in page_rows],
+        "cves": cves,
     }
 
 

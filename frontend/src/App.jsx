@@ -276,12 +276,22 @@ function ClientWorkspace({ user, route, navigate, onOpenSelector, onSignOut, ver
     return () => clearInterval(t);
   }, [refreshCounts]);
 
-  // Browser back/forward to another page closes what was open on this one.
-  useEffect(() => { setOpenedJob(null); setOpenedAsset(null); }, [page]);
+  // Browser back/forward to another page closes what was open on this one
+  // — except the scan another page asked to open (openJob).
+  const pendingJob = useRef(null);
+  useEffect(() => { setOpenedJob(pendingJob.current); pendingJob.current = null; setOpenedAsset(null); }, [page]);
 
   const go = useCallback((target) => navigate(routeHash({ clientId, ...target })), [navigate, clientId]);
   const openDevice = useCallback((id) => go({ page: "inventory", deviceId: id }), [go]);
   const closeDevice = useCallback(() => go({ page: "inventory" }), [go]);
+  const openJob = useCallback(async (id) => {
+    try {
+      const r = await scanApi.getJob(id);
+      if (page === "jobs") { setOpenedJob(r.job); return; }
+      pendingJob.current = r.job;
+      go({ page: "jobs" });
+    } catch {}
+  }, [go, page]);
 
   function setPageWrap(p, tab) {
     setOpenedJob(null); setOpenedAsset(null);
@@ -320,7 +330,7 @@ function ClientWorkspace({ user, route, navigate, onOpenSelector, onSignOut, ver
           {page === "profiles"    && <Profiles/>}
           {page === "reports"     && <Reports/>}
           {page === "credentials" && <Credentials/>}
-          {page === "threat-intel"&& <ThreatIntel/>}
+          {page === "threat-intel"&& <ThreatIntel client openDevice={openDevice} openJob={openJob}/>}
           {page === "attack-graph"&& <AttackGraph/>}
           {page === "analytics"  && <Analytics/>}
           {page === "settings"    && <Settings initialTab={settingsTab}/>}

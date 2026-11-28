@@ -96,6 +96,7 @@ def device_finding(issue: AuditIssue, audited: AuditedDevice) -> Finding:
         references=list(issue.references),
         cvss=issue.cvss,
         cve=issue.cve,
+        cves=list(issue.cves),
         is_kev=issue.is_kev,
         confidence=issue.confidence,
         affected=device.name,

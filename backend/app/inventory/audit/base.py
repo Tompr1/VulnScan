@@ -34,6 +34,7 @@ class AuditIssue:
     confidence: float = 1.0
     references: tuple[str, ...] = ()
     cve: str | None = None  # the most urgent CVE, when the issue is about CVEs
+    cves: tuple[str, ...] = ()  # all of them (the description lists the first ones)
     cvss: float | None = None
     is_kev: bool = False
 

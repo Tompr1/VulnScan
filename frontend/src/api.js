@@ -375,6 +375,7 @@ export const threatIntelApi = {
     return api(`/threat-intel/cves${s ? "?" + s : ""}`);
   },
   detail:   (cveId)             => api(`/threat-intel/cves/${encodeURIComponent(cveId)}`),
+  affected: (cveId)             => api(`/threat-intel/cves/${encodeURIComponent(cveId)}/affected`),
   refresh:  ()                  => api("/threat-intel/refresh", { method: "POST" }),
 };
 

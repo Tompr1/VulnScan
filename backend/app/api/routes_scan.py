@@ -457,10 +457,15 @@ def delete_job(
         models.AiAnalysis.workspace_id == ws_id,
     ).delete()
 
-    db.query(models.Finding).filter(
+    job_findings = db.query(models.Finding).filter(
         models.Finding.job_id == job_id,
         models.Finding.workspace_id == ws_id,
-    ).delete()
+    )
+    # ON DELETE CASCADE in PostgreSQL; SQLite (demo) does not enforce it.
+    db.query(models.FindingCve).filter(
+        models.FindingCve.finding_id.in_(job_findings.with_entities(models.Finding.id).scalar_subquery())
+    ).delete(synchronize_session=False)
+    job_findings.delete()
 
     db.delete(job)
     db.commit()

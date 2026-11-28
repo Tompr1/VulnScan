@@ -167,7 +167,13 @@ class SqlScanJobRepository:
 
     def save_findings(self, job: ScanJobSnapshot, findings: list[ProcessedFinding]) -> None:
         with self._session_factory() as db:
-            db.add_all(_finding_row(job, finding) for finding in findings)
+            rows = [(_finding_row(job, finding), finding.cve_ids) for finding in findings]
+            db.add_all(row for row, _ in rows)
+            db.flush()  # ids for the CVE links
+            db.add_all(
+                models.FindingCve(finding_id=row.id, workspace_id=job.workspace_id, cve=cve)
+                for row, cve_ids in rows for cve in cve_ids
+            )
             db.commit()
 
     def delete_ephemeral_credential(self, job: ScanJobSnapshot) -> None:

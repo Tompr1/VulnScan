@@ -14,6 +14,7 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from app.cve.ids import finding_cve_ids
 from app.risk.risk_engine import DEFAULT_CRITICALITY, RiskFactors, compute_risk
 from app.risk.severity import Severity
 from app.risk.sla_engine import assign_sla_days, sla_policy_text
@@ -52,6 +53,8 @@ class ProcessedFinding:
     is_kev: bool
     cve: str | None
     device_id: int | None = None
+    # Every CVE the finding names (app.cve.ids): links it to Threat Intel.
+    cve_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -150,6 +153,10 @@ class FindingProcessor:
             is_kev=finding.is_kev,
             cve=finding.cve if finding.cve and finding.cve.startswith("CVE-") else None,
             device_id=finding.device_id,
+            cve_ids=finding_cve_ids(
+                cve=finding.cve, cves=finding.cves, title=finding.title, description=finding.description,
+                evidence=finding.evidence, references=finding.references or (),
+            ),
         )
 
 

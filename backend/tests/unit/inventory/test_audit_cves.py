@@ -307,6 +307,8 @@ def test_la_liste_des_cve_est_tronquee_au_dela_de_quinze():
     lines = issue.description.splitlines()
     assert len(lines) == 1 + 15 + 1 and lines[-1] == "- … and 5 more"
     assert issue.title.endswith("has 20 known vulnerabilities")
+    # Threat Intel voit pourtant les 20 (« présente sur mon parc »).
+    assert sorted(issue.cves) == sorted(f"CVE-2025-{9000 + n}" for n in range(20))
 
 
 def test_un_appareil_sans_cve_ne_produit_rien():
