@@ -27,6 +27,8 @@ CVE_CATALOG_SYNC_TASK = "app.worker_tasks.run_cve_catalog_sync"
 # Above the sync's own time budget (NvdCatalogSync.budget_seconds), so a run
 # always stops by itself and saves its progress before RQ would kill it.
 CVE_CATALOG_SYNC_TIMEOUT = 7200
+THREAT_INTEL_REBUILD_TASK = "app.worker_tasks.run_threat_intel_rebuild"
+THREAT_INTEL_REBUILD_TIMEOUT = 1800
 
 
 class QueueUnavailableError(RuntimeError):
@@ -50,6 +52,11 @@ class CveCatalogSyncQueue(Protocol):
     def enqueue_cve_catalog_sync(self) -> None: ...
 
 
+class ThreatIntelRebuildQueue(Protocol):
+    def enqueue_threat_intel_rebuild(self) -> None:
+        """Rebuild the Threat Intel table from the datasets, in the datasets worker."""
+
+
 class RqJobQueue:
     def __init__(self, redis_url: str, scan_timeout: int, ai_analysis_timeout: int) -> None:
         self._redis_url = redis_url
@@ -69,10 +76,16 @@ class RqJobQueue:
     def enqueue_cve_catalog_sync(self) -> None:
         self._enqueue("datasets", CVE_CATALOG_SYNC_TASK, None, CVE_CATALOG_SYNC_TIMEOUT)
 
-    def _enqueue(self, queue_name: str, task: str, argument: int | None, timeout: int, *more: Any) -> None:
+    def enqueue_threat_intel_rebuild(self) -> None:
+        # A few seconds: ahead of a queued NVD catalog sync, which takes hours.
+        self._enqueue("datasets", THREAT_INTEL_REBUILD_TASK, None, THREAT_INTEL_REBUILD_TIMEOUT, at_front=True)
+
+    def _enqueue(self, queue_name: str, task: str, argument: int | None, timeout: int, *more: Any, at_front: bool = False) -> None:
         arguments = (() if argument is None else (argument,)) + more
         try:
-            Queue(queue_name, connection=Redis.from_url(self._redis_url)).enqueue(task, *arguments, job_timeout=timeout)
+            Queue(queue_name, connection=Redis.from_url(self._redis_url)).enqueue(
+                task, *arguments, job_timeout=timeout, at_front=at_front,
+            )
         except RedisError as exc:
             raise QueueUnavailableError(str(exc)) from exc
 
@@ -135,6 +148,9 @@ class ProbeAwareJobQueue:
 
     def enqueue_cve_catalog_sync(self) -> None:
         self._platform.enqueue_cve_catalog_sync()
+
+    def enqueue_threat_intel_rebuild(self) -> None:
+        self._platform.enqueue_threat_intel_rebuild()
 
 
 def get_job_queue() -> ProbeAwareJobQueue:

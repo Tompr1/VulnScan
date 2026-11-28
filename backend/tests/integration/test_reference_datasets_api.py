@@ -45,11 +45,11 @@ def referentiel(db, tmp_path):
     kev.write_text(json.dumps([{"cveID": "CVE-2024-0001", "vendorProject": "Acme", "product": "Tool"}]))
     db.add(models.CveDataset(id=10, name="CISA KEV", kind="cisa_kev", path=str(kev), enabled=True))
     db.commit()
+    aggregator.rebuild(db)
 
 
 @pytest.fixture
 def client(session_factory, referentiel):
-    aggregator.invalidate()
     app = FastAPI()
     install_validation_error_handler(app)
     for module in (routes_datasets, routes_settings, routes_threat_intel):
@@ -62,7 +62,6 @@ def client(session_factory, referentiel):
     app.dependency_overrides[get_db] = test_db
     app.dependency_overrides[require_auth] = lambda: session(ADMIN_CLIENT, 1)
     yield TestClient(app)
-    aggregator.invalidate()
 
 
 def connecte(client, claims):
@@ -93,25 +92,16 @@ def _ecrire_kev(tmp_path, *cves):
     (tmp_path / "cisa_kev.json").write_text(json.dumps([{"cveID": cve} for cve in cves]))
 
 
-def test_le_cache_threat_intel_est_unique_pour_tous_les_clients_jusqu_a_son_invalidation(client, tmp_path):
+def test_la_table_threat_intel_est_commune_a_tous_les_clients_jusqu_a_sa_reconstruction(client, db, tmp_path):
     client.get("/threat-intel/stats")
     _ecrire_kev(tmp_path, "CVE-2024-0001", "CVE-2024-0002")
 
     connecte(client, session(LECTEUR, 2))
-    encore_en_cache = client.get("/threat-intel/stats").json()["total_cves"]
-    connecte(client, session(ADMIN_CLIENT, 1))
-    client.post("/threat-intel/refresh")
-    apres_invalidation = client.get("/threat-intel/stats").json()["total_cves"]
+    avant = client.get("/threat-intel/stats").json()["total_cves"]
+    aggregator.rebuild(db)
+    apres = client.get("/threat-intel/stats").json()["total_cves"]
 
-    assert (encore_en_cache, apres_invalidation) == (1, 2)
-
-
-def test_le_cache_threat_intel_expire_de_lui_meme(client, tmp_path, monkeypatch):
-    client.get("/threat-intel/stats")
-    _ecrire_kev(tmp_path, "CVE-2024-0001", "CVE-2024-0002")
-    monkeypatch.setattr(aggregator, "_CACHE_TTL_SECONDS", 0.0)
-
-    assert client.get("/threat-intel/stats").json()["total_cves"] == 2
+    assert (avant, apres) == (1, 2)
 
 
 # ── Écriture : admin global seulement ────────────────────────────────────────
@@ -142,7 +132,7 @@ def test_seul_un_admin_global_modifie_le_referentiel(client, db, methode, chemin
     assert reponse.status_code == statut
     db.expire_all()
     assert [(d.id, d.enabled) for d in db.query(models.CveDataset)] == [(10, True)]
-    assert db.query(models.PlatformSetting).count() == 0
+    assert db.query(models.PlatformSetting).filter(models.PlatformSetting.key != aggregator.BUILD_KEY).count() == 0
 
 
 def test_l_admin_global_active_ou_desactive_un_dataset_pour_tous_les_clients(client, db):

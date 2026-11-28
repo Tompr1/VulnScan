@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Text, Boolean, DateTime, ForeignKey, Float, Index, UniqueConstraint, CheckConstraint
+from datetime import date, datetime, timezone
+from sqlalchemy import String, Integer, Text, Boolean, Date, DateTime, ForeignKey, Float, Index, UniqueConstraint, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
@@ -413,6 +413,31 @@ class CveSyncState(Base):
     full_import_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Changes up to this instant are in the catalog; the next incremental run starts here.
     synced_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ThreatIntelCve(Base):
+    """One CVE of the Threat Intel page: NVD, CISA KEV, EPSS and vendor
+    advisories fused by the datasets worker (app.threat_intel.aggregator),
+    shared by every client. The API only queries it."""
+
+    __tablename__ = "threat_intel_cves"
+    cve: Mapped[str] = mapped_column(String(32), primary_key=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    cvss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    severity: Mapped[str] = mapped_column(String(16), default="", index=True)
+    vendor: Mapped[str] = mapped_column(Text, default="")
+    product: Mapped[str] = mapped_column(Text, default="")
+    epss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    epss_percentile: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kev: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    kev_added: Mapped[date | None] = mapped_column(Date, nullable=True)
+    kev_due: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ransomware: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Threat score without its KEV recency bonus, which depends on the day
+    # the page is read: the query adds it.
+    base_score: Mapped[float] = mapped_column(Float, default=0.0)
+    # Only shown on the detail of a CVE: matches, refs, vendor advisories, KEV notes.
+    details_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
 # ── Device inventory (fleet managers: Intune, later GLPI / Fleet) ───────────

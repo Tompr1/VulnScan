@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import uuid
 
@@ -11,15 +12,20 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_global_admin, require_shared_reader
 from app.core.config import settings
 from app.core.job_queue import get_job_queue
-from app.cve.reference_datasets import REFRESH_LOCK_KEY, REFRESH_STATUS_KEY, latest_dataset_path
+from app.cve.reference_datasets import (
+    REFRESH_LOCK_KEY, REFRESH_STATUS_KEY, clear_abandoned_refresh, latest_dataset_path,
+)
 from app.db import models
+from app.threat_intel import aggregator as _ti_aggregator
 
 # The reference datasets are shared by every client: everyone reads them,
 # only a global admin changes or refreshes them.
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
-# Dataset kinds that feed the Threat Intel aggregator cache.
-_TI_FEEDER_KINDS = {"nvd_cpe_cve", "cisa_kev", "epss", "vendor_advisories"}
+logger = logging.getLogger("v0cday.api.datasets")
+
+# Dataset kinds the Threat Intel table is built from.
+_TI_FEEDER_KINDS = set(_ti_aggregator.FEEDER_KINDS)
 
 # Canonical dataset file paths — these must NEVER be deleted via the UI
 # because they are the stable files the system writes during refresh.
@@ -38,13 +44,13 @@ _CANONICAL_PATHS = {
 _EDITABLE_FIELDS = {"name", "kind", "path", "enabled"}
 
 
-def _invalidate_ti_cache() -> None:
-    """Best-effort invalidation of the Threat Intel in-memory cache."""
+def _queue_ti_rebuild() -> None:
+    """Best-effort: rebuild the Threat Intel table in the datasets worker (the
+    scheduler also notices a changed dataset within a minute)."""
     try:
-        from app.threat_intel import aggregator as _ti
-        _ti.invalidate()
-    except Exception:
-        pass
+        _ti_aggregator.request_rebuild(_redis_conn(), get_job_queue().enqueue_threat_intel_rebuild)
+    except Exception as exc:
+        logger.warning("Threat Intel rebuild not queued: %s", exc)
 
 
 # ── Browse dataset contents ─────────────────────────────────────────────────
@@ -154,7 +160,7 @@ def create_dataset(
 
 
 @router.post("/upload")
-async def upload_dataset(
+def upload_dataset(
     file: UploadFile = File(...),
     kind: str = Query(...),
     name: str = Query(""),
@@ -164,7 +170,9 @@ async def upload_dataset(
     if not name:
         name = kind
 
-    content = await file.read()
+    # A plain def: validating a large file runs in a worker thread, not on
+    # the event loop every other request waits on.
+    content = file.file.read()
     try:
         json.loads(content)
     except Exception:
@@ -187,6 +195,8 @@ async def upload_dataset(
     db.add(d)
     db.commit()
     db.refresh(d)
+    if kind in _TI_FEEDER_KINDS:
+        _queue_ti_rebuild()
     return {"dataset_id": d.id, "path": filepath}
 
 
@@ -205,7 +215,7 @@ def update_dataset(
             setattr(d, k, v)
     db.commit()
     if d.kind in _TI_FEEDER_KINDS and "enabled" in body:
-        _invalidate_ti_cache()
+        _queue_ti_rebuild()
     return {"ok": True}
 
 
@@ -221,7 +231,7 @@ def toggle_dataset(
     d.enabled = not d.enabled
     db.commit()
     if d.kind in _TI_FEEDER_KINDS:
-        _invalidate_ti_cache()
+        _queue_ti_rebuild()
     return {"ok": True, "enabled": d.enabled}
 
 
@@ -258,7 +268,7 @@ def delete_dataset(
     db.delete(d)
     db.commit()
     if kind in _TI_FEEDER_KINDS:
-        _invalidate_ti_cache()
+        _queue_ti_rebuild()
     return {"ok": True}
 
 
@@ -269,6 +279,21 @@ _VALID_KINDS = {"nvd_cpe_cve", "cisa_kev", "epss", "vendor_advisories", "cvedeta
 
 def _redis_conn():
     return redis.Redis.from_url(settings.REDIS_URL)
+
+
+def _job_status(r):
+    """RQ status of a job id ("started", "failed"…), None if unknown."""
+    from rq.exceptions import NoSuchJobError
+    from rq.job import Job
+
+    def status(job_id: str) -> str | None:
+        try:
+            value = Job.fetch(job_id, connection=r).get_status()
+        except NoSuchJobError:
+            return None
+        return getattr(value, "value", value)
+
+    return status
 
 
 @router.post("/refresh")
@@ -290,6 +315,7 @@ def refresh_datasets(
             raise HTTPException(400, f"Invalid kinds: {invalid}")
 
     r = _redis_conn()
+    clear_abandoned_refresh(r, _job_status(r))
     if r.exists(REFRESH_LOCK_KEY):
         raise HTTPException(409, "A dataset refresh is already running")
 
@@ -306,6 +332,7 @@ def refresh_status(
     user: dict = Depends(require_shared_reader("admin", "analyst", "viewer")),
 ):
     r = _redis_conn()
+    clear_abandoned_refresh(r, _job_status(r))
     data = r.get(REFRESH_STATUS_KEY)
     if not data:
         return {"status": "idle"}
