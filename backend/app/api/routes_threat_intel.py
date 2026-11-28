@@ -5,7 +5,10 @@ Endpoints:
   GET /threat-intel/cves          — paginated, filterable, sortable list
   GET /threat-intel/cves/{cve_id} — single-CVE detail
   GET /threat-intel/stats         — summary counters (used for dashboard tiles)
-  POST /threat-intel/refresh      — explicit cache invalidation (admin only)
+  POST /threat-intel/refresh      — rebuild the table if the datasets changed
+
+The fusion is stored in a table by the datasets worker: these endpoints are
+database queries, never a reload of the dataset files.
 """
 import logging
 from typing import Optional
@@ -14,6 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_shared_reader
+from app.core.config import settings
+from app.core.job_queue import get_job_queue
 from app.threat_intel import aggregator
 
 logger = logging.getLogger("v0cday.api.threat_intel")
@@ -63,7 +68,7 @@ def get_cve(
 ):
     rec = aggregator.detail(db, cve_id)
     if not rec:
-        raise HTTPException(404, f"CVE not found in Threat Intel cache: {cve_id}")
+        raise HTTPException(404, f"CVE not found in Threat Intel: {cve_id}")
     return rec
 
 
@@ -71,7 +76,19 @@ def get_cve(
 def refresh_cache(
     user=Depends(require_shared_reader("admin", "analyst")),
 ):
-    """Manually invalidate the Threat Intel cache (shared by every client)."""
-    aggregator.invalidate()
-    logger.info("Threat Intel cache invalidated by %s", user.get("sub", "?"))
-    return {"ok": True}
+    """Queue a rebuild of the Threat Intel table (shared by every client);
+    the worker skips it when the datasets did not change."""
+    from redis import Redis
+    from redis.exceptions import RedisError
+
+    from app.core.job_queue import QueueUnavailableError
+
+    try:
+        queued = aggregator.request_rebuild(
+            Redis.from_url(settings.REDIS_URL), get_job_queue().enqueue_threat_intel_rebuild,
+        )
+    except (RedisError, QueueUnavailableError) as exc:
+        logger.warning("Threat Intel rebuild not queued: %s", exc)
+        raise HTTPException(503, "The rebuild cannot be queued now: try again later") from None
+    logger.info("Threat Intel rebuild requested by %s (queued=%s)", user.get("sub", "?"), queued)
+    return {"ok": True, "queued": queued}

@@ -690,7 +690,12 @@ def run_dataset_refresh(kinds: list[str] | None = None) -> None:
 
     # TTL must cover the slowest full refresh, or the lock expires mid-run and a
     # scheduled trigger starts a second one. Matches the 7200s job_timeout.
-    if not r.set(lock_key, "1", nx=True, ex=7200):
+    # The lock holds the job id: a refresh whose worker was killed (a deploy
+    # restarts it) is recognised and its lock released (clear_abandoned_refresh).
+    from rq import get_current_job
+
+    current_job = get_current_job()
+    if not r.set(lock_key, current_job.id if current_job else "1", nx=True, ex=7200):
         logger.warning("Dataset refresh already running")
         return
 
@@ -789,6 +794,15 @@ def run_dataset_refresh(kinds: list[str] | None = None) -> None:
         fail_count = sum(1 for v in state["kinds"].values() if v["status"] == "failed")
         if state["status"] != "cancelled":
             state["status"] = "done" if fail_count == 0 else "partial" if done_count > 0 else "failed"
+
+        # The Threat Intel table is built from four of the datasets: once,
+        # after all of them were swapped.
+        from app.threat_intel import aggregator as _ti
+        if any(state["kinds"].get(k, {}).get("status") == "done" for k in _ti.FEEDER_KINDS):
+            try:
+                _ti.rebuild(db)
+            except Exception as e:
+                logger.warning("Threat Intel rebuild failed: %s", e)
 
         # Clean up old timestamped files — keep only canonical files
         if done_count > 0:
@@ -900,19 +914,31 @@ def _swap_dataset(kind: str, new_file_path: str, db: Session) -> None:
         db.add(ds)
         db.commit()
         logger.info("Swapped dataset %s: ID=%d", kind, ds.id)
-
-        # Invalidate the Threat Intel cache if a feeder dataset was just
-        # rotated. Best-effort — never block the swap on it.
-        if kind in ("nvd_cpe_cve", "cisa_kev", "epss", "vendor_advisories"):
-            try:
-                from app.threat_intel import aggregator as _ti
-                _ti.invalidate()
-            except Exception as _ti_err:
-                logger.debug("Threat Intel cache invalidation skipped: %s", _ti_err)
     except Exception as e:
         db.rollback()
         logger.error("Failed to swap dataset %s: %s", kind, e)
         raise
+
+
+def run_threat_intel_rebuild() -> None:
+    """RQ task (datasets queue) — rebuild the Threat Intel table when the
+    datasets changed since it was built."""
+    from redis import Redis
+
+    from app.core.config import settings
+    from app.threat_intel import aggregator
+
+    db = SessionLocal()
+    try:
+        aggregator.rebuild(db)
+    finally:
+        db.close()
+    # Only once it is done: after a failure the key expires and the
+    # scheduler queues it again, instead of every minute.
+    try:
+        Redis.from_url(settings.REDIS_URL).delete(aggregator.REBUILD_QUEUED_KEY)
+    except Exception as e:
+        logger.warning("Threat Intel: could not clear the queued flag: %s", e)
 
 
 # ── AI Analysis Tasks ─────────────────────────────────────────────────────

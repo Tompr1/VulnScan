@@ -891,6 +891,21 @@ def _schedule_loop():
             except Exception as e_feat5:
                 logger.warning("Scheduled dataset refresh error: %s", e_feat5)
 
+            # ── Threat Intel table ────────────────────────────────────────
+            # Rebuilt by the datasets worker when a dataset it is built
+            # from changed (upload, toggle, first start). Cheap check: the
+            # files' size and modification time.
+            try:
+                from app.core.job_queue import get_job_queue
+                from app.threat_intel import aggregator as _ti
+
+                if _ti.queue_rebuild_if_needed(
+                    db, Redis.from_url(settings.REDIS_URL), get_job_queue().enqueue_threat_intel_rebuild,
+                ):
+                    logger.info("Threat Intel rebuild queued: the datasets changed")
+            except Exception as e_ti:
+                logger.warning("Threat Intel rebuild check error: %s", e_ti)
+
             # ── Device inventory sync (Intune…) ───────────────────────────
             # Each connection is synced daily or weekly; the request time is
             # recorded, so a sync still queued is never queued twice.
