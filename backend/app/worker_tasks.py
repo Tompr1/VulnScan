@@ -865,7 +865,12 @@ def _cleanup_old_dataset_files() -> None:
 
 
 def _swap_dataset(kind: str, new_file_path: str, db: Session) -> None:
-    """Atomically swap: create new dataset, disable old ones of same kind."""
+    """Make ``new_file_path`` the one enabled dataset of ``kind``.
+
+    The refresh rewrites the same canonical file every time, so the record
+    for that file is reused: inserting one per refresh left a disabled
+    duplicate behind on every run. Other records of the kind are disabled.
+    """
     try:
         # Verify the new file exists and is non-empty before disabling the old one
         if not os.path.isfile(new_file_path):
@@ -873,21 +878,28 @@ def _swap_dataset(kind: str, new_file_path: str, db: Session) -> None:
         if os.path.getsize(new_file_path) < 10:
             raise ValueError(f"New dataset file is empty or too small: {new_file_path}")
 
+        same_file = (
+            db.query(models.CveDataset)
+            .filter(models.CveDataset.kind == kind, models.CveDataset.path == new_file_path)
+            .order_by(models.CveDataset.enabled.desc(), models.CveDataset.id.desc())
+            .all()
+        )
+        ds = same_file[0] if same_file else models.CveDataset(kind=kind, path=new_file_path)
+        for duplicate in same_file[1:]:
+            db.delete(duplicate)
+
         db.query(models.CveDataset).filter(
             models.CveDataset.kind == kind,
+            models.CveDataset.path != new_file_path,
             models.CveDataset.enabled == True,
         ).update({"enabled": False})
 
-        name = _DS_KIND_NAMES.get(kind, kind)
-        new_ds = models.CveDataset(
-            name=name,
-            kind=kind,
-            path=new_file_path,
-            enabled=True,
-        )
-        db.add(new_ds)
+        ds.name = _DS_KIND_NAMES.get(kind, kind)
+        ds.enabled = True
+        ds.created_at = datetime.now(timezone.utc)  # when this file was last refreshed
+        db.add(ds)
         db.commit()
-        logger.info("Swapped dataset %s: new ID=%d", kind, new_ds.id)
+        logger.info("Swapped dataset %s: ID=%d", kind, ds.id)
 
         # Invalidate the Threat Intel cache if a feeder dataset was just
         # rotated. Best-effort — never block the swap on it.
