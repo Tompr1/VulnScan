@@ -35,7 +35,7 @@ from app.scan_jobs.executors import ScanExecutor
 from app.scan_jobs.outcome import JobFailure
 from app.scan_jobs.progress import ThrottledProgressWriter
 from app.scanner.allowlist import AllowlistPolicy
-from app.scanner.target import InvalidTargetError, ScanTarget, ScanType
+from app.scanner.target import InvalidTargetError, ScanType
 
 logger = logging.getLogger(__name__)
 
@@ -311,18 +311,17 @@ class ProbeAgent:
         if self._local is None:
             return None
         try:
-            target = ScanTarget.parse(assignment.target)
             scan_type = ScanType.parse(assignment.scan_type)
+            if self._local.allows_target(assignment.target, scan_type):
+                return None
         except (InvalidTargetError, ValueError):
             return None  # the executor reports an unusable target or type itself
-        if self._local.allows(target, scan_type):
-            return None
         return JobFailure(
             error="Target outside this probe's scope",
             error_type="configuration",
             detail=(
                 f"'{assignment.target}' is outside the scope the client set on its probe "
-                f"(local allowlist: {self._local}). Ask the client to widen it, or scan from the platform."
+                f"(local allowlist: {self._local}). Ask the client to widen it."
             ),
         )
 

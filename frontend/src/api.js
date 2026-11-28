@@ -165,6 +165,7 @@ export const probesApi = {
   revoke:        (id)             => api(`/probes/${id}/revoke`, { method: "POST" }),
   remove:        (id)             => api(`/probes/${id}`, { method: "DELETE" }),
   setExecution:  (clientId, scanTypes) => api(`/probes/clients/${clientId}/execution`, { method: "PUT", body: { scan_types: scanTypes } }),
+  setAllowlist:  (clientId, allowlist) => api(`/probes/clients/${clientId}/allowlist`, { method: "PUT", body: { allowlist } }),
   checkUpdates:  ()               => api("/probes/updates"),
   update:        (id)             => api(`/probes/${id}/update`, { method: "POST" }),
   updateAll:     ()               => api("/probes/update-all", { method: "POST" }),
@@ -437,6 +438,8 @@ export const scanApi = {
   cancelJob:  (id)     => api(`/scan/jobs/${id}/cancel`, { method: "POST" }),
   deleteJob:  (id)     => api(`/scan/jobs/${id}`, { method: "DELETE" }),
   rescanJob:  (id)     => api(`/scan/jobs/${id}/rescan`, { method: "POST" }),
+  // Whether this client can launch a network scan now (they run on its probe only).
+  networkAvailability: () => api("/scan/network-availability"),
 
   listProfiles:   ()           => api("/scan/profiles"),
   createProfile:  (body)       => api("/scan/profiles", { method: "POST", body }),

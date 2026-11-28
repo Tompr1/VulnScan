@@ -1,7 +1,8 @@
 """
 Administration of the scan probes by a global admin (Root): create a probe
 for a client and hand its enrollment token to whoever installs the VM,
-renew or revoke it, and choose which of a client's scans run on its probe.
+renew or revoke it, choose which of a client's scans run on its probe, and
+set the networks the client's internal scans may reach.
 """
 from __future__ import annotations
 
@@ -14,13 +15,16 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_global_admin
 from app.core.config import settings
+from app.core.workspace_settings import client_allowlist, set_client_allowlist
 from app.db import models
 from app.probes import events, updates
 from app.probes.placement import (
-    DELEGABLE_SCAN_TYPES, PROBE, NotDelegableError, probe_execution_is_default, probe_scan_types, set_probe_scan_types,
+    DELEGABLE_SCAN_TYPES, PROBE, PROBE_ONLY_SCAN_TYPES, NotDelegableError, probe_execution_is_default, probe_scan_types,
+    set_probe_scan_types,
 )
 from app.probes.registry import Enrollment, ProbeRegistry, ProbeStateError, display_status
 from app.scan_jobs.outcome import JobStatus
+from app.scanner.allowlist import parse_entries
 
 router = APIRouter(prefix="/probes", tags=["probes"], dependencies=[Depends(require_global_admin)])
 
@@ -32,6 +36,11 @@ class ProbeCreateBody(BaseModel):
 
 class ExecutionBody(BaseModel):
     scan_types: list[str]
+
+
+class AllowlistBody(BaseModel):
+    # Comma-separated; empty goes back to the platform default.
+    allowlist: str = Field(default="", max_length=4000)
 
 
 def _now() -> datetime:
@@ -69,10 +78,15 @@ def list_probes(db: Session = Depends(get_db)):
                 # with an active probe, nothing without).
                 "probe_scan_types_default": probe_execution_is_default(db, client.id),
                 "waiting_jobs": waiting.get(client.id, 0),
+                # The networks its internal scans may reach; None: the
+                # platform default below.
+                "allowlist": client_allowlist(db, client.id),
             }
             for client in clients
         ],
         "delegable_scan_types": [t.value for t in DELEGABLE_SCAN_TYPES],
+        "probe_only_scan_types": [t.value for t in PROBE_ONLY_SCAN_TYPES],
+        "default_allowlist": parse_entries(settings.ALLOWLIST) if _parses(settings.ALLOWLIST) else [],
         "desired_image": settings.PROBE_IMAGE.strip() or None,
         "platform_build": _platform_build(),
     }
@@ -188,6 +202,28 @@ def set_client_execution(workspace_id: int, body: ExecutionBody, db: Session = D
     except NotDelegableError as exc:
         raise HTTPException(422, str(exc)) from None
     return {"workspace_id": workspace_id, "probe_scan_types": chosen, "probe_scan_types_default": False}
+
+
+@router.put("/clients/{workspace_id}/allowlist")
+def set_client_networks(workspace_id: int, body: AllowlistBody, db: Session = Depends(get_db)):
+    """The networks this client's internal scans may reach, checked when a
+    scan is launched and again by the probe. Applies from the next scan."""
+    if db.get(models.Workspace, workspace_id) is None:
+        raise HTTPException(404, "Client not found")
+    try:
+        entries = parse_entries(body.allowlist)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    set_client_allowlist(db, workspace_id, entries or None)
+    return {"workspace_id": workspace_id, "allowlist": entries or None}
+
+
+def _parses(raw: str) -> bool:
+    try:
+        parse_entries(raw)
+        return True
+    except ValueError:
+        return False
 
 
 def _close_discoveries(db: Session, probe: models.Probe, reason: str) -> None:

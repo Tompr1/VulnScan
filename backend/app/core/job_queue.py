@@ -90,11 +90,36 @@ class ProbeAwareJobQueue:
         self._platform = platform
 
     def enqueue_scan(self, job_id: int) -> None:
+        import json
+        from datetime import datetime, timezone
+
         from app.db import models
         from app.probes.placement import PROBE, placement_of
+        from app.scan_jobs import network_scope
 
         with self._session_factory() as db:
             job = db.get(models.ScanJob, job_id)
+            if job is not None and network_scope.requires_probe(job.scan_type):
+                # Scheduled scans and re-verifications reach here without the
+                # submission's check: an internal scan never falls back to the
+                # platform, it fails with the reason.
+                now = datetime.now(timezone.utc)
+                try:
+                    network_scope.check_scan(db, job.workspace_id, job.scan_type, job.target, now)
+                except network_scope.NetworkScanRefused as refused:
+                    try:
+                        meta = json.loads(job.meta_json) if job.meta_json else {}
+                    except ValueError:
+                        meta = {}
+                    if not isinstance(meta, dict):
+                        meta = {}
+                    meta.update({"error": refused.message, "error_type": "configuration", "error_detail": refused.message})
+                    job.status = "failed"
+                    job.finished_at = now
+                    job.meta_json = json.dumps(meta)
+                    db.commit()
+                    logger.info("Scan job #%d refused: %s", job_id, refused.message)
+                    return
             if job is not None and placement_of(db, job.workspace_id, job.scan_type) == PROBE:
                 job.runs_on = PROBE
                 db.commit()

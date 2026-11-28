@@ -7,6 +7,7 @@ Each client has its own internal network: the engine asks an
 from __future__ import annotations
 
 import ipaddress
+import re
 import logging
 from collections.abc import Iterable
 from typing import Protocol
@@ -16,6 +17,29 @@ from app.scanner.target import ScanTarget, ScanType
 logger = logging.getLogger(__name__)
 
 _IpNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+
+_DOMAIN = re.compile(r"^\.?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
+
+
+def parse_entries(raw: str | None) -> list[str]:
+    """The entries of an allowlist typed by an admin (comma or space
+    separated): CIDR ranges, IPs, host names, ``.domain`` suffixes, or ``*``
+    alone. Raises ValueError naming the first unusable entry."""
+    entries = [e.strip().lower() for e in re.split(r"[,\s]+", raw or "") if e.strip()]
+    for entry in entries:
+        if entry == "*":
+            if len(entries) > 1:
+                raise ValueError("'*' allows every target: use it alone")
+            continue
+        try:
+            ipaddress.ip_network(entry, strict=False)
+            continue
+        except ValueError:
+            pass
+        if "/" in entry or not _DOMAIN.match(entry):
+            raise ValueError(f"Invalid entry '{entry}': use a CIDR range (192.168.3.0/24), an IP, or a domain (.corp.local)")
+    return entries
 
 
 class AllowlistSource(Protocol):
@@ -60,6 +84,29 @@ class AllowlistPolicy:
         except ValueError:
             return self._allows_domain(target.host)
         return any(address in network for network in self._networks)
+
+    def allows_target(self, raw: str, scan_type: ScanType) -> bool:
+        """Whether a target as typed by the user may be scanned: a CIDR range
+        must lie entirely inside an allowed network (its first address is not
+        enough), and every entry of a comma-separated list must be allowed.
+
+        Raises :class:`app.scanner.target.InvalidTargetError` for an entry
+        without a host."""
+        if scan_type is ScanType.EXTERNAL or self._allow_all:
+            return True
+        entries = [entry.strip() for entry in (raw or "").split(",") if entry.strip()]
+        if not entries:
+            entries = [raw]
+        for entry in entries:
+            try:
+                network = ipaddress.ip_network(entry, strict=False)
+            except ValueError:
+                if not self.allows(ScanTarget.parse(entry), scan_type):
+                    return False
+                continue
+            if not self.allows_network(network):
+                return False
+        return True
 
     def allows_network(self, network: _IpNetwork) -> bool:
         """Whether every address of ``network`` is allowed (a range to

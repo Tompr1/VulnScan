@@ -20,6 +20,7 @@ from app.core.job_queue import QueueUnavailableError, get_job_queue
 from app.discovery.jobs import (
     DiscoveryAlreadyRunningError, NoProbeError, RangeNotAllowedError, request_cancel, serialize, start_discovery,
 )
+from app.scan_jobs import network_scope
 from app.scanner.client_allowlists import client_policy
 from app.discovery.known_targets import known_targets
 
@@ -491,6 +492,10 @@ def reverify_scan(
     )
     if not original:
         raise HTTPException(404, f"Scan job {job_id} not found")
+    try:
+        network_scope.check_scan(db, ws, original.scan_type or "internal", original.target, datetime.now(timezone.utc))
+    except network_scope.NetworkScanRefused as exc:
+        raise HTTPException(409, exc.message) from None
 
     # Gather fingerprints from original job findings
     findings = (

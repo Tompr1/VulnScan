@@ -21,17 +21,32 @@ export function toggledScanTypes(current, scanType, on, delegable) {
   return (delegable || []).filter(t => chosen.has(t));
 }
 
-/** What to run on the probe VM, in deploy/probe, to enroll it (deploy/probe/README.md). */
-export function enrollCommand(platformUrl, token) {
+/** What to run on the probe VM, in deploy/probe, to enroll it (deploy/probe/README.md).
+ * A local scope, when given, is the client's own extra limit on the probe. */
+export function enrollCommand(platformUrl, token, localAllowlist = "") {
   // "--token=…": a value starting with "-" stays a value (tokens from older
   // platforms could).
-  return `docker compose run --rm probe enroll --platform ${platformUrl.replace(/\/+$/, "")} --token=${token}`;
+  const scope = (localAllowlist || "").replace(/\s+/g, "");
+  if (!ALLOWLIST_PATTERN.test(scope)) {
+    throw new Error("Local allowlist: CIDRs, IPs or .domain suffixes separated by commas");
+  }
+  return `docker compose run --rm probe enroll --platform ${platformUrl.replace(/\/+$/, "")} --token=${token}`
+    + (scope ? ` --local-allowlist=${scope}` : "");
 }
 
-/** Clients that have scan types on a probe but no probe able to run them. */
-export function clientsWithoutProbe(clients, probes) {
+/** Clients whose jobs wait for a probe they do not have: scan types Root
+ * sent to a probe (beyond those that always run there, which are refused
+ * without one), or jobs already waiting. */
+export function clientsWithoutProbe(clients, probes, probeOnly = []) {
   const usable = new Set((probes || []).filter(p => p.status === "online" || p.status === "offline").map(p => p.workspace_id));
-  return (clients || []).filter(c => (c.probe_scan_types || []).length && !usable.has(c.id));
+  const always = new Set(probeOnly || []);
+  return (clients || []).filter(c => !usable.has(c.id)
+    && ((c.probe_scan_types || []).some(t => !always.has(t)) || (c.waiting_jobs || 0) > 0));
+}
+
+/** A client's allowed networks as typed in Root, or the platform default. */
+export function allowlistText(entries) {
+  return (entries || []).join(", ");
 }
 
 /** When a probe was last heard from: probes call every few seconds, so

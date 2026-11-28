@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  applianceHostname, canUpdate, clientsWithoutProbe, codeCounts, cloudInitUserData, codeStatus, enrollCommand, eventLabel, imageStatus,
+  allowlistText, applianceHostname, canUpdate, clientsWithoutProbe, codeCounts, cloudInitUserData, codeStatus, enrollCommand, eventLabel, imageStatus,
   isAlarmEvent, probeCounts, probeStatus, seenText, shortBuild, shortImage, toggledScanTypes, updateSummary,
 } from "../src/design/probesModel.js";
 
@@ -26,6 +26,17 @@ test("la commande d'enrôlement nomme la plateforme sans barre finale", () => {
   assert.match(enrollCommand("https://soc.example", "-abc"), / --token=-abc$/);
 });
 
+test("la limite locale de la sonde passe aussi dans la commande Docker", () => {
+  assert.match(enrollCommand("https://soc.example", "tok", " 192.168.3.0/24, .corp.local"),
+               / --token=tok --local-allowlist=192\.168\.3\.0\/24,\.corp\.local$/);
+  assert.throws(() => enrollCommand("https://soc.example", "tok", "10.0.0.0/8; rm -rf /"), /Local allowlist/);
+});
+
+test("les réseaux autorisés s'affichent séparés par des virgules", () => {
+  assert.equal(allowlistText(["192.168.3.0/24", ".corp.local"]), "192.168.3.0/24, .corp.local");
+  assert.equal(allowlistText(null), "");
+});
+
 test("un client qui confie des scans sans sonde enrôlée est signalé", () => {
   const clients = [
     { id: 1, probe_scan_types: ["internal"] },
@@ -35,6 +46,16 @@ test("un client qui confie des scans sans sonde enrôlée est signalé", () => {
   const probes = [{ workspace_id: 1, status: "offline" }, { workspace_id: 2, status: "pending" }];
 
   assert.deepEqual(clientsWithoutProbe(clients, probes).map(c => c.id), [2]);
+});
+
+test("un client sans sonde n'est pas signalé pour les scans qui sont refusés sans sonde", () => {
+  const clients = [
+    { id: 1, probe_scan_types: ["internal"] },
+    { id: 2, probe_scan_types: ["internal", "api"] },
+    { id: 3, probe_scan_types: ["internal"], waiting_jobs: 2 },
+  ];
+
+  assert.deepEqual(clientsWithoutProbe(clients, [], ["internal"]).map(c => c.id), [2, 3]);
 });
 
 test("la dernière nouvelle d'une sonde se compte en minutes", () => {

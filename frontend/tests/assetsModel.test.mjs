@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { assetCounts, folderChoices, isHost, targetLabel, treeRows } from "../src/design/assetsModel.js";
+import { assetCounts, folderChoices, isHost, scanKindBlocked, targetLabel, treeRows } from "../src/design/assetsModel.js";
 
 const ASSETS = [
   { id: 1, name: "VM UBUNTU", parent_id: null, target_list: [] },
@@ -42,4 +42,13 @@ test("les compteurs séparent dossiers, sous-dossiers et hôtes", () => {
 test("une cible s'affiche sous son alias", () => {
   assert.equal(targetLabel({ target: "10.0.0.1", name: "ERP" }), "ERP (10.0.0.1)");
   assert.equal(targetLabel({ target: "10.0.0.1", name: null }), "10.0.0.1");
+});
+
+test("sans sonde en ligne, les scans réseau et IoT sont grisés, pas les autres", () => {
+  const sansSonde = { available: false, reason: "no_probe" };
+
+  assert.deepEqual(["network", "iot", "web", "api", "cloud"].map(k => scanKindBlocked(k, sansSonde)),
+                   [true, true, false, false, false]);
+  assert.equal(scanKindBlocked("network", { available: true }), false);
+  assert.equal(scanKindBlocked("network", null), false, "disponibilité inconnue : la plateforme tranche");
 });
